@@ -17,7 +17,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 
-app = FastAPI(title="Amaryllis Runtime", version="0.2.0")
+app = FastAPI(title="Amaryllis Runtime", version="0.3.0")
 runtime_service = RuntimeService()
 logger = logging.getLogger("amaryllis.api")
 

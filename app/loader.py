@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import importlib.util
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
 
 import yaml
 from pydantic import ValidationError as PydanticValidationError
@@ -30,7 +28,8 @@ class EntrypointError(ModuleLoaderError):
 @dataclass(frozen=True)
 class LoadedModule:
     manifest: ModuleManifest
-    run: Callable[[dict[str, Any]], dict[str, Any]]
+    module_dir: Path
+    entrypoint_path: Path
 
 
 class ModuleLoader:
@@ -46,8 +45,12 @@ class ModuleLoader:
                 f"Unsupported runtime_api '{manifest.runtime_api}' for module '{module_name}'. Expected '1.0'."
             )
 
-        run_callable = self._load_run_callable(module_dir, manifest.entrypoint)
-        return LoadedModule(manifest=manifest, run=run_callable)
+        entrypoint_path = self._resolve_entrypoint_path(module_dir, manifest.entrypoint)
+        return LoadedModule(
+            manifest=manifest,
+            module_dir=module_dir,
+            entrypoint_path=entrypoint_path,
+        )
 
     def _resolve_module_dir(self, module_name: str) -> Path:
         module_dir = (self.modules_dir / module_name).resolve()
@@ -82,9 +85,7 @@ class ModuleLoader:
         except PydanticValidationError as exc:
             raise ManifestError(f"Manifest validation error in '{manifest_path}': {exc}") from exc
 
-    def _load_run_callable(
-        self, module_dir: Path, entrypoint: str
-    ) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    def _resolve_entrypoint_path(self, module_dir: Path, entrypoint: str) -> Path:
         entrypoint_path = (module_dir / entrypoint).resolve()
 
         try:
@@ -95,23 +96,4 @@ class ModuleLoader:
         if not entrypoint_path.is_file():
             raise EntrypointError(f"Entrypoint file not found: '{entrypoint_path}'.")
 
-        import_name = f"amaryllis_module_{module_dir.name}"
-        spec = importlib.util.spec_from_file_location(import_name, entrypoint_path)
-
-        if spec is None or spec.loader is None:
-            raise EntrypointError(f"Unable to load entrypoint: '{entrypoint_path}'.")
-
-        module = importlib.util.module_from_spec(spec)
-
-        try:
-            spec.loader.exec_module(module)
-        except Exception as exc:
-            raise EntrypointError(f"Failed to import entrypoint '{entrypoint_path}': {exc}") from exc
-
-        run_callable = getattr(module, "run", None)
-        if run_callable is None or not callable(run_callable):
-            raise EntrypointError(
-                f"Entrypoint '{entrypoint_path}' must define callable function run(context: dict) -> dict."
-            )
-
-        return run_callable
+        return entrypoint_path
