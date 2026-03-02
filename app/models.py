@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ExecuteRequest(BaseModel):
     module: str = Field(min_length=1, pattern=r"^[A-Za-z0-9_-]+$")
     input: dict[str, Any] = Field(default_factory=dict)
     user_id: str = Field(min_length=1)
+    session_id: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -38,11 +40,49 @@ class ModuleExecutionResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class Context(BaseModel):
+    request_id: str
+    user_id: str = Field(min_length=1)
+    session_id: str | None = None
+    input: dict[str, Any] = Field(default_factory=dict)
+    memory: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("request_id")
+    @classmethod
+    def validate_request_id_uuid4(cls, value: str) -> str:
+        try:
+            parsed = UUID(value)
+        except ValueError as exc:
+            raise ValueError("request_id must be a valid UUID4 string.") from exc
+
+        if parsed.version != 4:
+            raise ValueError("request_id must be UUID4.")
+
+        return value
+
+
 class ExecuteResponse(BaseModel):
     request_id: str
     module: str
     output: dict[str, Any]
     memory_write: dict[str, Any]
     execution_time_ms: int = Field(ge=0)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ErrorDetail(BaseModel):
+    type: str
+    message: str
+    request_id: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ErrorResponse(BaseModel):
+    error: ErrorDetail
 
     model_config = ConfigDict(extra="forbid")

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import yaml
-from pydantic import ValidationError
+from pydantic import ValidationError as PydanticValidationError
 
 from app.models import ModuleManifest
 
@@ -79,7 +79,7 @@ class ModuleLoader:
 
         try:
             return ModuleManifest.model_validate(raw_manifest)
-        except ValidationError as exc:
+        except PydanticValidationError as exc:
             raise ManifestError(f"Manifest validation error in '{manifest_path}': {exc}") from exc
 
     def _load_run_callable(
