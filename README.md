@@ -1,183 +1,244 @@
-# Amaryllis v0.3
+# Amaryllis
 
-Modular runtime for executing AI modules with a clean single-node flow:
-`HTTP request -> Context -> Module -> Result`.
+Amaryllis is an open-source local AI runtime for macOS.
 
-This version is focused on a stable foundation:
-- strict Pydantic models for request, context, and module output
-- structured JSON errors with `request_id`
-- in-memory session memory by `session_id`
-- module isolation via subprocess execution
+It acts as a **local AI brain node**:
+- runs local models
+- supports agent execution
+- provides tool calling
+- stores memory
+- exposes OpenAI-compatible API
 
-## What It Does
+This MVP is intentionally simple and modular, so it can evolve into a richer cognitive architecture later.
 
-- accepts `POST /execute`
-- generates `request_id` for every call
-- loads module from local `./modules/<module_name>`
-- validates `module.yaml` and `runtime_api == "1.0"`
-- runs module in isolated subprocess (`python <entrypoint>`)
-- passes context JSON through `stdin`
-- reads module result JSON from `stdout`
-- validates module output contract
-- logs execution lifecycle and errors
+## Privacy and Anonymity
 
-## Current Boundaries
+- no telemetry by default
+- no personal paths or machine-specific identifiers in repository files
+- local-first runtime, data stays on your machine unless tools/providers call external services
 
-- linear pipeline only (one module per request)
-- no DAG
-- no distributed execution
-- no registry/marketplace
-- no billing
+## MVP Scope
+
+Implemented in this version:
+- FastAPI backend runtime
+- OpenAI-compatible endpoint: `POST /v1/chat/completions`
+- model manager with MLX primary provider and Ollama fallback
+- model APIs: list/download/load
+- agent APIs: create/list/chat
+- memory layer: episodic + semantic + user memory
+- SQLite persistence
+- vector search via FAISS (with local fallback behavior)
+- tool registry/executor with builtin tools
+- plugin discovery from `plugins/`
+- sequential task loop: meta-controller -> planner -> reasoning -> tools -> response
+
+Out of scope for MVP:
+- distributed execution
+- multi-node orchestration
+- GUI-heavy app shell
+- full production hardening
+
+## Target Platform
+
+Primary target:
+- macOS (Apple Silicon)
+- Python 3.11+
+
+Model storage location:
+- `~/Library/Application Support/amaryllis/models/`
+
+Data storage location:
+- `~/Library/Application Support/amaryllis/data/`
 
 ## Project Structure
 
 ```text
 .
-├── app
-│   ├── context.py
-│   ├── errors.py
-│   ├── loader.py
-│   ├── main.py
-│   ├── models.py
-│   └── runtime.py
-├── modules
-│   └── example_module
-│       ├── main.py
-│       └── module.yaml
-├── Dockerfile
+├── agents
+│   ├── agent.py
+│   └── agent_manager.py
+├── api
+│   ├── agent_api.py
+│   ├── chat_api.py
+│   └── model_api.py
+├── controller
+│   └── meta_controller.py
+├── memory
+│   ├── episodic_memory.py
+│   ├── memory_manager.py
+│   ├── semantic_memory.py
+│   └── user_memory.py
+├── models
+│   ├── model_manager.py
+│   └── providers
+│       ├── mlx_provider.py
+│       └── ollama_provider.py
+├── planner
+│   └── planner.py
+├── plugins
+│   └── .gitkeep
+├── runtime
+│   ├── config.py
+│   └── server.py
+├── storage
+│   ├── database.py
+│   └── vector_store.py
+├── tasks
+│   └── task_executor.py
+├── tools
+│   ├── builtin_tools
+│   │   ├── filesystem.py
+│   │   ├── python_exec.py
+│   │   └── web_search.py
+│   ├── tool_executor.py
+│   └── tool_registry.py
 ├── LICENSE
 ├── README.md
 └── requirements.txt
 ```
 
-## Requirements
-
-- Docker (recommended) or Python 3.11+
-
-## Run With Docker
-
-```bash
-docker build -t amaryllis:v0.3 .
-docker run --rm -p 8000:8000 amaryllis:v0.3
-```
-
-API: `http://localhost:8000`
-
-## Run Locally
+## Install
 
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
+pip install -U pip
 pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-## API
+## Run
 
-### `POST /execute`
-
-Request:
-
-```json
-{
-  "module": "example_module",
-  "user_id": "123",
-  "session_id": "session-1",
-  "input": {
-    "text": "Hello from Amaryllis"
-  }
-}
+```bash
+uvicorn runtime.server:app --host localhost --port 8000 --reload
 ```
 
-Success response:
+Health check:
 
-```json
-{
-  "request_id": "c4da3ec0-f8c2-4625-8e2f-195e7dc6f294",
-  "module": "example_module",
-  "output": {
-    "echo": {
-      "text": "Hello from Amaryllis"
-    },
-    "received_user_id": "123"
-  },
-  "memory_write": {
-    "last_input": {
-      "text": "Hello from Amaryllis"
-    }
-  },
-  "execution_time_ms": 3
-}
+```bash
+curl http://localhost:8000/health
 ```
 
-Error response:
+## Model Management API
 
-```json
-{
-  "error": {
-    "type": "ModuleExecutionError",
-    "message": "Module subprocess returned non-JSON stdout.",
-    "request_id": "c4da3ec0-f8c2-4625-8e2f-195e7dc6f294"
-  }
-}
+### List models
+
+```bash
+curl http://localhost:8000/models
 ```
 
-## Module Contract
+### Download model (MLX)
 
-Module folder:
-
-```text
-modules/<module_name>/
-  module.yaml
-  main.py
+```bash
+curl -X POST http://localhost:8000/models/download \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_id": "mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+    "provider": "mlx"
+  }'
 ```
 
-`module.yaml`:
+### Load model
 
-```yaml
-name: example_module
-version: 0.1.0
-runtime_api: "1.0"
-entrypoint: "main.py"
-permissions:
-  - network
-resources:
-  timeout_ms: 3000
-  memory_mb: 128
+```bash
+curl -X POST http://localhost:8000/models/load \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_id": "mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+    "provider": "mlx"
+  }'
 ```
 
-Context passed to module (`stdin` JSON):
+## OpenAI-Compatible Chat API
 
-```json
-{
-  "request_id": "uuid4",
-  "user_id": "123",
-  "session_id": "session-1",
-  "input": {},
-  "memory": {},
-  "metadata": {}
-}
+`POST /v1/chat/completions`
+
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+    "messages": [
+      {"role": "system", "content": "You are a concise assistant."},
+      {"role": "user", "content": "Explain what Amaryllis is."}
+    ],
+    "stream": false
+  }'
 ```
 
-Module output (`stdout` JSON only):
+Streaming mode:
 
-```json
-{
-  "output": {},
-  "memory_write": {}
-}
+```bash
+curl -N -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [{"role": "user", "content": "Hello"}],
+    "stream": true
+  }'
 ```
 
-Important subprocess rules:
-- write only JSON to `stdout`
-- write diagnostics to `stderr`
-- return non-zero exit code on failure
+## Agent API
 
-## Session Memory (In-Memory)
+### Create agent
 
-If `session_id` is provided:
-- runtime loads memory from in-process store
-- module receives it in `context.memory`
-- `memory_write` is merged and persisted for next calls
+```bash
+curl -X POST http://localhost:8000/agents/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Research Agent",
+    "system_prompt": "You are a practical research assistant.",
+    "model": "mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+    "tools": ["web_search", "filesystem"],
+    "user_id": "demo-user"
+  }'
+```
 
-Store lifetime is process lifetime (no Redis yet).
+### List agents
+
+```bash
+curl "http://localhost:8000/agents?user_id=demo-user"
+```
+
+### Chat with agent
+
+```bash
+curl -X POST http://localhost:8000/agents/<agent_id>/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "demo-user",
+    "session_id": "demo-session",
+    "message": "Find 3 sources about MLX and summarize them."
+  }'
+```
+
+## Plugins
+
+Plugins are auto-discovered from:
+- `plugins/<plugin_name>/manifest.json`
+- `plugins/<plugin_name>/tool.py`
+
+`tool.py` must expose either:
+- `register(registry, manifest)`
+- or `register_tool(registry, manifest)`
+
+## Notes on MLX and Ollama
+
+- MLX is the primary local inference provider.
+- If MLX fails and fallback is enabled, runtime can try Ollama.
+- Configure fallback via env:
+  - `AMARYLLIS_OLLAMA_FALLBACK=true|false`
+  - `AMARYLLIS_OLLAMA_URL=http://localhost:11434`
+
+## Example Environment Variables
+
+```bash
+export AMARYLLIS_HOST=localhost
+export AMARYLLIS_PORT=8000
+export AMARYLLIS_DEFAULT_PROVIDER=mlx
+export AMARYLLIS_DEFAULT_MODEL=mlx-community/Qwen2.5-1.5B-Instruct-4bit
+export AMARYLLIS_OLLAMA_URL=http://localhost:11434
+export AMARYLLIS_OLLAMA_FALLBACK=true
+```
+
+## License
+
+See `LICENSE`.

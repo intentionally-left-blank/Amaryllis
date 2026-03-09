@@ -1,9 +1,0 @@
-name: example_module
-version: 0.1.0
-runtime_api: "1.0"
-entrypoint: "main.py"
-permissions:
-  - network
-resources:
-  timeout_ms: 3000
-  memory_mb: 128
