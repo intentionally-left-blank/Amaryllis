@@ -6,18 +6,18 @@ struct SettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Runtime Settings")
-                .font(.system(size: 26, weight: .black, design: .rounded))
+                .font(AmaryllisTheme.titleFont(size: 30))
                 .foregroundStyle(AmaryllisTheme.textPrimary)
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("API Endpoint")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
                     .foregroundStyle(AmaryllisTheme.textSecondary)
                 TextField("http://localhost:8000", text: $appState.endpoint)
                     .textFieldStyle(.roundedBorder)
 
                 Text("Runtime Directory")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
                     .foregroundStyle(AmaryllisTheme.textSecondary)
                 TextField("Path to repository root", text: $appState.runtimeDirectory)
                     .textFieldStyle(.roundedBorder)
@@ -26,30 +26,29 @@ struct SettingsView: View {
                     Button("Save") {
                         appState.persistSettings()
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(AmaryllisSecondaryButtonStyle())
 
                     Button("Start Runtime") {
                         appState.startRuntime()
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(AmaryllisTheme.accent)
+                    .buttonStyle(AmaryllisPrimaryButtonStyle())
                     .disabled(appState.runtimeManager.isRunning)
 
                     Button("Stop Runtime") {
                         appState.stopRuntime()
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(AmaryllisSecondaryButtonStyle())
                     .disabled(!appState.runtimeManager.isRunning)
 
                     Button("Check API") {
                         Task { await appState.refreshHealth() }
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(AmaryllisSecondaryButtonStyle())
                 }
 
                 if let error = appState.lastError {
                     Text(error)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(AmaryllisTheme.bodyFont(size: 12, weight: .medium))
                         .foregroundStyle(AmaryllisTheme.accent)
                 }
             }
@@ -57,14 +56,14 @@ struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Runtime Logs")
-                    .font(.system(size: 14, weight: .bold))
+                    .font(AmaryllisTheme.sectionFont(size: 17))
                     .foregroundStyle(AmaryllisTheme.textPrimary)
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 4) {
                         ForEach(Array(appState.runtimeManager.logs.enumerated()), id: \.offset) { _, line in
                             Text(line)
-                                .font(.system(size: 11, weight: .regular, design: .monospaced))
+                                .font(AmaryllisTheme.monoFont(size: 11, weight: .regular))
                                 .foregroundStyle(AmaryllisTheme.textSecondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }

@@ -7,6 +7,70 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+FALLBACK_MLX_SUGGESTED_MODELS: list[str] = [
+    "mlx-community/Qwen2.5-0.5B-Instruct-4bit",
+    "mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+    "mlx-community/Qwen2.5-3B-Instruct-4bit",
+    "mlx-community/Qwen2.5-7B-Instruct-4bit",
+    "mlx-community/Qwen2.5-14B-Instruct-4bit",
+    "mlx-community/Qwen2.5-32B-Instruct-4bit",
+    "mlx-community/Qwen2.5-72B-Instruct-4bit",
+    "mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit",
+    "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit",
+    "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
+    "mlx-community/Qwen2.5-Coder-32B-Instruct-4bit",
+    "mlx-community/QwQ-32B-Preview-4bit",
+    "mlx-community/Llama-3.2-1B-Instruct-4bit",
+    "mlx-community/Llama-3.2-3B-Instruct-4bit",
+    "mlx-community/Llama-3.1-8B-Instruct-4bit",
+    "mlx-community/Llama-3.1-70B-Instruct-4bit",
+    "mlx-community/Meta-Llama-3-8B-Instruct-4bit",
+    "mlx-community/Meta-Llama-3-70B-Instruct-4bit",
+    "mlx-community/Mistral-7B-Instruct-v0.3-4bit",
+    "mlx-community/Mistral-Nemo-Instruct-2407-4bit",
+    "mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit",
+    "mlx-community/Mixtral-8x22B-Instruct-v0.1-4bit",
+    "mlx-community/c4ai-command-r-v01-4bit",
+    "mlx-community/c4ai-command-r-plus-08-2024-4bit",
+    "mlx-community/Phi-3-mini-4k-instruct-4bit",
+    "mlx-community/Phi-3-medium-4k-instruct-4bit",
+    "mlx-community/Phi-3.5-mini-instruct-4bit",
+    "mlx-community/Phi-3.5-MoE-instruct-4bit",
+    "mlx-community/phi-4-4bit",
+    "mlx-community/gemma-2-2b-it-4bit",
+    "mlx-community/gemma-2-9b-it-4bit",
+    "mlx-community/gemma-2-27b-it-4bit",
+    "mlx-community/DeepSeek-R1-Distill-Qwen-1.5B-4bit",
+    "mlx-community/DeepSeek-R1-Distill-Qwen-7B-4bit",
+    "mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit",
+    "mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit",
+    "mlx-community/DeepSeek-R1-Distill-Llama-8B-4bit",
+    "mlx-community/DeepSeek-R1-Distill-Llama-70B-4bit",
+    "mlx-community/deepseek-coder-1.3b-instruct-4bit",
+    "mlx-community/deepseek-coder-6.7b-instruct-4bit",
+    "mlx-community/deepseek-coder-33b-instruct-4bit",
+    "mlx-community/StarCoder2-3B-4bit",
+    "mlx-community/StarCoder2-7B-4bit",
+    "mlx-community/StarCoder2-15B-4bit",
+    "mlx-community/CodeLlama-7b-Instruct-hf-4bit",
+    "mlx-community/CodeLlama-13b-Instruct-hf-4bit",
+    "mlx-community/CodeLlama-34b-Instruct-hf-4bit",
+    "mlx-community/SmolLM2-1.7B-Instruct-4bit",
+    "mlx-community/SmolLM2-360M-Instruct-4bit",
+    "mlx-community/TinyLlama-1.1B-Chat-v1.0-4bit",
+    "mlx-community/OpenHermes-2.5-Mistral-7B-4bit",
+    "mlx-community/Nous-Hermes-2-Mixtral-8x7B-DPO-4bit",
+    "mlx-community/zephyr-7b-beta-4bit",
+    "mlx-community/yi-1.5-6b-chat-4bit",
+    "mlx-community/yi-1.5-9b-chat-4bit",
+    "mlx-community/yi-1.5-34b-chat-4bit",
+    "mlx-community/solar-10.7b-instruct-v1.0-4bit",
+    "mlx-community/dolphin-2.6-mistral-7b-4bit",
+    "mlx-community/OpenBioLLM-Llama3-8B-4bit",
+    "mlx-community/Granite-3.1-8B-Instruct-4bit",
+    "mlx-community/Granite-3.1-2B-Instruct-4bit",
+]
+
 
 class MLXProvider:
     def __init__(self, models_dir: Path) -> None:
@@ -55,6 +119,45 @@ class MLXProvider:
             )
 
         return models
+
+    def suggested_models(self, limit: int = 300) -> list[dict[str, str]]:
+        suggestions: list[dict[str, str]] = []
+        seen: set[str] = set()
+
+        def add(model_id: str) -> None:
+            normalized = model_id.strip()
+            if not normalized or normalized in seen:
+                return
+            seen.add(normalized)
+            suggestions.append(
+                {
+                    "id": normalized,
+                    "label": self._label_from_model_id(normalized),
+                }
+            )
+
+        for item in self.list_models():
+            model_id = str(item.get("id", "")).strip()
+            if model_id:
+                add(model_id)
+
+        try:
+            from huggingface_hub import HfApi  # type: ignore
+
+            api = HfApi()
+            for model in api.list_models(author="mlx-community", limit=max(limit, 300)):
+                model_id = getattr(model, "id", None) or getattr(model, "modelId", None)
+                if isinstance(model_id, str):
+                    add(model_id)
+
+            self.logger.info("mlx_suggested_catalog_loaded count=%s", len(suggestions))
+        except Exception as exc:  # pragma: no cover - runtime dependency/network
+            self.logger.warning("mlx_suggested_catalog_fetch_failed error=%s", exc)
+
+        for model_id in FALLBACK_MLX_SUGGESTED_MODELS:
+            add(model_id)
+
+        return suggestions[:limit]
 
     def download_model(self, model_id: str) -> dict[str, Any]:
         folder = self.models_dir / self._model_to_folder(model_id)
@@ -190,6 +293,12 @@ class MLXProvider:
         if chunks:
             chunks[-1] = chunks[-1].rstrip()
         return iter(chunks)
+
+    @staticmethod
+    def _label_from_model_id(model_id: str) -> str:
+        name = model_id.split("/")[-1].replace("-", " ").replace("_", " ").strip()
+        pretty = " ".join(segment for segment in name.split() if segment)
+        return pretty or model_id
 
     @staticmethod
     def _messages_to_prompt(messages: list[dict[str, Any]]) -> str:

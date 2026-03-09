@@ -36,7 +36,7 @@ struct AgentsView: View {
     private var leftPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Agents")
-                .font(.system(size: 24, weight: .black, design: .rounded))
+                .font(AmaryllisTheme.titleFont(size: 28))
                 .foregroundStyle(AmaryllisTheme.textPrimary)
 
             VStack(alignment: .leading, spacing: 8) {
@@ -47,7 +47,7 @@ struct AgentsView: View {
                 TextField("Tools (comma separated)", text: $newAgentTools)
                     .textFieldStyle(.roundedBorder)
                 TextEditor(text: $newAgentPrompt)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(AmaryllisTheme.bodyFont(size: 12, weight: .medium))
                     .frame(height: 80)
                     .padding(8)
                     .background(AmaryllisTheme.surfaceAlt)
@@ -66,14 +66,13 @@ struct AgentsView: View {
                                 .frame(width: 90)
                         }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(AmaryllisTheme.accent)
+                    .buttonStyle(AmaryllisPrimaryButtonStyle())
                     .disabled(isCreatingAgent || newAgentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                     Button("Refresh") {
                         Task { await refreshAgents() }
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(AmaryllisSecondaryButtonStyle())
                     .disabled(isLoadingAgents)
                 }
             }
@@ -88,10 +87,10 @@ struct AgentsView: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(agent.name)
-                                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                                    .font(AmaryllisTheme.bodyFont(size: 14, weight: .semibold))
                                     .foregroundStyle(AmaryllisTheme.textPrimary)
                                 Text(agent.id)
-                                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                                    .font(AmaryllisTheme.monoFont(size: 11, weight: .regular))
                                     .foregroundStyle(AmaryllisTheme.textSecondary)
                                     .lineLimit(1)
                             }
@@ -114,7 +113,7 @@ struct AgentsView: View {
 
             if let error = appState.lastError {
                 Text(error)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(AmaryllisTheme.bodyFont(size: 12, weight: .medium))
                     .foregroundStyle(AmaryllisTheme.accent)
             }
         }
@@ -123,16 +122,16 @@ struct AgentsView: View {
     private var rightPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Agent Chat")
-                .font(.system(size: 24, weight: .black, design: .rounded))
+                .font(AmaryllisTheme.titleFont(size: 28))
                 .foregroundStyle(AmaryllisTheme.textPrimary)
 
             if let selected = selectedAgent {
                 Text("Selected: \(selected.name)")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
                     .foregroundStyle(AmaryllisTheme.textSecondary)
             } else {
                 Text("Select an agent to start")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
                     .foregroundStyle(AmaryllisTheme.textSecondary)
             }
 
@@ -140,7 +139,7 @@ struct AgentsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(chatHistory.indices, id: \.self) { index in
                         Text(chatHistory[index])
-                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .font(AmaryllisTheme.bodyFont(size: 13, weight: .medium))
                             .foregroundStyle(AmaryllisTheme.textPrimary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(10)
@@ -171,8 +170,7 @@ struct AgentsView: View {
                             .frame(width: 90)
                     }
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(AmaryllisTheme.accent)
+                .buttonStyle(AmaryllisPrimaryButtonStyle())
                 .disabled(isSending || selectedAgent == nil || chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }

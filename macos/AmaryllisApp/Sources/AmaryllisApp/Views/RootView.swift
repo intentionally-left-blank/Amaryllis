@@ -25,7 +25,7 @@ struct RootView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Amaryllis")
-                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .font(AmaryllisTheme.titleFont(size: 30))
                 .foregroundStyle(AmaryllisTheme.textPrimary)
                 .padding(.top, 8)
 
@@ -35,9 +35,9 @@ struct RootView: View {
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: tab.icon)
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: 14, weight: .medium))
                         Text(tab.rawValue)
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(AmaryllisTheme.bodyFont(size: 14, weight: .semibold))
                         Spacer()
                     }
                     .padding(.vertical, 8)
@@ -63,7 +63,7 @@ struct RootView: View {
             statusDot(label: "API", on: appState.runtimeManager.connectionState == .online)
             Spacer()
             Text(appState.endpoint)
-                .font(.system(size: 12, weight: .medium))
+                .font(AmaryllisTheme.monoFont(size: 12, weight: .regular))
                 .foregroundStyle(AmaryllisTheme.textSecondary)
         }
         .padding(.horizontal, 14)
@@ -77,7 +77,7 @@ struct RootView: View {
                 .fill(on ? Color.green : AmaryllisTheme.accent)
                 .frame(width: 8, height: 8)
             Text(label)
-                .font(.system(size: 11, weight: .semibold))
+                .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
                 .foregroundStyle(AmaryllisTheme.textSecondary)
         }
         .padding(.horizontal, 8)

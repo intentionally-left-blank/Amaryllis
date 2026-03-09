@@ -50,7 +50,7 @@ struct ChatView: View {
 
             HStack(alignment: .bottom, spacing: 8) {
                 TextEditor(text: $inputText)
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .font(AmaryllisTheme.bodyFont(size: 14, weight: .medium))
                     .frame(minHeight: 64, maxHeight: 120)
                     .padding(6)
                     .background(AmaryllisTheme.surface)
@@ -64,12 +64,11 @@ struct ChatView: View {
                             .frame(width: 88)
                     } else {
                         Text("Send")
-                            .font(.system(size: 14, weight: .bold))
+                            .font(AmaryllisTheme.bodyFont(size: 14, weight: .semibold))
                             .frame(width: 88)
                     }
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(AmaryllisTheme.accent)
+                .buttonStyle(AmaryllisPrimaryButtonStyle())
                 .disabled(isSending || inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .amaryllisCard()
@@ -111,7 +110,7 @@ struct ChatView: View {
 
             Toggle("Stream", isOn: $isStreaming)
                 .toggleStyle(.switch)
-                .font(.system(size: 12, weight: .semibold))
+                .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
                 .frame(width: 120)
         }
         .amaryllisCard()
@@ -124,10 +123,10 @@ struct ChatView: View {
             if isUser { Spacer() }
             VStack(alignment: .leading, spacing: 4) {
                 Text(isUser ? "You" : "Amaryllis")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(AmaryllisTheme.bodyFont(size: 10, weight: .bold))
                     .foregroundStyle(AmaryllisTheme.textSecondary)
                 Text(message.content)
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .font(AmaryllisTheme.bodyFont(size: 14, weight: .medium))
                     .foregroundStyle(AmaryllisTheme.textPrimary)
                     .textSelection(.enabled)
             }
