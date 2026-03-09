@@ -28,11 +28,16 @@ class ModelManager:
 
         for name, provider in self.providers.items():
             try:
-                provider_payload[name] = provider.list_models()
+                provider_payload[name] = {
+                    "available": True,
+                    "error": None,
+                    "items": provider.list_models(),
+                }
             except Exception as exc:
                 provider_payload[name] = {
-                    "error": str(exc),
                     "available": False,
+                    "error": str(exc),
+                    "items": [],
                 }
 
         return {

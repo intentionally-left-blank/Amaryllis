@@ -1,6 +1,6 @@
 # Amaryllis
 
-Amaryllis is an open-source local AI runtime for macOS.
+Amaryllis is an open-source local AI runtime and native macOS app.
 
 It acts as a **local AI brain node**:
 - runs local models
@@ -8,6 +8,7 @@ It acts as a **local AI brain node**:
 - provides tool calling
 - stores memory
 - exposes OpenAI-compatible API
+- ships with a native SwiftUI desktop interface
 
 This MVP is intentionally simple and modular, so it can evolve into a richer cognitive architecture later.
 
@@ -21,6 +22,7 @@ This MVP is intentionally simple and modular, so it can evolve into a richer cog
 
 Implemented in this version:
 - FastAPI backend runtime
+- native macOS UI (`SwiftUI`) with dark amaryllis theme
 - OpenAI-compatible endpoint: `POST /v1/chat/completions`
 - model manager with MLX primary provider and Ollama fallback
 - model APIs: list/download/load
@@ -31,11 +33,13 @@ Implemented in this version:
 - tool registry/executor with builtin tools
 - plugin discovery from `plugins/`
 - sequential task loop: meta-controller -> planner -> reasoning -> tools -> response
+- local runtime controls from the desktop app (start/stop/check)
+- streaming chat UI
+- model load/download progress indicators
 
 Out of scope for MVP:
 - distributed execution
 - multi-node orchestration
-- GUI-heavy app shell
 - full production hardening
 
 ## Target Platform
@@ -73,6 +77,17 @@ Data storage location:
 │   └── providers
 │       ├── mlx_provider.py
 │       └── ollama_provider.py
+├── macos
+│   └── AmaryllisApp
+│       ├── Package.swift
+│       ├── Sources/AmaryllisApp
+│       │   ├── AmaryllisMacApp.swift
+│       │   ├── Core
+│       │   ├── Models
+│       │   ├── Services
+│       │   └── Views
+│       └── scripts
+│           └── build_app.sh
 ├── planner
 │   └── planner.py
 ├── plugins
@@ -117,6 +132,36 @@ Health check:
 ```bash
 curl http://localhost:8000/health
 ```
+
+## Native macOS App (.app)
+
+Prerequisites:
+- Xcode Command Line Tools installed (`xcode-select --install`)
+- Xcode license accepted (`sudo xcodebuild -license accept`)
+
+Build:
+
+```bash
+cd macos/AmaryllisApp
+./scripts/build_app.sh
+```
+
+Result:
+
+```text
+macos/AmaryllisApp/dist/Amaryllis.app
+```
+
+Run:
+
+```bash
+open macos/AmaryllisApp/dist/Amaryllis.app
+```
+
+In app settings:
+- set `API Endpoint` (default `http://localhost:8000`)
+- set `Runtime Directory` to your repository root
+- use `Start Runtime` to run the Python backend from UI
 
 ## Model Management API
 
