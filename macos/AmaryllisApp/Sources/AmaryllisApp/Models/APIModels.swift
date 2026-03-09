@@ -255,6 +255,21 @@ struct APIAgentChatResponse: Decodable {
     }
 }
 
+struct LocalChatMessage: Codable, Identifiable, Equatable {
+    let id: UUID
+    let role: String
+    var content: String
+    let createdAt: Date
+}
+
+struct LocalChatSession: Codable, Identifiable, Equatable {
+    let id: UUID
+    var title: String
+    let createdAt: Date
+    var updatedAt: Date
+    var messages: [LocalChatMessage]
+}
+
 enum JSONValue: Codable {
     case string(String)
     case number(Double)

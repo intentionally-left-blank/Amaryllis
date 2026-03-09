@@ -1,22 +1,9 @@
 import SwiftUI
 
 struct ChatView: View {
-    struct MessageRow: Identifiable {
-        let id: UUID
-        let role: String
-        var content: String
-
-        init(id: UUID = UUID(), role: String, content: String) {
-            self.id = id
-            self.role = role
-            self.content = content
-        }
-    }
-
     @EnvironmentObject private var appState: AppState
 
     @State private var inputText: String = ""
-    @State private var messages: [MessageRow] = []
     @State private var isStreaming: Bool = true
     @State private var selectedModelID: String = ""
     @State private var selectedProvider: String = ""
@@ -26,23 +13,30 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 10) {
+            sessionBar
             controlBar
 
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(messages) { message in
-                            bubble(for: message)
-                                .id(message.id)
+                        if currentMessages.isEmpty {
+                            Text("Start a new conversation.")
+                                .font(AmaryllisTheme.bodyFont(size: 13, weight: .medium))
+                                .foregroundStyle(AmaryllisTheme.textSecondary)
+                                .padding(.top, 8)
+                        } else {
+                            ForEach(currentMessages) { message in
+                                bubble(for: message)
+                                    .id(message.id)
+                            }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .onChange(of: messages.count) { _ in
-                    if let last = messages.last {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
+                .onChange(of: currentMessages.count) { _ in
+                    guard let last = currentMessages.last else { return }
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo(last.id, anchor: .bottom)
                     }
                 }
             }
@@ -74,6 +68,7 @@ struct ChatView: View {
             .amaryllisCard()
         }
         .onAppear {
+            appState.ensureChatExists()
             if selectedModelID.isEmpty {
                 selectedModelID = appState.selectedModel ?? ""
             }
@@ -86,6 +81,62 @@ struct ChatView: View {
                 selectedModelID = appState.selectedModel ?? ""
             }
         }
+    }
+
+    private var currentMessages: [LocalChatMessage] {
+        appState.currentChatMessages
+    }
+
+    private var sessionBar: some View {
+        HStack(spacing: 8) {
+            Menu {
+                ForEach(appState.chatSessions) { session in
+                    Button {
+                        appState.selectChat(id: session.id)
+                    } label: {
+                        Text(session.title)
+                    }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(appState.currentChatTitle)
+                        .font(AmaryllisTheme.bodyFont(size: 13, weight: .semibold))
+                        .foregroundStyle(AmaryllisTheme.textPrimary)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(AmaryllisTheme.surfaceAlt)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(AmaryllisTheme.border.opacity(0.6), lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .menuStyle(.borderlessButton)
+            .disabled(isSending)
+
+            Button("New Chat") {
+                _ = appState.createChat()
+            }
+            .buttonStyle(AmaryllisSecondaryButtonStyle())
+            .disabled(isSending)
+
+            Button("Delete") {
+                appState.deleteCurrentChat()
+            }
+            .buttonStyle(AmaryllisSecondaryButtonStyle())
+            .disabled(isSending || appState.chatSessions.isEmpty)
+
+            Text("\(appState.chatSessions.count)")
+                .font(AmaryllisTheme.monoFont(size: 11, weight: .regular))
+                .foregroundStyle(AmaryllisTheme.textSecondary)
+        }
+        .amaryllisCard()
     }
 
     private var controlBar: some View {
@@ -116,7 +167,7 @@ struct ChatView: View {
         .amaryllisCard()
     }
 
-    private func bubble(for message: MessageRow) -> some View {
+    private func bubble(for message: LocalChatMessage) -> some View {
         let isUser = message.role == "user"
 
         return HStack {
@@ -158,11 +209,10 @@ struct ChatView: View {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending else { return }
 
-        messages.append(MessageRow(role: "user", content: text))
+        _ = appState.appendUserMessageToCurrentChat(text)
         inputText = ""
 
-        let assistantID = UUID()
-        messages.append(MessageRow(id: assistantID, role: "assistant", content: ""))
+        let assistantID = appState.appendAssistantPlaceholderToCurrentChat()
 
         isSending = true
         appState.clearError()
@@ -171,7 +221,7 @@ struct ChatView: View {
             APIChatMessage(role: "system", content: systemPrompt, name: nil)
         ]
 
-        for row in messages where row.role == "user" || row.role == "assistant" {
+        for row in appState.currentChatMessages where row.role == "user" || row.role == "assistant" {
             if !row.content.isEmpty {
                 payload.append(APIChatMessage(role: row.role, content: row.content, name: nil))
             }
@@ -194,7 +244,7 @@ struct ChatView: View {
                     for try await chunk in stream {
                         combined += chunk
                         await MainActor.run {
-                            replaceMessage(id: assistantID, content: combined)
+                            appState.updateCurrentChatMessage(id: assistantID, content: combined)
                         }
                     }
                 } else {
@@ -205,13 +255,15 @@ struct ChatView: View {
                         tools: nil
                     )
                     let content = response.choices.first?.message.content ?? ""
-                    replaceMessage(id: assistantID, content: content)
+                    await MainActor.run {
+                        appState.updateCurrentChatMessage(id: assistantID, content: content)
+                    }
                 }
 
                 await appState.refreshHealth()
             } catch {
                 await MainActor.run {
-                    replaceMessage(id: assistantID, content: "Error: \(error.localizedDescription)")
+                    appState.updateCurrentChatMessage(id: assistantID, content: "Error: \(error.localizedDescription)")
                     appState.lastError = error.localizedDescription
                 }
             }
@@ -220,10 +272,5 @@ struct ChatView: View {
                 isSending = false
             }
         }
-    }
-
-    private func replaceMessage(id: UUID, content: String) {
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
-        messages[index].content = content
     }
 }

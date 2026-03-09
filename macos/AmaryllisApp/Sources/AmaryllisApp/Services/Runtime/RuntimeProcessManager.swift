@@ -33,8 +33,18 @@ final class RuntimeProcessManager: ObservableObject {
         connectionState = .unknown
 
         let runtimeURL = URL(fileURLWithPath: runtimeDirectory, isDirectory: true)
+        let runtimeServerPath = runtimeURL.appendingPathComponent("runtime/server.py").path
+        guard FileManager.default.fileExists(atPath: runtimeServerPath) else {
+            appendLog("Runtime not found at \(runtimeDirectory). Expected runtime/server.py")
+            processState = .failed
+            connectionState = .offline
+            return
+        }
+
+        let venvPython = runtimeURL.appendingPathComponent(".venv/bin/python").path
+        let pythonCommand = FileManager.default.fileExists(atPath: venvPython) ? venvPython : "python3"
         let uvicornArgs = [
-            "python3",
+            pythonCommand,
             "-m",
             "uvicorn",
             "runtime.server:app",
@@ -48,6 +58,7 @@ final class RuntimeProcessManager: ObservableObject {
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         proc.arguments = uvicornArgs
         proc.currentDirectoryURL = runtimeURL
+        proc.environment = mergedEnvironment()
 
         let pipe = Pipe()
         outputPipe = pipe
@@ -76,7 +87,7 @@ final class RuntimeProcessManager: ObservableObject {
             try proc.run()
             process = proc
             processState = .running
-            appendLog("Runtime started at http://\(host):\(port)")
+            appendLog("Runtime started at http://\(host):\(port) using \(pythonCommand)")
         } catch {
             appendLog("Failed to start runtime: \(error.localizedDescription)")
             processState = .failed
@@ -110,5 +121,11 @@ final class RuntimeProcessManager: ObservableObject {
         if logs.count > 400 {
             logs.removeFirst(logs.count - 400)
         }
+    }
+
+    private func mergedEnvironment() -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        env["PYTHONUNBUFFERED"] = "1"
+        return env
     }
 }

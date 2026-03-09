@@ -36,6 +36,7 @@ Implemented in this version:
 - local runtime controls from the desktop app (start/stop/check)
 - streaming chat UI
 - model load/download progress indicators
+- persistent local chat history (multi-chat sessions) in macOS app
 
 Out of scope for MVP:
 - distributed execution
@@ -188,6 +189,14 @@ In app settings:
 - set `API Endpoint` (default `http://localhost:8000`)
 - set `Runtime Directory` to your repository root
 - use `Start Runtime` to run the Python backend from UI
+
+Chat tab behavior:
+- create multiple chats (`New Chat`)
+- switch chats from the chat selector
+- full chat history is saved automatically and restored after restart
+
+Local chat file:
+- `~/Library/Application Support/amaryllis/chat_sessions.json`
 
 ## Model Management API
 
