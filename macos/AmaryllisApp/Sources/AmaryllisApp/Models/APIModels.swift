@@ -37,6 +37,11 @@ struct APIHealthResponse: Decodable {
 }
 
 struct APIModelCatalog: Decodable {
+    struct SuggestedModel: Decodable, Identifiable {
+        let id: String
+        let label: String
+    }
+
     struct Active: Decodable {
         let provider: String
         let model: String
@@ -50,6 +55,7 @@ struct APIModelCatalog: Decodable {
 
     let active: Active
     let providers: [String: ProviderPayload]
+    let suggested: [String: [SuggestedModel]]?
 }
 
 struct APIModelItem: Decodable, Identifiable {

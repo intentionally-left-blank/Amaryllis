@@ -6,6 +6,10 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DIST_DIR="${PROJECT_DIR}/dist"
 APP_NAME="Amaryllis"
 APP_BUNDLE="${DIST_DIR}/${APP_NAME}.app"
+ASSETS_DIR="${PROJECT_DIR}/Assets"
+ICON_FILE="${ASSETS_DIR}/AppIcon.icns"
+
+"${SCRIPT_DIR}/generate_icon.sh"
 
 swift build --configuration release --package-path "${PROJECT_DIR}"
 
@@ -51,6 +55,8 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" <<'PLIST'
   <string>Amaryllis</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
   <key>NSHighResolutionCapable</key>
@@ -61,5 +67,6 @@ PLIST
 
 cp "${BINARY}" "${APP_BUNDLE}/Contents/MacOS/Amaryllis"
 chmod +x "${APP_BUNDLE}/Contents/MacOS/Amaryllis"
+cp "${ICON_FILE}" "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
 
 echo "Built app bundle: ${APP_BUNDLE}"

@@ -114,6 +114,20 @@ Data storage location:
 
 ## Install
 
+One command (from GitHub):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/intentionally-left-blank/Amaryllis/main/scripts/install_macos.sh | bash
+```
+
+One command (inside cloned repo):
+
+```bash
+./scripts/install_macos.sh
+```
+
+Manual backend setup:
+
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
@@ -158,6 +172,18 @@ Run:
 open macos/AmaryllisApp/dist/Amaryllis.app
 ```
 
+Build `.dmg`:
+
+```bash
+./scripts/build_dmg.sh
+```
+
+Output:
+
+```text
+macos/AmaryllisApp/dist/Amaryllis.dmg
+```
+
 In app settings:
 - set `API Endpoint` (default `http://localhost:8000`)
 - set `Runtime Directory` to your repository root
@@ -181,6 +207,8 @@ curl -X POST http://localhost:8000/models/download \
     "provider": "mlx"
   }'
 ```
+
+Tip: `/models` now returns `suggested` model lists for both `mlx` and `ollama`, and UI shows quick download actions for them.
 
 ### Load model
 

@@ -8,6 +8,30 @@ from models.providers.ollama_provider import OllamaProvider
 from runtime.config import AppConfig
 from storage.database import Database
 
+SUGGESTED_MODELS: dict[str, list[dict[str, str]]] = {
+    "mlx": [
+        {"id": "mlx-community/Qwen2.5-1.5B-Instruct-4bit", "label": "Qwen 2.5 1.5B (4bit)"},
+        {"id": "mlx-community/Qwen2.5-3B-Instruct-4bit", "label": "Qwen 2.5 3B (4bit)"},
+        {"id": "mlx-community/Qwen2.5-7B-Instruct-4bit", "label": "Qwen 2.5 7B (4bit)"},
+        {"id": "mlx-community/Llama-3.2-1B-Instruct-4bit", "label": "Llama 3.2 1B (4bit)"},
+        {"id": "mlx-community/Llama-3.2-3B-Instruct-4bit", "label": "Llama 3.2 3B (4bit)"},
+        {"id": "mlx-community/Meta-Llama-3-8B-Instruct-4bit", "label": "Llama 3 8B (4bit)"},
+        {"id": "mlx-community/Mistral-7B-Instruct-v0.3-4bit", "label": "Mistral 7B Instruct (4bit)"},
+        {"id": "mlx-community/phi-4-4bit", "label": "Phi-4 (4bit)"},
+        {"id": "mlx-community/Phi-3.5-mini-instruct-4bit", "label": "Phi-3.5 Mini (4bit)"},
+        {"id": "mlx-community/DeepSeek-R1-Distill-Qwen-7B-4bit", "label": "DeepSeek R1 Distill Qwen 7B"},
+    ],
+    "ollama": [
+        {"id": "llama3.2", "label": "Llama 3.2"},
+        {"id": "llama3.1", "label": "Llama 3.1"},
+        {"id": "qwen2.5", "label": "Qwen 2.5"},
+        {"id": "mistral", "label": "Mistral"},
+        {"id": "phi4", "label": "Phi-4"},
+        {"id": "deepseek-r1", "label": "DeepSeek R1"},
+        {"id": "gemma2", "label": "Gemma 2"},
+    ],
+}
+
 
 class ModelManager:
     def __init__(self, config: AppConfig, database: Database) -> None:
@@ -46,6 +70,7 @@ class ModelManager:
                 "model": self.active_model,
             },
             "providers": provider_payload,
+            "suggested": SUGGESTED_MODELS,
         }
 
     def download_model(self, model_id: str, provider: str | None = None) -> dict[str, Any]:

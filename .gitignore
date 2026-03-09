@@ -171,6 +171,8 @@ cython_debug/
 # Swift / macOS app build artifacts
 .build/
 DerivedData/
+macos/AmaryllisApp/dist/
+macos/AmaryllisApp/Assets/
 
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can

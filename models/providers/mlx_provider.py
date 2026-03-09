@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from datetime import datetime, timezone
@@ -69,19 +70,31 @@ class MLXProvider:
         try:
             from huggingface_hub import snapshot_download  # type: ignore
 
-            snapshot_download(
-                repo_id=model_id,
-                local_dir=str(folder),
-                local_dir_use_symlinks=False,
-            )
+            kwargs: dict[str, Any] = {
+                "repo_id": model_id,
+                "local_dir": str(folder),
+                "resume_download": True,
+            }
+
+            signature = inspect.signature(snapshot_download)
+            if "local_dir_use_symlinks" in signature.parameters:
+                kwargs["local_dir_use_symlinks"] = False
+
+            snapshot_download(**kwargs)
             metadata["source"] = "huggingface_hub"
-        except Exception as exc:  # pragma: no cover - optional path
-            metadata["note"] = (
-                "huggingface_hub is not available or download failed. "
-                "Model may still load lazily via mlx_lm if installed."
-            )
+            metadata["status"] = "ok"
+        except Exception as exc:  # pragma: no cover - runtime dependency/network
+            metadata["status"] = "failed"
             metadata["error"] = str(exc)
-            self.logger.warning("mlx_download_fallback model=%s error=%s", model_id, exc)
+            self.logger.error("mlx_download_failed model=%s error=%s", model_id, exc)
+
+            (folder / "model.json").write_text(
+                json.dumps(metadata, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            raise RuntimeError(
+                f"Failed to download model '{model_id}'. Check internet access and model id."
+            ) from exc
 
         (folder / "model.json").write_text(
             json.dumps(metadata, ensure_ascii=False, indent=2),
