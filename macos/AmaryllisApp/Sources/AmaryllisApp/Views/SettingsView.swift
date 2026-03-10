@@ -53,16 +53,15 @@ struct SettingsView: View {
                     .buttonStyle(AmaryllisSecondaryButtonStyle())
 
                     Button("Start Runtime") {
-                        appState.startRuntime()
+                        Task { await appState.startRuntimeFromSettings() }
                     }
                     .buttonStyle(AmaryllisPrimaryButtonStyle())
                     .disabled(appState.runtimeManager.isRunning)
 
                     Button("Stop Runtime") {
-                        appState.stopRuntime()
+                        Task { await appState.stopRuntimeFromSettings() }
                     }
                     .buttonStyle(AmaryllisSecondaryButtonStyle())
-                    .disabled(!appState.runtimeManager.isRunning)
 
                     Button("Check API") {
                         Task { await appState.refreshHealth() }
@@ -71,6 +70,10 @@ struct SettingsView: View {
                 }
 
                 Text("After updating cloud provider keys, restart runtime.")
+                    .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                    .foregroundStyle(AmaryllisTheme.textSecondary)
+
+                Text("If API is already online while Runtime is offline, it means an external server is running on this endpoint.")
                     .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
                     .foregroundStyle(AmaryllisTheme.textSecondary)
 

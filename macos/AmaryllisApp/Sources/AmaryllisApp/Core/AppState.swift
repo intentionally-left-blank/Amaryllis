@@ -143,8 +143,39 @@ final class AppState: ObservableObject {
         )
     }
 
+    func startRuntimeFromSettings() async {
+        if runtimeManager.isRunning {
+            lastError = "Runtime is already running from the app."
+            return
+        }
+
+        if await checkHealthOnce() {
+            lastError = "API is already running from another process on this endpoint. Stop external runtime in terminal, then start from app."
+            return
+        }
+
+        startRuntime()
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        await refreshHealth()
+    }
+
     func stopRuntime() {
         runtimeManager.stop()
+    }
+
+    func stopRuntimeFromSettings() async {
+        if runtimeManager.isRunning {
+            stopRuntime()
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            await refreshHealth()
+            return
+        }
+
+        if await checkHealthOnce() {
+            lastError = "Cannot stop external runtime from app. Stop it in terminal or change endpoint."
+        } else {
+            lastError = "Runtime is not running."
+        }
     }
 
     var currentChatMessages: [LocalChatMessage] {
