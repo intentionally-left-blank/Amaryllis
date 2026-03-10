@@ -20,6 +20,8 @@ class AppConfig:
     default_model: str
     ollama_base_url: str
     enable_ollama_fallback: bool
+    openai_base_url: str
+    openai_api_key: str | None
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -85,6 +87,8 @@ class AppConfig:
             ),
             ollama_base_url=os.getenv("AMARYLLIS_OLLAMA_URL", "http://localhost:11434"),
             enable_ollama_fallback=enable_ollama_fallback,
+            openai_base_url=os.getenv("AMARYLLIS_OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
+            openai_api_key=(os.getenv("AMARYLLIS_OPENAI_API_KEY") or "").strip() or None,
         )
 
     def ensure_directories(self) -> None:

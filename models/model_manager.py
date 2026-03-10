@@ -5,6 +5,7 @@ import time
 from typing import Any, Iterator
 
 from models.providers.mlx_provider import MLXProvider
+from models.providers.openai_provider import OpenAIProvider
 from models.providers.ollama_provider import OllamaProvider
 from runtime.config import AppConfig
 from storage.database import Database
@@ -20,9 +21,20 @@ class ModelManager:
             "mlx": MLXProvider(config.models_dir),
             "ollama": OllamaProvider(config.ollama_base_url),
         }
+        if config.openai_api_key or config.openai_base_url != "https://api.openai.com/v1":
+            self.providers["openai"] = OpenAIProvider(
+                base_url=config.openai_base_url,
+                api_key=config.openai_api_key,
+            )
 
         self.active_provider = database.get_setting("active_provider", config.default_provider) or config.default_provider
         self.active_model = database.get_setting("active_model", config.default_model) or config.default_model
+
+        if self.active_provider not in self.providers:
+            self.active_provider = config.default_provider if config.default_provider in self.providers else "mlx"
+            self.database.set_setting("active_provider", self.active_provider)
+            if self.active_model:
+                self.database.set_setting("active_model", self.active_model)
 
         self._suggested_cache: dict[str, list[dict[str, str]]] = {}
         self._suggested_cache_until: float = 0.0
@@ -222,10 +234,22 @@ class ModelManager:
 
     def _resolve_target(self, model: str | None, provider: str | None) -> tuple[str, str]:
         provider_name = provider or self.active_provider or self.config.default_provider
-        model_name = model or self.active_model or self.config.default_model
+        if model:
+            model_name = model
+        elif provider and provider != self.active_provider:
+            model_name = self._default_model_for_provider(provider_name)
+        else:
+            model_name = self.active_model or self.config.default_model
         if provider_name not in self.providers:
             raise ValueError(f"Unknown provider: {provider_name}")
         return provider_name, model_name
+
+    def _default_model_for_provider(self, provider_name: str) -> str:
+        if provider_name == "openai":
+            return self.database.get_setting("openai_default_model", "gpt-4o-mini") or "gpt-4o-mini"
+        if provider_name == "ollama":
+            return self.database.get_setting("ollama_fallback_model", "llama3.2") or "llama3.2"
+        return self.config.default_model
 
     def _provider_chat(
         self,

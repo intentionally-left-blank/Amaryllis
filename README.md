@@ -24,7 +24,7 @@ Implemented in this version:
 - FastAPI backend runtime
 - native macOS UI (`SwiftUI`) with dark amaryllis theme
 - OpenAI-compatible endpoint: `POST /v1/chat/completions`
-- model manager with MLX primary provider and Ollama fallback
+- model manager with MLX primary provider, Ollama fallback, and optional OpenAI-compatible cloud provider
 - model APIs: list/download/load
 - agent APIs: create/list/chat
 - memory layer: episodic + semantic + user memory
@@ -77,6 +77,7 @@ Data storage location:
 │   ├── model_manager.py
 │   └── providers
 │       ├── mlx_provider.py
+│       ├── openai_provider.py
 │       └── ollama_provider.py
 ├── macos
 │   └── AmaryllisApp
@@ -230,6 +231,17 @@ curl -X POST http://localhost:8000/models/load \
   }'
 ```
 
+### Load remote OpenAI-compatible model (optional)
+
+```bash
+curl -X POST http://localhost:8000/models/load \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_id": "gpt-4o-mini",
+    "provider": "openai"
+  }'
+```
+
 ## OpenAI-Compatible Chat API
 
 `POST /v1/chat/completions`
@@ -306,9 +318,12 @@ Plugins are auto-discovered from:
 
 - MLX is the primary local inference provider.
 - If MLX fails and fallback is enabled, runtime can try Ollama.
+- You can optionally enable a remote OpenAI-compatible provider.
 - Configure fallback via env:
   - `AMARYLLIS_OLLAMA_FALLBACK=true|false`
   - `AMARYLLIS_OLLAMA_URL=http://localhost:11434`
+  - `AMARYLLIS_OPENAI_BASE_URL=https://api.openai.com/v1`
+  - `AMARYLLIS_OPENAI_API_KEY=<your_key>`
 
 ## Example Environment Variables
 
@@ -319,6 +334,8 @@ export AMARYLLIS_DEFAULT_PROVIDER=mlx
 export AMARYLLIS_DEFAULT_MODEL=mlx-community/Qwen2.5-1.5B-Instruct-4bit
 export AMARYLLIS_OLLAMA_URL=http://localhost:11434
 export AMARYLLIS_OLLAMA_FALLBACK=true
+export AMARYLLIS_OPENAI_BASE_URL=https://api.openai.com/v1
+export AMARYLLIS_OPENAI_API_KEY=replace_me
 ```
 
 ## License
