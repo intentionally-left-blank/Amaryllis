@@ -281,11 +281,17 @@ class AgentRunManager:
         )
 
         try:
+            def push_checkpoint(payload: dict[str, Any]) -> None:
+                data = dict(payload)
+                data.setdefault("attempt", attempt)
+                self.database.append_agent_run_checkpoint(run_id=run_id, checkpoint=data)
+
             result = self.task_executor.execute(
                 agent=agent,
                 user_id=str(run["user_id"]),
                 session_id=run.get("session_id"),
                 user_message=str(run["input_message"]),
+                checkpoint=push_checkpoint,
             )
         except Exception as exc:
             error_message = str(exc)

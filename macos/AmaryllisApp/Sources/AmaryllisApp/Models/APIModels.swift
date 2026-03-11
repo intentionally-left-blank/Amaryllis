@@ -368,6 +368,110 @@ struct APIAgentChatResponse: Decodable {
     }
 }
 
+struct APICreateAgentRunRequest: Encodable {
+    let userId: String
+    let message: String
+    let sessionId: String?
+    let maxAttempts: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case message
+        case sessionId = "session_id"
+        case maxAttempts = "max_attempts"
+    }
+}
+
+struct APIAgentRunCheckpoint: Codable, Identifiable {
+    let data: [String: JSONValue]
+
+    var id: String { "\(timestamp):\(stage ?? "-"):\(attempt ?? -1)" }
+    var timestamp: String {
+        data["timestamp"]?.stringValue ?? ""
+    }
+    var stage: String? {
+        data["stage"]?.stringValue
+    }
+    var message: String? {
+        data["message"]?.stringValue
+    }
+    var attempt: Int? {
+        data["attempt"]?.intValue
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        data = try container.decode([String: JSONValue].self)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(data)
+    }
+}
+
+struct APIAgentRunRecord: Codable, Identifiable {
+    let id: String
+    let agentId: String
+    let userId: String
+    let sessionId: String?
+    let inputMessage: String
+    let status: String
+    let attempts: Int
+    let maxAttempts: Int
+    let cancelRequested: Int
+    let result: [String: JSONValue]?
+    let errorMessage: String?
+    let checkpoints: [APIAgentRunCheckpoint]
+    let createdAt: String
+    let updatedAt: String
+    let startedAt: String?
+    let finishedAt: String?
+
+    var isCancelRequested: Bool { cancelRequested == 1 }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case agentId = "agent_id"
+        case userId = "user_id"
+        case sessionId = "session_id"
+        case inputMessage = "input_message"
+        case status
+        case attempts
+        case maxAttempts = "max_attempts"
+        case cancelRequested = "cancel_requested"
+        case result
+        case errorMessage = "error_message"
+        case checkpoints
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case startedAt = "started_at"
+        case finishedAt = "finished_at"
+    }
+}
+
+struct APIAgentRunSingleResponse: Codable {
+    let run: APIAgentRunRecord
+    let requestId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case run
+        case requestId = "request_id"
+    }
+}
+
+struct APIAgentRunListResponse: Codable {
+    let items: [APIAgentRunRecord]
+    let count: Int
+    let requestId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case items
+        case count
+        case requestId = "request_id"
+    }
+}
+
 struct APICreateAutomationRequest: Encodable {
     let agentId: String
     let userId: String
@@ -819,5 +923,45 @@ enum JSONValue: Codable {
         case .null:
             try container.encodeNil()
         }
+    }
+}
+
+extension JSONValue {
+    var stringValue: String? {
+        switch self {
+        case .string(let value):
+            return value
+        case .number(let value):
+            return String(value)
+        case .bool(let value):
+            return value ? "true" : "false"
+        default:
+            return nil
+        }
+    }
+
+    var intValue: Int? {
+        switch self {
+        case .number(let value):
+            return Int(value)
+        case .string(let value):
+            return Int(value)
+        default:
+            return nil
+        }
+    }
+
+    var objectValue: [String: JSONValue]? {
+        if case .object(let value) = self {
+            return value
+        }
+        return nil
+    }
+
+    var arrayValue: [JSONValue]? {
+        if case .array(let value) = self {
+            return value
+        }
+        return nil
     }
 }

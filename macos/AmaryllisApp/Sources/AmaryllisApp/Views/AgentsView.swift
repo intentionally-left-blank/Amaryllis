@@ -16,6 +16,11 @@ struct AgentsView: View {
 
     @State private var chatInput: String = ""
     @State private var chatHistory: [String] = []
+    @State private var runMaxAttempts: String = "2"
+    @State private var runs: [APIAgentRunRecord] = []
+    @State private var selectedRunID: String?
+    @State private var consumedRunResponses: Set<String> = []
+    @State private var runStatusMessage: String = "No run activity yet."
 
     @State private var newAutomationMessage: String = "Check recent updates and summarize key points."
     @State private var newAutomationScheduleType: String = "interval"
@@ -33,6 +38,9 @@ struct AgentsView: View {
     @State private var isLoadingAgents: Bool = false
     @State private var isCreatingAgent: Bool = false
     @State private var isSending: Bool = false
+    @State private var isLoadingRuns: Bool = false
+    @State private var isCreatingRun: Bool = false
+    @State private var isRunActionLoading: Bool = false
     @State private var isLoadingAutomations: Bool = false
     @State private var isCreatingAutomation: Bool = false
     @State private var isAutomationActionLoading: Bool = false
@@ -47,10 +55,14 @@ struct AgentsView: View {
         }
         .task {
             await refreshAgents()
+            await refreshRuns()
             await refreshAutomations()
         }
         .onChange(of: selectedAgentID ?? "") { _ in
-            Task { await refreshAutomations() }
+            Task {
+                await refreshRuns()
+                await refreshAutomations()
+            }
         }
     }
 
@@ -93,6 +105,7 @@ struct AgentsView: View {
                     Button("Refresh") {
                         Task {
                             await refreshAgents()
+                            await refreshRuns()
                             await refreshAutomations()
                         }
                     }
@@ -108,6 +121,9 @@ struct AgentsView: View {
                         Button {
                             selectedAgentID = agent.id
                             chatHistory.removeAll()
+                            runs = []
+                            selectedRunID = nil
+                            runStatusMessage = "Agent switched. Refreshing runs..."
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(agent.name)
@@ -178,7 +194,11 @@ struct AgentsView: View {
             HStack(spacing: 8) {
                 TextField("Session ID", text: $sessionID)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 180)
+                    .frame(width: 160)
+
+                TextField("Attempts", text: $runMaxAttempts)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 90)
 
                 TextField("Message", text: $chatInput)
                     .textFieldStyle(.roundedBorder)
@@ -197,12 +217,173 @@ struct AgentsView: View {
                 }
                 .buttonStyle(AmaryllisPrimaryButtonStyle())
                 .disabled(isSending || selectedAgent == nil || chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button {
+                    Task { await queueAgentRunFromInput() }
+                } label: {
+                    if isCreatingRun {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 110)
+                    } else {
+                        Text("Queue Run")
+                            .frame(width: 110)
+                    }
+                }
+                .buttonStyle(AmaryllisSecondaryButtonStyle())
+                .disabled(isCreatingRun || selectedAgent == nil || chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button("Refresh Runs") {
+                    Task { await refreshRuns() }
+                }
+                .buttonStyle(AmaryllisSecondaryButtonStyle())
+                .disabled(isLoadingRuns || isRunActionLoading)
             }
             .amaryllisCard()
+
+            runsPanel
+                .frame(maxHeight: 340)
 
             automationPanel
                 .frame(maxHeight: .infinity)
         }
+    }
+
+    private var runsPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Runs (Work Mode)")
+                .font(AmaryllisTheme.sectionFont(size: 18))
+                .foregroundStyle(AmaryllisTheme.textPrimary)
+
+            if selectedAgent == nil {
+                Text("Select an agent to queue and monitor runs.")
+                    .font(AmaryllisTheme.bodyFont(size: 12, weight: .medium))
+                    .foregroundStyle(AmaryllisTheme.textSecondary)
+            } else {
+                Text(runStatusMessage)
+                    .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                    .foregroundStyle(AmaryllisTheme.textSecondary)
+
+                Text("Runs: \(runs.count)")
+                    .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                    .foregroundStyle(AmaryllisTheme.textSecondary)
+
+                if runs.isEmpty {
+                    Text("No runs yet for selected agent.")
+                        .font(AmaryllisTheme.bodyFont(size: 12, weight: .medium))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 8) {
+                            ForEach(runs) { run in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(spacing: 8) {
+                                        Circle()
+                                            .fill(runStatusColor(run.status))
+                                            .frame(width: 8, height: 8)
+                                        Text(run.status.uppercased())
+                                            .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                                        Text("attempts \(run.attempts)/\(run.maxAttempts)")
+                                            .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                                        Spacer()
+                                        Text(run.createdAt)
+                                            .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                                            .lineLimit(1)
+                                    }
+
+                                    Text(run.inputMessage)
+                                        .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                                        .foregroundStyle(AmaryllisTheme.textPrimary)
+                                        .lineLimit(2)
+
+                                    if let error = run.errorMessage, !error.isEmpty {
+                                        Text("error: \(error)")
+                                            .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                                            .foregroundStyle(AmaryllisTheme.accent)
+                                            .lineLimit(3)
+                                    }
+
+                                    HStack(spacing: 8) {
+                                        Button("Open") {
+                                            selectedRunID = run.id
+                                            runStatusMessage = "Selected run \(run.id)"
+                                        }
+                                        .buttonStyle(AmaryllisSecondaryButtonStyle())
+                                        .disabled(isRunActionLoading)
+
+                                        Button("Cancel") {
+                                            Task { await cancelRun(id: run.id) }
+                                        }
+                                        .buttonStyle(AmaryllisSecondaryButtonStyle())
+                                        .disabled(isRunActionLoading || !["queued", "running"].contains(run.status))
+
+                                        Button("Resume") {
+                                            Task { await resumeRun(id: run.id) }
+                                        }
+                                        .buttonStyle(AmaryllisSecondaryButtonStyle())
+                                        .disabled(isRunActionLoading || !["failed", "canceled"].contains(run.status))
+                                    }
+                                }
+                                .padding(8)
+                                .background(AmaryllisTheme.surface)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .onTapGesture {
+                                    selectedRunID = run.id
+                                    runStatusMessage = "Selected run \(run.id)"
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 150)
+                }
+
+                if let run = selectedRun {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Selected Run")
+                            .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
+                            .foregroundStyle(AmaryllisTheme.textPrimary)
+                        Text("id: \(run.id)")
+                            .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                            .lineLimit(1)
+                        Text("status: \(run.status) | started: \(run.startedAt ?? "-") | finished: \(run.finishedAt ?? "-")")
+                            .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                            .lineLimit(1)
+                        if let response = runResponseText(from: run), !response.isEmpty {
+                            Text("response: \(response)")
+                                .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                                .foregroundStyle(AmaryllisTheme.textPrimary)
+                                .lineLimit(3)
+                        }
+
+                        Text("Checkpoints (\(run.checkpoints.count))")
+                            .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 4) {
+                                ForEach(Array(run.checkpoints.suffix(20))) { checkpoint in
+                                    let stage = checkpoint.stage ?? "-"
+                                    let message = checkpoint.message ?? "-"
+                                    Text("[\(checkpoint.timestamp)] \(stage) \(message)")
+                                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 120)
+                    }
+                    .padding(8)
+                    .background(AmaryllisTheme.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+            }
+        }
+        .amaryllisCard()
     }
 
     private var automationPanel: some View {
@@ -417,6 +598,11 @@ struct AgentsView: View {
         return agents.first(where: { $0.id == id })
     }
 
+    private var selectedRun: APIAgentRunRecord? {
+        guard let id = selectedRunID else { return nil }
+        return runs.first(where: { $0.id == id })
+    }
+
     private func createAgent() async {
         let trimmedName = newAgentName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { return }
@@ -441,6 +627,7 @@ struct AgentsView: View {
 
             selectedAgentID = agent.id
             await refreshAgents()
+            await refreshRuns()
             await refreshAutomations()
             appState.clearError()
         } catch {
@@ -487,6 +674,186 @@ struct AgentsView: View {
         } catch {
             chatHistory.append("ERROR: \(error.localizedDescription)")
             appState.lastError = error.localizedDescription
+        }
+    }
+
+    private func queueAgentRunFromInput() async {
+        guard let agent = selectedAgent else { return }
+        let text = chatInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+
+        isCreatingRun = true
+        defer { isCreatingRun = false }
+
+        chatInput = ""
+        chatHistory.append("USER: \(text)")
+        runStatusMessage = "Queuing run..."
+
+        do {
+            let maxAttempts = clampInt(runMaxAttempts, fallback: 2, min: 1, max: 10)
+            let run = try await appState.apiClient.createAgentRun(
+                agentId: agent.id,
+                userId: userID,
+                message: text,
+                sessionId: sessionID.isEmpty ? nil : sessionID,
+                maxAttempts: maxAttempts
+            )
+            upsertRun(run)
+            selectedRunID = run.id
+            runStatusMessage = "Run queued: \(run.id)"
+            await refreshRuns()
+            await pollRunUntilTerminal(runID: run.id, timeoutSec: 120)
+            appState.clearError()
+        } catch {
+            chatHistory.append("RUN ERROR: \(error.localizedDescription)")
+            runStatusMessage = "Run failed to queue."
+            appState.lastError = error.localizedDescription
+        }
+    }
+
+    private func refreshRuns() async {
+        guard let agent = selectedAgent else {
+            runs = []
+            selectedRunID = nil
+            runStatusMessage = "No agent selected."
+            return
+        }
+
+        isLoadingRuns = true
+        defer { isLoadingRuns = false }
+
+        do {
+            let response = try await appState.apiClient.listAgentRuns(
+                agentId: agent.id,
+                userId: userID,
+                status: nil,
+                limit: 100
+            )
+            runs = response.items
+            if selectedRunID == nil || !runs.contains(where: { $0.id == selectedRunID }) {
+                selectedRunID = runs.first?.id
+            }
+            if runs.isEmpty {
+                runStatusMessage = "No runs yet."
+            } else if let selected = selectedRun {
+                runStatusMessage = "Selected run status: \(selected.status)"
+            } else {
+                runStatusMessage = "Loaded \(runs.count) runs."
+            }
+            appState.clearError()
+        } catch {
+            appState.lastError = error.localizedDescription
+        }
+    }
+
+    private func pollRunUntilTerminal(runID: String, timeoutSec: Double) async {
+        let terminalStates: Set<String> = ["succeeded", "failed", "canceled"]
+        let maxTicks = max(1, Int(timeoutSec / 1.2))
+
+        for _ in 0..<maxTicks {
+            do {
+                let run = try await appState.apiClient.getAgentRun(runId: runID)
+                upsertRun(run)
+                selectedRunID = run.id
+                runStatusMessage = "Run \(run.id) status: \(run.status)"
+
+                if terminalStates.contains(run.status) {
+                    if run.status == "succeeded",
+                       !consumedRunResponses.contains(run.id),
+                       let response = runResponseText(from: run),
+                       !response.isEmpty {
+                        chatHistory.append("AGENT (run): \(response)")
+                        consumedRunResponses.insert(run.id)
+                    } else if run.status == "failed", let error = run.errorMessage, !error.isEmpty {
+                        chatHistory.append("RUN FAILED: \(error)")
+                    } else if run.status == "canceled" {
+                        chatHistory.append("RUN CANCELED")
+                    }
+                    return
+                }
+            } catch {
+                appState.lastError = error.localizedDescription
+                return
+            }
+
+            do {
+                try await Task.sleep(nanoseconds: 1_200_000_000)
+            } catch {
+                return
+            }
+        }
+
+        runStatusMessage = "Run watch timeout reached. Use Refresh Runs."
+    }
+
+    private func cancelRun(id: String) async {
+        isRunActionLoading = true
+        defer { isRunActionLoading = false }
+
+        do {
+            let run = try await appState.apiClient.cancelAgentRun(runId: id)
+            upsertRun(run)
+            selectedRunID = id
+            runStatusMessage = "Run canceled: \(id)"
+            await refreshRuns()
+            appState.clearError()
+        } catch {
+            appState.lastError = error.localizedDescription
+        }
+    }
+
+    private func resumeRun(id: String) async {
+        isRunActionLoading = true
+        defer { isRunActionLoading = false }
+
+        do {
+            let run = try await appState.apiClient.resumeAgentRun(runId: id)
+            upsertRun(run)
+            selectedRunID = id
+            runStatusMessage = "Run resumed: \(id)"
+            await refreshRuns()
+            await pollRunUntilTerminal(runID: id, timeoutSec: 120)
+            appState.clearError()
+        } catch {
+            appState.lastError = error.localizedDescription
+        }
+    }
+
+    private func upsertRun(_ run: APIAgentRunRecord) {
+        if let index = runs.firstIndex(where: { $0.id == run.id }) {
+            runs[index] = run
+        } else {
+            runs.insert(run, at: 0)
+        }
+        runs.sort { $0.createdAt > $1.createdAt }
+    }
+
+    private func runResponseText(from run: APIAgentRunRecord) -> String? {
+        guard let result = run.result else { return nil }
+        if let direct = result["response"]?.stringValue {
+            return direct
+        }
+        if let nested = result["result"]?.objectValue,
+           let nestedResponse = nested["response"]?.stringValue {
+            return nestedResponse
+        }
+        return nil
+    }
+
+    private func runStatusColor(_ status: String) -> Color {
+        switch status {
+        case "succeeded":
+            return .green
+        case "failed":
+            return AmaryllisTheme.accent
+        case "running":
+            return .yellow
+        case "queued":
+            return .blue
+        case "canceled":
+            return .gray
+        default:
+            return AmaryllisTheme.textSecondary
         }
     }
 

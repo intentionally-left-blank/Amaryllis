@@ -18,6 +18,7 @@ class _FakeTaskExecutor:
         user_id: str,
         session_id: str | None,
         user_message: str,
+        checkpoint: dict | None = None,
     ) -> dict:
         return {
             "agent_id": agent.id,
@@ -111,4 +112,3 @@ class AutomationSchedulerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -24,12 +24,20 @@ class _FakeTaskExecutor:
         user_id: str,
         session_id: str | None,
         user_message: str,
+        checkpoint: Any = None,
     ) -> dict[str, Any]:
         self.call_count += 1
         if self.always_fail:
             raise RuntimeError("forced failure")
         if self.fail_first and self.call_count == 1:
             raise RuntimeError("fail first attempt")
+        if callable(checkpoint):
+            checkpoint(
+                {
+                    "stage": "fake_executor",
+                    "message": "Fake executor produced response.",
+                }
+            )
         return {
             "agent_id": agent.id,
             "user_id": user_id,
@@ -86,6 +94,7 @@ class AgentRunManagerTests(unittest.TestCase):
         stages = {item.get("stage") for item in final["checkpoints"]}
         self.assertIn("queued", stages)
         self.assertIn("running", stages)
+        self.assertIn("fake_executor", stages)
         self.assertIn("succeeded", stages)
 
     def test_run_retries_then_succeeds(self) -> None:

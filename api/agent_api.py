@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from runtime.errors import NotFoundError, ProviderError, ValidationError
 
 router = APIRouter(tags=["agents"])
+RUN_STATUSES: set[str] = {"queued", "running", "succeeded", "failed", "canceled"}
 
 
 class CreateAgentRequest(BaseModel):
@@ -94,6 +95,12 @@ def list_agent_runs(
 ) -> dict[str, Any]:
     services = request.app.state.services
     try:
+        if status is not None:
+            normalized_status = status.strip().lower()
+            if normalized_status not in RUN_STATUSES:
+                allowed = ", ".join(sorted(RUN_STATUSES))
+                raise ValidationError(f"Invalid status: {status}. Allowed: {allowed}")
+            status = normalized_status
         runs = services.agent_manager.list_runs(
             user_id=user_id,
             agent_id=agent_id,
@@ -142,6 +149,8 @@ def cancel_agent_run(
             "request_id": str(getattr(request.state, "request_id", "")),
         }
     except ValueError as exc:
+        if "not found" in str(exc).lower():
+            raise NotFoundError(str(exc)) from exc
         raise ValidationError(str(exc)) from exc
     except Exception as exc:
         raise ProviderError(str(exc)) from exc
@@ -160,6 +169,8 @@ def resume_agent_run(
             "request_id": str(getattr(request.state, "request_id", "")),
         }
     except ValueError as exc:
+        if "not found" in str(exc).lower():
+            raise NotFoundError(str(exc)) from exc
         raise ValidationError(str(exc)) from exc
     except Exception as exc:
         raise ProviderError(str(exc)) from exc

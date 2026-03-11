@@ -219,6 +219,73 @@ final class AmaryllisAPIClient {
         return try await request(path: path, method: "POST", body: body)
     }
 
+    func createAgentRun(
+        agentId: String,
+        userId: String,
+        message: String,
+        sessionId: String?,
+        maxAttempts: Int? = nil
+    ) async throws -> APIAgentRunRecord {
+        let payload = APICreateAgentRunRequest(
+            userId: userId,
+            message: message,
+            sessionId: sessionId,
+            maxAttempts: maxAttempts
+        )
+        let body = try jsonEncoder.encode(payload)
+        let response: APIAgentRunSingleResponse = try await request(
+            path: "/agents/\(agentId)/runs",
+            method: "POST",
+            body: body
+        )
+        return response.run
+    }
+
+    func listAgentRuns(
+        agentId: String,
+        userId: String?,
+        status: String? = nil,
+        limit: Int = 50
+    ) async throws -> APIAgentRunListResponse {
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let userId, !userId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            queryItems.append(URLQueryItem(name: "user_id", value: userId))
+        }
+        if let status, !status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            queryItems.append(URLQueryItem(name: "status", value: status))
+        }
+
+        let path = buildPath(path: "/agents/\(agentId)/runs", queryItems: queryItems)
+        return try await request(path: path, method: "GET", body: Optional<Data>.none)
+    }
+
+    func getAgentRun(runId: String) async throws -> APIAgentRunRecord {
+        let response: APIAgentRunSingleResponse = try await request(
+            path: "/agents/runs/\(runId)",
+            method: "GET",
+            body: Optional<Data>.none
+        )
+        return response.run
+    }
+
+    func cancelAgentRun(runId: String) async throws -> APIAgentRunRecord {
+        let response: APIAgentRunSingleResponse = try await request(
+            path: "/agents/runs/\(runId)/cancel",
+            method: "POST",
+            body: Optional<Data>.none
+        )
+        return response.run
+    }
+
+    func resumeAgentRun(runId: String) async throws -> APIAgentRunRecord {
+        let response: APIAgentRunSingleResponse = try await request(
+            path: "/agents/runs/\(runId)/resume",
+            method: "POST",
+            body: Optional<Data>.none
+        )
+        return response.run
+    }
+
     func createAutomation(
         agentId: String,
         userId: String,

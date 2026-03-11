@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any
+from typing import Any, Callable
 
 from agents.agent import Agent
 from controller.meta_controller import MetaController
@@ -11,6 +11,8 @@ from models.model_manager import ModelManager
 from planner.planner import Planner
 from tools.tool_executor import PermissionRequiredError, ToolExecutionError, ToolExecutor
 from tools.tool_registry import ToolRegistry
+
+CheckpointWriter = Callable[[dict[str, Any]], None]
 
 
 class TaskExecutor:
@@ -36,13 +38,27 @@ class TaskExecutor:
         user_id: str,
         session_id: str | None,
         user_message: str,
+        checkpoint: CheckpointWriter | None = None,
     ) -> dict[str, Any]:
         tools_available = bool(agent.tools)
         strategy = self.meta_controller.choose_strategy(
             user_message=user_message,
             tools_available=tools_available,
         )
+        self._emit_checkpoint(
+            checkpoint,
+            stage="strategy_selected",
+            message=f"Strategy selected: {strategy}",
+            strategy=strategy,
+            tools_available=tools_available,
+        )
         plan = self.planner.create_plan(task=user_message, strategy=strategy)
+        self._emit_checkpoint(
+            checkpoint,
+            stage="plan_created",
+            message=f"Plan created with {len(plan)} steps.",
+            plan_steps=[step.__dict__ for step in plan],
+        )
 
         self.memory_manager.add_interaction(
             user_id=user_id,
@@ -58,6 +74,15 @@ class TaskExecutor:
             query=user_message,
             session_id=session_id,
         )
+        self._emit_checkpoint(
+            checkpoint,
+            stage="memory_loaded",
+            message="Memory context loaded.",
+            working_count=len(memory_context.get("working", [])),
+            episodic_count=len(memory_context.get("episodic", [])),
+            semantic_count=len(memory_context.get("semantic", [])),
+            profile_count=len(memory_context.get("profile", [])),
+        )
 
         messages = self._build_messages(
             agent=agent,
@@ -67,12 +92,27 @@ class TaskExecutor:
         )
 
         tool_events: list[dict[str, Any]] = []
+        self._emit_checkpoint(
+            checkpoint,
+            stage="reasoning_started",
+            message="LLM reasoning started.",
+            tools_allowed=agent.tools,
+        )
         response_text, provider_used, model_used = self._reason_with_optional_tools(
             messages=messages,
             agent=agent,
             tool_events=tool_events,
             user_id=user_id,
             session_id=session_id,
+            checkpoint=checkpoint,
+        )
+        self._emit_checkpoint(
+            checkpoint,
+            stage="reasoning_completed",
+            message="LLM reasoning completed.",
+            provider=provider_used,
+            model=model_used,
+            tool_events_count=len(tool_events),
         )
 
         self.memory_manager.add_interaction(
@@ -89,6 +129,11 @@ class TaskExecutor:
                 "agent_id": agent.id,
                 "kind": "response",
             },
+        )
+        self._emit_checkpoint(
+            checkpoint,
+            stage="memory_updated",
+            message="Assistant response stored in memory layers.",
         )
 
         return {
@@ -135,6 +180,7 @@ class TaskExecutor:
         tool_events: list[dict[str, Any]],
         user_id: str,
         session_id: str | None,
+        checkpoint: CheckpointWriter | None = None,
     ) -> tuple[str, str, str]:
         allowed_tools = [name for name in agent.tools if self.tool_registry.get(name) is not None]
 
@@ -154,6 +200,14 @@ class TaskExecutor:
         response_text = str(first.get("content", "")).strip()
         provider_used = str(first.get("provider", "unknown"))
         model_used = str(first.get("model", agent.model or "unknown"))
+        self._emit_checkpoint(
+            checkpoint,
+            stage="llm_response",
+            message="Received model response.",
+            provider=provider_used,
+            model=model_used,
+            preview=response_text[:240],
+        )
 
         if not allowed_tools:
             return response_text, provider_used, model_used
@@ -161,10 +215,23 @@ class TaskExecutor:
         for attempt in range(1, 3):
             parsed = self.tool_executor.parse_tool_call(response_text)
             if not parsed:
+                self._emit_checkpoint(
+                    checkpoint,
+                    stage="tool_loop_done",
+                    message="No tool call requested by model.",
+                    attempt=attempt,
+                )
                 break
 
             tool_name = str(parsed["name"])
             arguments = parsed["arguments"]
+            self._emit_checkpoint(
+                checkpoint,
+                stage="tool_call_started",
+                message=f"Tool call started: {tool_name}",
+                tool=tool_name,
+                attempt=attempt,
+            )
             event: dict[str, Any] = {
                 "attempt": attempt,
                 "tool": tool_name,
@@ -175,6 +242,13 @@ class TaskExecutor:
                 event["status"] = "blocked"
                 event["error"] = "Tool is not allowed for this agent"
                 tool_events.append(event)
+                self._emit_checkpoint(
+                    checkpoint,
+                    stage="tool_call_blocked",
+                    message=f"Tool is not allowed: {tool_name}",
+                    tool=tool_name,
+                    attempt=attempt,
+                )
                 break
 
             started_at = time.perf_counter()
@@ -189,6 +263,13 @@ class TaskExecutor:
                 event["result"] = tool_result.get("result")
                 if "permission_prompt" in tool_result:
                     event["permission_prompt"] = tool_result["permission_prompt"]
+                self._emit_checkpoint(
+                    checkpoint,
+                    stage="tool_call_succeeded",
+                    message=f"Tool executed successfully: {tool_name}",
+                    tool=tool_name,
+                    attempt=attempt,
+                )
             except PermissionRequiredError as exc:
                 tool_result = {
                     "tool": tool_name,
@@ -198,6 +279,14 @@ class TaskExecutor:
                 event["status"] = "permission_required"
                 event["error"] = str(exc)
                 event["permission_prompt_id"] = exc.prompt_id
+                self._emit_checkpoint(
+                    checkpoint,
+                    stage="tool_call_permission_required",
+                    message=f"Permission required for tool: {tool_name}",
+                    tool=tool_name,
+                    attempt=attempt,
+                    permission_prompt_id=exc.prompt_id,
+                )
             except ToolExecutionError as exc:
                 tool_result = {
                     "tool": tool_name,
@@ -205,9 +294,26 @@ class TaskExecutor:
                 }
                 event["status"] = "failed"
                 event["error"] = str(exc)
+                self._emit_checkpoint(
+                    checkpoint,
+                    stage="tool_call_failed",
+                    message=f"Tool execution failed: {tool_name}",
+                    tool=tool_name,
+                    attempt=attempt,
+                    error=str(exc),
+                )
 
             event["duration_ms"] = round((time.perf_counter() - started_at) * 1000.0, 2)
             tool_events.append(event)
+            self._emit_checkpoint(
+                checkpoint,
+                stage="tool_call_finished",
+                message=f"Tool call finished: {tool_name}",
+                tool=tool_name,
+                attempt=attempt,
+                status=event.get("status"),
+                duration_ms=event["duration_ms"],
+            )
 
             reasoning_messages.append({"role": "assistant", "content": response_text})
             reasoning_messages.append(
@@ -231,6 +337,15 @@ class TaskExecutor:
             response_text = str(followup.get("content", "")).strip()
             provider_used = str(followup.get("provider", provider_used))
             model_used = str(followup.get("model", model_used))
+            self._emit_checkpoint(
+                checkpoint,
+                stage="llm_followup_response",
+                message="Received follow-up model response after tool output.",
+                provider=provider_used,
+                model=model_used,
+                attempt=attempt,
+                preview=response_text[:240],
+            )
 
         return response_text, provider_used, model_used
 
@@ -249,3 +364,23 @@ class TaskExecutor:
             "semantic_memory": semantic,
         }
         return "Memory context: " + json.dumps(payload, ensure_ascii=False)
+
+    @staticmethod
+    def _emit_checkpoint(
+        checkpoint: CheckpointWriter | None,
+        *,
+        stage: str,
+        message: str,
+        **extra: Any,
+    ) -> None:
+        if checkpoint is None:
+            return
+        payload: dict[str, Any] = {
+            "stage": stage,
+            "message": message,
+        }
+        payload.update(extra)
+        try:
+            checkpoint(payload)
+        except Exception:
+            return

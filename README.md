@@ -425,6 +425,12 @@ curl -X POST http://localhost:8000/agents/<agent_id>/runs \
 curl "http://localhost:8000/agents/<agent_id>/runs?user_id=user-001&limit=20"
 ```
 
+Filter by status:
+
+```bash
+curl "http://localhost:8000/agents/<agent_id>/runs?user_id=user-001&status=running&limit=20"
+```
+
 ### Work Mode: get run by id
 
 ```bash
@@ -469,9 +475,18 @@ SQLite tables added in migration `v2`:
 Implemented now:
 - async run queue for agents (`queued` -> `running` -> `succeeded|failed|canceled`)
 - persistent run state in SQLite (`agent_runs`)
-- run checkpoints (stage history)
+- run checkpoints (stage history) including task-level phases:
+  - `strategy_selected`, `plan_created`, `memory_loaded`
+  - `reasoning_started`, `llm_response`, `tool_call_*`, `llm_followup_response`
+  - `reasoning_completed`, `memory_updated`
 - automatic retry until `max_attempts`
 - manual cancel and resume APIs
+- status validation for run filters in API (`queued|running|succeeded|failed|canceled`)
+- desktop Agents tab run monitor:
+  - queue run from message input
+  - live polling until terminal state
+  - cancel/resume actions
+  - checkpoint timeline and result preview
 
 Run status values:
 - `queued`
