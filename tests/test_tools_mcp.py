@@ -99,6 +99,28 @@ class ToolsMCPTests(unittest.TestCase):
             self.assertEqual(call["tool"], "mcp_mcp_local_echo")
             self.assertEqual(call["result"]["result"]["text"], "hello")
 
+    def test_permission_ids_batch_can_unlock_execution(self) -> None:
+        registry = ToolRegistry()
+        registry.load_builtin_tools()
+        executor = ToolExecutor(
+            registry,
+            approval_enforcement_mode="strict",
+        )
+
+        with self.assertRaises(PermissionRequiredError) as ctx:
+            executor.execute("python_exec", {"code": "print('batch')"})
+        prompt_id = ctx.exception.prompt_id
+        executor.approve_permission_prompt(prompt_id)
+
+        result = executor.execute(
+            "python_exec",
+            {"code": "print('batch')"},
+            permission_ids=[prompt_id],
+        )
+        self.assertEqual(result["tool"], "python_exec")
+        self.assertEqual(result["result"]["returncode"], 0)
+        self.assertIn("batch", result["result"]["stdout"])
+
 
 if __name__ == "__main__":
     unittest.main()

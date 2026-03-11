@@ -201,6 +201,7 @@ struct APIChatCompletionsRequest: Encodable {
     let temperature: Double
     let maxTokens: Int
     let tools: [APIChatToolDefinition]?
+    let permissionIds: [String]?
 
     private enum CodingKeys: String, CodingKey {
         case model
@@ -210,6 +211,25 @@ struct APIChatCompletionsRequest: Encodable {
         case temperature
         case maxTokens = "max_tokens"
         case tools
+        case permissionIds = "permission_ids"
+    }
+}
+
+struct APIChatToolEvent: Decodable {
+    let attempt: Int?
+    let tool: String?
+    let status: String?
+    let durationMs: Double?
+    let error: String?
+    let permissionPromptId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case attempt
+        case tool
+        case status
+        case durationMs = "duration_ms"
+        case error
+        case permissionPromptId = "permission_prompt_id"
     }
 }
 
@@ -235,6 +255,15 @@ struct APIChatCompletionsResponse: Decodable {
     let model: String
     let provider: String?
     let choices: [Choice]
+    let toolEvents: [APIChatToolEvent]?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case model
+        case provider
+        case choices
+        case toolEvents = "tool_events"
+    }
 }
 
 struct APIChatChunkResponse: Decodable {

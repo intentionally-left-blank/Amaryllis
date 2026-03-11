@@ -40,6 +40,7 @@ class ChatCompletionsRequest(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int = Field(default=512, ge=1, le=8192)
     tools: list[ToolDefinition] | None = None
+    permission_ids: list[str] = Field(default_factory=list)
 
 
 def _normalize_messages(messages: list[ChatMessage]) -> list[dict[str, Any]]:
@@ -99,44 +100,62 @@ def _chat_with_tool_loop(
     provider_used = str(first.get("provider", payload.provider or "unknown"))
     model_used = str(first.get("model", payload.model or "unknown"))
     tool_events: list[dict[str, Any]] = []
+    permission_ids = [item.strip() for item in payload.permission_ids if item and item.strip()]
 
     if not tool_names:
         return response_text, provider_used, model_used, tool_events
 
-    for _ in range(2):
+    for attempt in range(1, 3):
         parsed = services.tool_executor.parse_tool_call(response_text)
         if not parsed:
             break
 
         tool_name = str(parsed["name"])
+        arguments = parsed["arguments"]
+        event: dict[str, Any] = {
+            "attempt": attempt,
+            "tool": tool_name,
+            "arguments": arguments,
+            "status": "started",
+        }
         if tool_name not in tool_names:
-            tool_events.append(
-                {
-                    "tool": tool_name,
-                    "error": "Tool is not allowed",
-                }
-            )
+            event["status"] = "blocked"
+            event["error"] = "Tool is not allowed"
+            tool_events.append(event)
             break
 
+        started_at = time.perf_counter()
         try:
             tool_result = services.tool_executor.execute(
                 tool_name,
-                parsed["arguments"],
+                arguments,
                 request_id=str(getattr(request.state, "request_id", "")),
+                permission_ids=permission_ids,
             )
+            event["status"] = "succeeded"
+            event["result"] = tool_result.get("result")
+            if "permission_prompt" in tool_result:
+                event["permission_prompt"] = tool_result["permission_prompt"]
         except PermissionRequiredError as exc:
             tool_result = {
                 "tool": tool_name,
                 "error": str(exc),
                 "permission_prompt_id": exc.prompt_id,
             }
+            event["status"] = "permission_required"
+            event["error"] = str(exc)
+            event["permission_prompt_id"] = exc.prompt_id
         except Exception as exc:
             tool_result = {
                 "tool": tool_name,
                 "error": str(exc),
             }
+            event["status"] = "failed"
+            event["error"] = str(exc)
 
-        tool_events.append(tool_result)
+        event["duration_ms"] = round((time.perf_counter() - started_at) * 1000.0, 2)
+
+        tool_events.append(event)
 
         reasoning_messages.append({"role": "assistant", "content": response_text})
         reasoning_messages.append(

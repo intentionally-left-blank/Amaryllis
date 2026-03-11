@@ -331,6 +331,41 @@ curl -N -X POST http://localhost:8000/v1/chat/completions \
   }'
 ```
 
+Tool-call loop mode (non-stream) with permission resume:
+
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+    "messages": [{"role": "user", "content": "List files in my home folder"}],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "filesystem",
+          "description": "Read/write files",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "action": {"type": "string"},
+              "path": {"type": "string"}
+            },
+            "required": ["action", "path"]
+          }
+        }
+      }
+    ],
+    "permission_ids": [],
+    "stream": false
+  }'
+```
+
+Notes:
+- non-stream responses include `tool_events` trace with status and duration
+- when a tool requires approval, `tool_events` includes `permission_prompt_id`
+- after approving prompt(s), resend with `permission_ids` to continue tool execution
+
 ## Agent API
 
 ### Create agent
@@ -444,11 +479,13 @@ Run status values:
 Implemented now:
 - tool isolation policy (blocked tools + risk/approval metadata)
 - permission prompts for risky tools (`pending -> approved/denied -> consumed`)
+- batch permission handoff in chat API via `permission_ids`
 - MCP server endpoints:
   - `GET /mcp/tools`
   - `POST /mcp/tools/{tool_name}/invoke`
 - MCP client aggregation from remote MCP endpoints into local tool registry
 - signed plugin manifest verification (HMAC-SHA256 when signing key is configured)
+- structured tool execution trace (`status`, `duration_ms`, `permission_prompt_id`) in chat responses
 
 ### Tooling API
 

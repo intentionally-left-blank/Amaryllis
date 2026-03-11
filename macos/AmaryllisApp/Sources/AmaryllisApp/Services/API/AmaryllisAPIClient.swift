@@ -92,6 +92,7 @@ final class AmaryllisAPIClient {
         provider: String?,
         messages: [APIChatMessage],
         tools: [APIChatToolDefinition]? = nil,
+        permissionIds: [String]? = nil,
         temperature: Double = 0.7,
         maxTokens: Int = 512
     ) async throws -> APIChatCompletionsResponse {
@@ -102,7 +103,8 @@ final class AmaryllisAPIClient {
             stream: false,
             temperature: temperature,
             maxTokens: maxTokens,
-            tools: tools
+            tools: tools,
+            permissionIds: permissionIds
         )
         let body = try jsonEncoder.encode(payload)
         return try await request(path: "/v1/chat/completions", method: "POST", body: body)
@@ -126,7 +128,8 @@ final class AmaryllisAPIClient {
                         stream: true,
                         temperature: temperature,
                         maxTokens: maxTokens,
-                        tools: tools
+                        tools: tools,
+                        permissionIds: nil
                     )
                     let body = try jsonEncoder.encode(payload)
                     let request = try makeURLRequest(path: "/v1/chat/completions", method: "POST", body: body)

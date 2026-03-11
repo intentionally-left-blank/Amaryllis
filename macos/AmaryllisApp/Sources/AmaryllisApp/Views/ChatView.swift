@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct ChatView: View {
@@ -7,6 +8,7 @@ struct ChatView: View {
     @State private var isStreaming: Bool = true
     @State private var selectedModelID: String = ""
     @State private var selectedProvider: String = ""
+    @State private var toolsEnabled: Bool = true
     @State private var isSending: Bool = false
 
     private let systemPrompt = "You are Amaryllis, a concise and practical local AI assistant."
@@ -75,6 +77,7 @@ struct ChatView: View {
             if selectedProvider.isEmpty {
                 selectedProvider = appState.selectedProvider ?? ""
             }
+            Task { await appState.refreshToolingState() }
         }
         .onChange(of: appState.selectedModel ?? "") { _ in
             if selectedModelID.isEmpty {
@@ -163,6 +166,11 @@ struct ChatView: View {
                 .toggleStyle(.switch)
                 .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
                 .frame(width: 120)
+
+            Toggle("Tools", isOn: $toolsEnabled)
+                .toggleStyle(.switch)
+                .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
+                .frame(width: 110)
         }
         .amaryllisCard()
     }
@@ -205,6 +213,19 @@ struct ChatView: View {
         return catalog.providers.keys.sorted()
     }
 
+    private var chatTools: [APIChatToolDefinition] {
+        appState.availableTools.map { tool in
+            APIChatToolDefinition(
+                type: "function",
+                function: APIChatToolFunction(
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: tool.inputSchema
+                )
+            )
+        }
+    }
+
     private func send() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending else { return }
@@ -229,10 +250,12 @@ struct ChatView: View {
 
         let provider = selectedProvider.isEmpty ? nil : selectedProvider
         let model = selectedModelID.isEmpty ? nil : selectedModelID
+        let tools = toolsEnabled ? chatTools : []
+        let shouldUseStreaming = isStreaming && tools.isEmpty
 
         Task {
             do {
-                if isStreaming {
+                if shouldUseStreaming {
                     var combined = ""
                     let stream = appState.apiClient.streamChatCompletions(
                         model: model,
@@ -258,15 +281,62 @@ struct ChatView: View {
                         }
                     }
                 } else {
-                    let response = try await appState.apiClient.chatCompletions(
+                    if isStreaming && !tools.isEmpty {
+                        await MainActor.run {
+                            appState.lastError = "Streaming with tools is disabled; using non-stream mode for tool loop."
+                        }
+                    }
+
+                    var response = try await appState.apiClient.chatCompletions(
                         model: model,
                         provider: provider,
                         messages: payload,
-                        tools: nil
+                        tools: tools.isEmpty ? nil : tools
                     )
-                    let content = response.choices.first?.message.content ?? ""
+
+                    let pendingPromptIDs = pendingPermissionPromptIDs(from: response.toolEvents)
+                    var content = response.choices.first?.message.content ?? ""
+                    let firstTrace = renderToolTrace(response.toolEvents)
+                    if !firstTrace.isEmpty {
+                        content += "\n\n\(firstTrace)"
+                    }
+
                     await MainActor.run {
                         appState.updateCurrentChatMessage(id: assistantID, content: content)
+                    }
+
+                    if !pendingPromptIDs.isEmpty {
+                        await MainActor.run {
+                            appState.lastError = "Tool permission required. Approve in Settings -> Tools & MCP. Waiting for approval..."
+                        }
+                        let approvalState = try await waitForPromptDecision(promptIDs: pendingPromptIDs, timeoutSec: 120)
+                        if approvalState == .approved {
+                            response = try await appState.apiClient.chatCompletions(
+                                model: model,
+                                provider: provider,
+                                messages: payload,
+                                tools: tools.isEmpty ? nil : tools,
+                                permissionIds: pendingPromptIDs
+                            )
+
+                            var retriedContent = response.choices.first?.message.content ?? content
+                            let retryTrace = renderToolTrace(response.toolEvents)
+                            if !retryTrace.isEmpty {
+                                retriedContent += "\n\n\(retryTrace)"
+                            }
+                            await MainActor.run {
+                                appState.updateCurrentChatMessage(id: assistantID, content: retriedContent)
+                                appState.lastError = nil
+                            }
+                        } else if approvalState == .denied {
+                            await MainActor.run {
+                                appState.lastError = "Tool permission denied."
+                            }
+                        } else {
+                            await MainActor.run {
+                                appState.lastError = "Tool permission timeout. You can resend after approving."
+                            }
+                        }
                     }
                 }
 
@@ -282,5 +352,71 @@ struct ChatView: View {
                 isSending = false
             }
         }
+    }
+
+    private enum PromptDecision {
+        case approved
+        case denied
+        case timeout
+    }
+
+    private func pendingPermissionPromptIDs(from events: [APIChatToolEvent]?) -> [String] {
+        guard let events else { return [] }
+        var ids: [String] = []
+        for event in events {
+            if event.status?.lowercased() == "permission_required",
+               let promptID = event.permissionPromptId,
+               !promptID.isEmpty {
+                ids.append(promptID)
+            }
+        }
+        return Array(Set(ids))
+    }
+
+    private func waitForPromptDecision(promptIDs: [String], timeoutSec: Int) async throws -> PromptDecision {
+        if promptIDs.isEmpty {
+            return .approved
+        }
+
+        let checks = max(1, timeoutSec / 2)
+        for _ in 0..<checks {
+            try await Task.sleep(nanoseconds: 2_000_000_000)
+            let snapshot = try await appState.apiClient.listPermissionPrompts(status: nil, limit: 500)
+            var statusByID: [String: String] = [:]
+            for item in snapshot.items {
+                statusByID[item.id] = item.status.lowercased()
+            }
+
+            let statuses = promptIDs.compactMap { statusByID[$0] }
+            if statuses.contains("denied") {
+                return .denied
+            }
+            if statuses.count == promptIDs.count,
+               statuses.allSatisfy({ $0 == "approved" || $0 == "consumed" }) {
+                return .approved
+            }
+        }
+
+        return .timeout
+    }
+
+    private func renderToolTrace(_ events: [APIChatToolEvent]?) -> String {
+        guard let events, !events.isEmpty else { return "" }
+
+        var lines = ["Tool trace:"]
+        for event in events {
+            let tool = event.tool ?? "-"
+            let status = event.status ?? "-"
+            let duration = event.durationMs.map { String(format: "%.2fms", $0) } ?? "-"
+            var line = "- \(tool): \(status) (\(duration))"
+            if let promptID = event.permissionPromptId, !promptID.isEmpty {
+                line += " prompt_id=\(promptID)"
+            }
+            if let error = event.error, !error.isEmpty {
+                line += " error=\(error)"
+            }
+            lines.append(line)
+        }
+        return lines.joined(separator: "\n")
     }
 }

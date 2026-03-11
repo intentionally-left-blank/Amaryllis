@@ -43,6 +43,7 @@ class ToolExecutor:
         user_id: str | None = None,
         session_id: str | None = None,
         permission_id: str | None = None,
+        permission_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         tool = self.registry.get(name)
         if tool is None:
@@ -61,6 +62,17 @@ class ToolExecutor:
                     tool_name=name,
                     arguments=arguments,
                 )
+            if not approved and permission_ids:
+                for candidate in permission_ids:
+                    if not candidate:
+                        continue
+                    approved = self.permission_manager.consume_if_approved(
+                        candidate,
+                        tool_name=name,
+                        arguments=arguments,
+                    )
+                    if approved:
+                        break
             if not approved:
                 permission_prompt = self.permission_manager.request(
                     tool_name=name,
