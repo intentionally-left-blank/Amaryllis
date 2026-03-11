@@ -8,7 +8,7 @@ from controller.meta_controller import MetaController
 from memory.memory_manager import MemoryManager
 from models.model_manager import ModelManager
 from planner.planner import Planner
-from tools.tool_executor import ToolExecutionError, ToolExecutor
+from tools.tool_executor import PermissionRequiredError, ToolExecutionError, ToolExecutor
 from tools.tool_registry import ToolRegistry
 
 
@@ -70,6 +70,8 @@ class TaskExecutor:
             messages=messages,
             agent=agent,
             tool_events=tool_events,
+            user_id=user_id,
+            session_id=session_id,
         )
 
         self.memory_manager.add_interaction(
@@ -130,6 +132,8 @@ class TaskExecutor:
         messages: list[dict[str, Any]],
         agent: Agent,
         tool_events: list[dict[str, Any]],
+        user_id: str,
+        session_id: str | None,
     ) -> tuple[str, str, str]:
         allowed_tools = [name for name in agent.tools if self.tool_registry.get(name) is not None]
 
@@ -172,7 +176,16 @@ class TaskExecutor:
                 tool_result = self.tool_executor.execute(
                     name=tool_name,
                     arguments=parsed["arguments"],
+                    user_id=user_id,
+                    session_id=session_id,
                 )
+                tool_events.append(tool_result)
+            except PermissionRequiredError as exc:
+                tool_result = {
+                    "tool": tool_name,
+                    "error": str(exc),
+                    "permission_prompt_id": exc.prompt_id,
+                }
                 tool_events.append(tool_result)
             except ToolExecutionError as exc:
                 tool_result = {

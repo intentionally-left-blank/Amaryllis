@@ -23,6 +23,11 @@ class NotFoundError(AmaryllisError):
         super().__init__(message=message, error_type="not_found", status_code=404)
 
 
+class PermissionDeniedError(AmaryllisError):
+    def __init__(self, message: str) -> None:
+        super().__init__(message=message, error_type="permission_denied", status_code=403)
+
+
 class ProviderError(AmaryllisError):
     def __init__(self, message: str) -> None:
         super().__init__(message=message, error_type="provider_error", status_code=502)

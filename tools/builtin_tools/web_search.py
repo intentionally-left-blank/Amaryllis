@@ -48,4 +48,8 @@ def register(registry: ToolRegistry) -> None:
             "required": ["query"],
         },
         handler=_web_search_handler,
+        source="builtin",
+        risk_level="low",
+        approval_mode="none",
+        isolation="network_readonly",
     )

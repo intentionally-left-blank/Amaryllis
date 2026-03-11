@@ -16,6 +16,7 @@ from api.agent_api import router as agent_router
 from api.chat_api import router as chat_router
 from api.memory_api import router as memory_router
 from api.model_api import router as model_router
+from api.tool_api import router as tool_router
 from controller.meta_controller import MetaController
 from memory.episodic_memory import EpisodicMemory
 from memory.memory_manager import MemoryManager
@@ -30,6 +31,9 @@ from runtime.telemetry import LocalTelemetry
 from storage.database import Database
 from storage.vector_store import VectorStore
 from tasks.task_executor import TaskExecutor
+from tools.mcp_client_registry import MCPClientRegistry
+from tools.permission_manager import ToolPermissionManager
+from tools.policy import ToolIsolationPolicy
 from tools.tool_executor import ToolExecutor
 from tools.tool_registry import ToolRegistry
 
@@ -78,11 +82,25 @@ def create_services() -> ServiceContainer:
         telemetry=telemetry,
     )
 
-    tool_registry = ToolRegistry()
+    tool_registry = ToolRegistry(plugin_signing_key=config.plugin_signing_key)
     tool_registry.load_builtin_tools()
     tool_registry.discover_plugins(config.plugins_dir)
+    if config.mcp_endpoints:
+        mcp_registry = MCPClientRegistry(
+            endpoints=list(config.mcp_endpoints),
+            timeout_sec=config.mcp_timeout_sec,
+        )
+        discovered = mcp_registry.register_remote_tools(tool_registry)
+        logger.info("mcp_tools_discovered count=%s", discovered)
 
-    tool_executor = ToolExecutor(tool_registry)
+    tool_permission_manager = ToolPermissionManager()
+    tool_policy = ToolIsolationPolicy(blocked_tools=list(config.blocked_tools))
+    tool_executor = ToolExecutor(
+        tool_registry,
+        policy=tool_policy,
+        permission_manager=tool_permission_manager,
+        approval_enforcement_mode=config.tool_approval_enforcement,
+    )
 
     model_manager = ModelManager(config=config, database=database)
 
@@ -287,6 +305,7 @@ def create_app() -> FastAPI:
     app.include_router(model_router)
     app.include_router(agent_router)
     app.include_router(memory_router)
+    app.include_router(tool_router)
 
     @app.get("/health")
     def health(request: Request) -> dict[str, Any]:

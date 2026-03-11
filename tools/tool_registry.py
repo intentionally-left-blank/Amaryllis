@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import importlib.util
 import json
 import logging
@@ -14,12 +16,18 @@ class ToolDefinition:
     description: str
     input_schema: dict[str, Any]
     handler: Callable[[dict[str, Any]], Any]
+    source: str = "local"
+    risk_level: str = "low"
+    approval_mode: str = "none"
+    approval_predicate: Callable[[dict[str, Any]], bool] | None = None
+    isolation: str = "restricted"
 
 
 class ToolRegistry:
-    def __init__(self) -> None:
+    def __init__(self, plugin_signing_key: str | None = None) -> None:
         self._tools: dict[str, ToolDefinition] = {}
         self.logger = logging.getLogger("amaryllis.tools.registry")
+        self.plugin_signing_key = (plugin_signing_key or "").strip() or None
 
     def register(
         self,
@@ -27,12 +35,22 @@ class ToolRegistry:
         description: str,
         input_schema: dict[str, Any],
         handler: Callable[[dict[str, Any]], Any],
+        source: str = "local",
+        risk_level: str = "low",
+        approval_mode: str = "none",
+        approval_predicate: Callable[[dict[str, Any]], bool] | None = None,
+        isolation: str = "restricted",
     ) -> None:
         self._tools[name] = ToolDefinition(
             name=name,
             description=description,
             input_schema=input_schema,
             handler=handler,
+            source=source,
+            risk_level=risk_level,
+            approval_mode=approval_mode,
+            approval_predicate=approval_predicate,
+            isolation=isolation,
         )
 
     def get(self, name: str) -> ToolDefinition | None:
@@ -91,6 +109,13 @@ class ToolRegistry:
                 self.logger.error("plugin_manifest_invalid plugin=%s error=%s", item.name, exc)
                 continue
 
+            if not isinstance(manifest, dict):
+                self.logger.error("plugin_manifest_invalid plugin=%s error=manifest_must_be_object", item.name)
+                continue
+
+            if not self._verify_manifest_signature(plugin_name=item.name, manifest=manifest):
+                continue
+
             try:
                 spec = importlib.util.spec_from_file_location(f"amaryllis_plugin_{item.name}", tool_path)
                 if spec is None or spec.loader is None:
@@ -111,3 +136,26 @@ class ToolRegistry:
                 self.logger.info("plugin_loaded plugin=%s", item.name)
             except Exception as exc:
                 self.logger.error("plugin_register_failed plugin=%s error=%s", item.name, exc)
+
+    def _verify_manifest_signature(self, plugin_name: str, manifest: dict[str, Any]) -> bool:
+        signature = manifest.get("signature")
+        if self.plugin_signing_key is None:
+            if isinstance(signature, str) and signature.strip():
+                self.logger.info("plugin_signature_present plugin=%s verification=skipped_no_key", plugin_name)
+            return True
+
+        if not isinstance(signature, str) or not signature.strip():
+            self.logger.error("plugin_signature_missing plugin=%s", plugin_name)
+            return False
+
+        payload = {key: value for key, value in manifest.items() if key != "signature"}
+        canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        expected = hmac.new(
+            self.plugin_signing_key.encode("utf-8"),
+            canonical.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(signature.strip().lower(), expected):
+            self.logger.error("plugin_signature_invalid plugin=%s", plugin_name)
+            return False
+        return True

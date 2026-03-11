@@ -29,6 +29,11 @@ class AppConfig:
     openrouter_api_key: str | None
     run_workers: int
     run_max_attempts: int
+    tool_approval_enforcement: str
+    blocked_tools: tuple[str, ...]
+    plugin_signing_key: str | None
+    mcp_endpoints: tuple[str, ...]
+    mcp_timeout_sec: float
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -83,6 +88,14 @@ class AppConfig:
 
         fallback_raw = os.getenv("AMARYLLIS_OLLAMA_FALLBACK", "true").strip().lower()
         enable_ollama_fallback = fallback_raw in {"1", "true", "yes", "on"}
+        blocked_tools = tuple(_csv_items(os.getenv("AMARYLLIS_BLOCKED_TOOLS", "")))
+        mcp_endpoints = tuple(_csv_items(os.getenv("AMARYLLIS_MCP_ENDPOINTS", "")))
+        tool_approval_enforcement = os.getenv(
+            "AMARYLLIS_TOOL_APPROVAL_ENFORCEMENT",
+            "prompt_and_allow",
+        ).strip().lower()
+        if tool_approval_enforcement not in {"strict", "prompt_and_allow"}:
+            tool_approval_enforcement = "prompt_and_allow"
 
         return cls(
             app_name="Amaryllis",
@@ -112,6 +125,11 @@ class AppConfig:
             openrouter_api_key=(os.getenv("AMARYLLIS_OPENROUTER_API_KEY") or "").strip() or None,
             run_workers=max(1, int(os.getenv("AMARYLLIS_RUN_WORKERS", "2"))),
             run_max_attempts=max(1, int(os.getenv("AMARYLLIS_RUN_MAX_ATTEMPTS", "2"))),
+            tool_approval_enforcement=tool_approval_enforcement,
+            blocked_tools=blocked_tools,
+            plugin_signing_key=(os.getenv("AMARYLLIS_PLUGIN_SIGNING_KEY") or "").strip() or None,
+            mcp_endpoints=mcp_endpoints,
+            mcp_timeout_sec=max(1.0, float(os.getenv("AMARYLLIS_MCP_TIMEOUT_SEC", "10"))),
         )
 
     def ensure_directories(self) -> None:
@@ -119,3 +137,7 @@ class AppConfig:
         self.models_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.plugins_dir.mkdir(parents=True, exist_ok=True)
+
+
+def _csv_items(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]

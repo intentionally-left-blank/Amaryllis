@@ -74,7 +74,8 @@ Local telemetry log:
 │   ├── agent_api.py
 │   ├── chat_api.py
 │   ├── memory_api.py
-│   └── model_api.py
+│   ├── model_api.py
+│   └── tool_api.py
 ├── controller
 │   └── meta_controller.py
 ├── memory
@@ -118,12 +119,16 @@ Local telemetry log:
 │   └── task_executor.py
 ├── tests
 │   ├── test_agent_run_manager.py
-│   └── test_memory_manager.py
+│   ├── test_memory_manager.py
+│   └── test_tools_mcp.py
 ├── tools
 │   ├── builtin_tools
 │   │   ├── filesystem.py
 │   │   ├── python_exec.py
 │   │   └── web_search.py
+│   ├── mcp_client_registry.py
+│   ├── permission_manager.py
+│   ├── policy.py
 │   ├── tool_executor.py
 │   └── tool_registry.py
 ├── LICENSE
@@ -434,6 +439,43 @@ Run status values:
 - `failed`
 - `canceled`
 
+## Tools + MCP Layer Foundation (Current)
+
+Implemented now:
+- tool isolation policy (blocked tools + risk/approval metadata)
+- permission prompts for risky tools (`pending -> approved/denied -> consumed`)
+- MCP server endpoints:
+  - `GET /mcp/tools`
+  - `POST /mcp/tools/{tool_name}/invoke`
+- MCP client aggregation from remote MCP endpoints into local tool registry
+- signed plugin manifest verification (HMAC-SHA256 when signing key is configured)
+
+### Tooling API
+
+List all tools with metadata:
+
+```bash
+curl "http://localhost:8000/tools"
+```
+
+List permission prompts:
+
+```bash
+curl "http://localhost:8000/tools/permissions/prompts?status=pending&limit=50"
+```
+
+Approve prompt:
+
+```bash
+curl -X POST "http://localhost:8000/tools/permissions/prompts/<prompt_id>/approve"
+```
+
+Deny prompt:
+
+```bash
+curl -X POST "http://localhost:8000/tools/permissions/prompts/<prompt_id>/deny"
+```
+
 ## Memory Debug API
 
 Get computed memory context for a user/session:
@@ -472,7 +514,7 @@ Plugins are auto-discovered from:
 
 ## Tests
 
-Run unit tests (memory + work mode runs):
+Run unit tests (memory + work mode + tools/MCP):
 
 ```bash
 ~/Library/Application\ Support/amaryllis/runtime-src/.venv/bin/python -m unittest discover -s tests -p "test_*.py" -v
@@ -497,6 +539,11 @@ Run unit tests (memory + work mode runs):
   - `AMARYLLIS_OPENROUTER_API_KEY=<your_key>`
   - `AMARYLLIS_RUN_WORKERS=2`
   - `AMARYLLIS_RUN_MAX_ATTEMPTS=2`
+  - `AMARYLLIS_TOOL_APPROVAL_ENFORCEMENT=prompt_and_allow|strict`
+  - `AMARYLLIS_BLOCKED_TOOLS=python_exec,filesystem`
+  - `AMARYLLIS_PLUGIN_SIGNING_KEY=<hmac_secret>`
+  - `AMARYLLIS_MCP_ENDPOINTS=http://localhost:9001,http://localhost:9002`
+  - `AMARYLLIS_MCP_TIMEOUT_SEC=10`
 
 ## Example Environment Variables
 
@@ -516,6 +563,11 @@ export AMARYLLIS_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 export AMARYLLIS_OPENROUTER_API_KEY=replace_me
 export AMARYLLIS_RUN_WORKERS=2
 export AMARYLLIS_RUN_MAX_ATTEMPTS=2
+export AMARYLLIS_TOOL_APPROVAL_ENFORCEMENT=prompt_and_allow
+export AMARYLLIS_BLOCKED_TOOLS=
+export AMARYLLIS_PLUGIN_SIGNING_KEY=
+export AMARYLLIS_MCP_ENDPOINTS=
+export AMARYLLIS_MCP_TIMEOUT_SEC=10
 ```
 
 ## License

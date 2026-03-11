@@ -57,4 +57,9 @@ def register(registry: ToolRegistry) -> None:
             "required": ["action", "path"],
         },
         handler=_filesystem_handler,
+        source="builtin",
+        risk_level="medium",
+        approval_mode="conditional",
+        approval_predicate=lambda args: str(args.get("action", "")).strip().lower() == "write",
+        isolation="workspace_only",
     )

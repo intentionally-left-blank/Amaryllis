@@ -41,4 +41,8 @@ def register(registry: ToolRegistry) -> None:
             "required": ["code"],
         },
         handler=_python_exec_handler,
+        source="builtin",
+        risk_level="high",
+        approval_mode="required",
+        isolation="sandboxed_subprocess",
     )

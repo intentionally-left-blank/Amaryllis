@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from runtime.errors import ProviderError, ValidationError
+from tools.tool_executor import PermissionRequiredError
 
 router = APIRouter(tags=["chat"])
 
@@ -118,7 +119,17 @@ def _chat_with_tool_loop(
             break
 
         try:
-            tool_result = services.tool_executor.execute(tool_name, parsed["arguments"])
+            tool_result = services.tool_executor.execute(
+                tool_name,
+                parsed["arguments"],
+                request_id=str(getattr(request.state, "request_id", "")),
+            )
+        except PermissionRequiredError as exc:
+            tool_result = {
+                "tool": tool_name,
+                "error": str(exc),
+                "permission_prompt_id": exc.prompt_id,
+            }
         except Exception as exc:
             tool_result = {
                 "tool": tool_name,
