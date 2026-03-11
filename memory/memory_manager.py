@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import hashlib
-import re
-from typing import Any
+import logging
+from typing import Any, Protocol
 
 from memory.episodic_memory import EpisodicMemory
+from memory.extraction_service import ExtractionService
 from memory.models import (
     EpisodicMemoryItem,
     ExtractionCandidate,
@@ -19,6 +20,11 @@ from memory.user_memory import UserMemory
 from memory.working_memory import WorkingMemory
 
 
+class TelemetrySink(Protocol):
+    def emit(self, event_type: str, payload: dict[str, Any]) -> None:
+        ...
+
+
 class MemoryManager:
     def __init__(
         self,
@@ -26,11 +32,16 @@ class MemoryManager:
         semantic: SemanticMemory,
         user_memory: UserMemory,
         working_memory: WorkingMemory | None = None,
+        telemetry: TelemetrySink | None = None,
+        extraction_service: ExtractionService | None = None,
     ) -> None:
+        self.logger = logging.getLogger("amaryllis.memory.manager")
         self.episodic = episodic
         self.semantic = semantic
         self.user_memory = user_memory
         self.working_memory = working_memory
+        self.telemetry = telemetry
+        self.extraction_service = extraction_service or ExtractionService()
 
         self._database = episodic.database
 
@@ -152,20 +163,36 @@ class MemoryManager:
                 SemanticMemoryItem(
                     text=str(item.get("text", "")),
                     score=float(item.get("score", 0.0)),
+                    vector_score=float(item.get("vector_score")) if item.get("vector_score") is not None else None,
+                    recency_score=float(item.get("recency_score")) if item.get("recency_score") is not None else None,
                     metadata=metadata if isinstance(metadata, dict) else {},
-                    kind=str((metadata or {}).get("kind", "fact")),
-                    confidence=float((metadata or {}).get("confidence", 0.8)),
-                    importance=float((metadata or {}).get("importance", 0.5)),
+                    kind=str(item.get("kind", (metadata or {}).get("kind", "fact"))),
+                    confidence=float(item.get("confidence", (metadata or {}).get("confidence", 0.8))),
+                    importance=float(item.get("importance", (metadata or {}).get("importance", 0.5))),
                 )
             )
 
         profile = [ProfileMemoryItem(**item) for item in profile_raw]
-        return MemoryContext(
+        context = MemoryContext(
             working=working,
             episodic=episodic,
             semantic=semantic,
             profile=profile,
         )
+        self._emit(
+            "memory_retrieval",
+            {
+                "user_id": user_id,
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "working_count": len(context.working),
+                "episodic_count": len(context.episodic),
+                "semantic_count": len(context.semantic),
+                "profile_count": len(context.profile),
+                "top_semantic_scores": [round(item.score, 4) for item in context.semantic[:3]],
+            },
+        )
+        return context
 
     # Backward-compatible wrappers used by current task executor/api.
     def add_interaction(
@@ -221,27 +248,76 @@ class MemoryManager:
             fingerprint=self._fingerprint(text),
         )
 
-    def set_user_preference(self, user_id: str, key: str, value: str) -> None:
-        previous = self.user_memory.get_all(user_id=user_id).get(key)
-        if previous is not None and previous != value:
-            self._database.add_conflict_record(
+    def set_user_preference(
+        self,
+        user_id: str,
+        key: str,
+        value: str,
+        confidence: float = 0.9,
+        importance: float = 0.8,
+        source: str = "user_preference",
+    ) -> str:
+        previous = self.user_memory.get(user_id=user_id, key=key)
+        if not previous:
+            self.user_memory.set(
+                user_id=user_id,
+                key=key,
+                value=value,
+                confidence=confidence,
+                importance=importance,
+                source=source,
+            )
+            return "created"
+
+        previous_value = str(previous.get("value", ""))
+        previous_confidence = float(previous.get("confidence", 0.5))
+        if previous_value == value:
+            # Refresh confidence/importance only when new signal is stronger.
+            if confidence > previous_confidence:
+                self.user_memory.set(
+                    user_id=user_id,
+                    key=key,
+                    value=value,
+                    confidence=confidence,
+                    importance=importance,
+                    source=source,
+                )
+            return "same_value"
+
+        if confidence + 0.05 < previous_confidence:
+            resolution = "kept_previous_higher_confidence"
+            self._record_conflict(
                 user_id=user_id,
                 layer="profile",
                 key=key,
-                previous_value=previous,
+                previous_value=previous_value,
                 incoming_value=value,
-                resolution="incoming_overwrites_previous",
-                confidence_prev=0.7,
-                confidence_new=0.9,
+                resolution=resolution,
+                confidence_prev=previous_confidence,
+                confidence_new=confidence,
             )
+            return resolution
+
         self.user_memory.set(
             user_id=user_id,
             key=key,
             value=value,
-            confidence=0.9,
-            importance=0.8,
-            source="user_preference",
+            confidence=confidence,
+            importance=importance,
+            source=source,
         )
+        resolution = "incoming_overwrites_previous"
+        self._record_conflict(
+            user_id=user_id,
+            layer="profile",
+            key=key,
+            previous_value=previous_value,
+            incoming_value=value,
+            resolution=resolution,
+            confidence_prev=previous_confidence,
+            confidence_new=confidence,
+        )
+        return resolution
 
     def get_context(
         self,
@@ -271,54 +347,41 @@ class MemoryManager:
     def list_conflicts(self, user_id: str, limit: int = 50) -> list[dict[str, Any]]:
         return self._database.list_conflict_records(user_id=user_id, limit=limit)
 
+    def debug_retrieval(self, user_id: str, query: str, top_k: int = 8) -> list[dict[str, Any]]:
+        matches = self.semantic.search(user_id=user_id, query=query, top_k=top_k)
+        result: list[dict[str, Any]] = []
+        for index, item in enumerate(matches, start=1):
+            metadata = item.get("metadata", {})
+            metadata_obj = metadata if isinstance(metadata, dict) else {}
+            result.append(
+                {
+                    "rank": index,
+                    "semantic_id": item.get("semantic_id"),
+                    "kind": str(item.get("kind", metadata_obj.get("kind", "fact"))),
+                    "text": str(item.get("text", "")),
+                    "score": float(item.get("score", 0.0)),
+                    "vector_score": float(item.get("vector_score", 0.0)),
+                    "recency_score": float(item.get("recency_score", 0.0)),
+                    "confidence": float(item.get("confidence", metadata_obj.get("confidence", 0.8))),
+                    "importance": float(item.get("importance", metadata_obj.get("importance", 0.5))),
+                    "created_at": item.get("created_at"),
+                    "metadata": metadata_obj,
+                }
+            )
+
+        self._emit(
+            "memory_retrieval_debug",
+            {
+                "user_id": user_id,
+                "query": query,
+                "top_k": top_k,
+                "result_count": len(result),
+            },
+        )
+        return result
+
     def extract_from_text(self, text: str) -> ExtractionResult:
-        normalized = text.strip()
-        lowered = normalized.lower()
-
-        facts: list[ExtractionCandidate] = []
-        preferences: list[ExtractionCandidate] = []
-        tasks: list[ExtractionCandidate] = []
-
-        name_match = re.search(r"\b(?:my name is|i am|i'm)\s+([A-Za-z][A-Za-z0-9_\- ]{1,40})", normalized, re.I)
-        if name_match:
-            value = name_match.group(1).strip()
-            facts.append(
-                ExtractionCandidate(
-                    kind="fact",
-                    text=f"user_name={value}",
-                    key="name",
-                    value=value,
-                    confidence=0.75,
-                )
-            )
-
-        prefer_match = re.search(r"\b(?:i prefer|my favorite|i like)\s+(.+)$", normalized, re.I)
-        if prefer_match:
-            value = prefer_match.group(1).strip(" .,!?:;")
-            preferences.append(
-                ExtractionCandidate(
-                    kind="preference",
-                    text=f"preference={value}",
-                    key="preference",
-                    value=value,
-                    confidence=0.7,
-                )
-            )
-
-        task_match = re.search(r"\b(?:todo:|i need to|remind me to)\s+(.+)$", lowered, re.I)
-        if task_match:
-            task_text = task_match.group(1).strip(" .,!?:;")
-            tasks.append(
-                ExtractionCandidate(
-                    kind="task",
-                    text=task_text,
-                    key=None,
-                    value=task_text,
-                    confidence=0.7,
-                )
-            )
-
-        return ExtractionResult(facts=facts, preferences=preferences, tasks=tasks)
+        return self.extraction_service.extract(text)
 
     def _apply_extraction(
         self,
@@ -339,27 +402,40 @@ class MemoryManager:
                 source_text=source_text,
                 extracted_json=payload,
             )
+            self._emit(
+                "memory_extract",
+                {
+                    "user_id": user_id,
+                    "agent_id": agent_id,
+                    "session_id": session_id,
+                    "source_role": source_role,
+                    "facts": len(extracted.facts),
+                    "preferences": len(extracted.preferences),
+                    "tasks": len(extracted.tasks),
+                },
+            )
 
         for fact in extracted.facts:
             if not fact.value:
                 continue
-            self.semantic.add(
+            self._upsert_fact_candidate(
                 user_id=user_id,
-                text=fact.text,
-                metadata={
-                    "agent_id": agent_id,
-                    "source_role": source_role,
-                },
-                kind="fact",
-                confidence=fact.confidence,
-                importance=0.7,
-                fingerprint=self._fingerprint(fact.text),
+                agent_id=agent_id,
+                source_role=source_role,
+                fact=fact,
             )
 
         for pref in extracted.preferences:
             if not pref.key or not pref.value:
                 continue
-            self.set_user_preference(user_id=user_id, key=pref.key, value=pref.value)
+            self.set_user_preference(
+                user_id=user_id,
+                key=pref.key,
+                value=pref.value,
+                confidence=pref.confidence,
+                importance=0.8,
+                source=f"extraction:{source_role}",
+            )
 
         if self.working_memory is not None and session_id:
             for index, task in enumerate(extracted.tasks):
@@ -368,12 +444,165 @@ class MemoryManager:
                 self.working_memory.put(
                     user_id=user_id,
                     session_id=session_id,
-                    key=f"task_{index}",
+                    key=f"task_{index}_{self._fingerprint(task.value)[:10]}",
                     value=task.value,
                     kind="task_hint",
                     confidence=task.confidence,
                     importance=0.8,
                 )
+
+    def _upsert_fact_candidate(
+        self,
+        user_id: str,
+        agent_id: str | None,
+        source_role: str,
+        fact: ExtractionCandidate,
+    ) -> int | None:
+        metadata = {
+            "agent_id": agent_id,
+            "source_role": source_role,
+            "fact_key": fact.key,
+            "fact_value": fact.value,
+        }
+
+        previous_entry = None
+        if fact.key:
+            previous_entry = self._latest_fact_by_key(user_id=user_id, fact_key=fact.key)
+
+        if previous_entry:
+            previous_value = self._fact_value_from_entry(previous_entry)
+            previous_confidence = float(previous_entry.get("confidence", 0.5))
+            new_confidence = float(fact.confidence)
+
+            if previous_value == fact.value:
+                if new_confidence <= previous_confidence:
+                    return int(previous_entry.get("id"))
+                semantic_id = self.semantic.add(
+                    user_id=user_id,
+                    text=fact.text,
+                    metadata={**metadata, "supersedes": previous_entry.get("id")},
+                    kind="fact",
+                    confidence=new_confidence,
+                    importance=0.7,
+                    fingerprint=self._fingerprint(fact.text),
+                )
+                self._database.deactivate_semantic_entry(
+                    semantic_id=int(previous_entry["id"]),
+                    superseded_by=semantic_id,
+                )
+                return semantic_id
+
+            if new_confidence + 0.05 < previous_confidence:
+                self._record_conflict(
+                    user_id=user_id,
+                    layer="semantic",
+                    key=fact.key,
+                    previous_value=previous_value,
+                    incoming_value=fact.value,
+                    resolution="kept_previous_higher_confidence",
+                    confidence_prev=previous_confidence,
+                    confidence_new=new_confidence,
+                )
+                return int(previous_entry.get("id"))
+
+            semantic_id = self.semantic.add(
+                user_id=user_id,
+                text=fact.text,
+                metadata={**metadata, "supersedes": previous_entry.get("id")},
+                kind="fact",
+                confidence=new_confidence,
+                importance=0.7,
+                fingerprint=self._fingerprint(fact.text),
+            )
+            self._database.deactivate_semantic_entry(
+                semantic_id=int(previous_entry["id"]),
+                superseded_by=semantic_id,
+            )
+            self._record_conflict(
+                user_id=user_id,
+                layer="semantic",
+                key=fact.key,
+                previous_value=previous_value,
+                incoming_value=fact.value,
+                resolution="incoming_overwrites_previous",
+                confidence_prev=previous_confidence,
+                confidence_new=new_confidence,
+            )
+            return semantic_id
+
+        return self.semantic.add(
+            user_id=user_id,
+            text=fact.text,
+            metadata=metadata,
+            kind="fact",
+            confidence=fact.confidence,
+            importance=0.7,
+            fingerprint=self._fingerprint(fact.text),
+        )
+
+    def _latest_fact_by_key(self, user_id: str, fact_key: str) -> dict[str, Any] | None:
+        items = self._database.list_semantic_entries(
+            user_id=user_id,
+            kind="fact",
+            active_only=True,
+            limit=200,
+        )
+        for item in items:
+            metadata = item.get("metadata", {})
+            if isinstance(metadata, dict) and str(metadata.get("fact_key", "")) == fact_key:
+                return item
+        return None
+
+    @staticmethod
+    def _fact_value_from_entry(entry: dict[str, Any]) -> str | None:
+        metadata = entry.get("metadata", {})
+        if isinstance(metadata, dict) and metadata.get("fact_value") is not None:
+            return str(metadata["fact_value"])
+        text = str(entry.get("text", ""))
+        if "=" in text:
+            return text.split("=", 1)[1].strip()
+        return text if text else None
+
+    def _record_conflict(
+        self,
+        user_id: str,
+        layer: str,
+        key: str,
+        previous_value: str | None,
+        incoming_value: str | None,
+        resolution: str,
+        confidence_prev: float | None,
+        confidence_new: float | None,
+    ) -> None:
+        self._database.add_conflict_record(
+            user_id=user_id,
+            layer=layer,
+            key=key,
+            previous_value=previous_value,
+            incoming_value=incoming_value,
+            resolution=resolution,
+            confidence_prev=confidence_prev,
+            confidence_new=confidence_new,
+        )
+        self._emit(
+            "memory_conflict",
+            {
+                "user_id": user_id,
+                "layer": layer,
+                "key": key,
+                "resolution": resolution,
+                "confidence_prev": confidence_prev,
+                "confidence_new": confidence_new,
+            },
+        )
+
+    def _emit(self, event_type: str, payload: dict[str, Any]) -> None:
+        if self.telemetry is None:
+            return
+        try:
+            self.telemetry.emit(event_type=event_type, payload=payload)
+        except Exception as exc:
+            self.logger.debug("memory_telemetry_failed event=%s error=%s", event_type, exc)
 
     @staticmethod
     def _fingerprint(text: str) -> str:

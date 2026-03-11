@@ -29,6 +29,8 @@ class EpisodicMemoryItem(BaseModel):
 class SemanticMemoryItem(BaseModel):
     text: str
     score: float
+    vector_score: float | None = None
+    recency_score: float | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     kind: str = "fact"
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)

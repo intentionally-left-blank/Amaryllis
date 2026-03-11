@@ -183,7 +183,80 @@ final class AmaryllisAPIClient {
         return try await request(path: path, method: "POST", body: body)
     }
 
+    func debugMemoryContext(
+        userId: String,
+        agentId: String?,
+        sessionId: String?,
+        query: String,
+        workingLimit: Int = 12,
+        episodicLimit: Int = 16,
+        semanticTopK: Int = 8
+    ) async throws -> String {
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "user_id", value: userId),
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "working_limit", value: String(workingLimit)),
+            URLQueryItem(name: "episodic_limit", value: String(episodicLimit)),
+            URLQueryItem(name: "semantic_top_k", value: String(semanticTopK))
+        ]
+        if let agentId, !agentId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            queryItems.append(URLQueryItem(name: "agent_id", value: agentId))
+        }
+        if let sessionId, !sessionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            queryItems.append(URLQueryItem(name: "session_id", value: sessionId))
+        }
+
+        let path = buildPath(path: "/debug/memory/context", queryItems: queryItems)
+        let data = try await requestData(path: path, method: "GET", body: nil)
+        return prettyJSON(from: data)
+    }
+
+    func debugMemoryRetrieval(
+        userId: String,
+        query: String,
+        topK: Int = 8
+    ) async throws -> String {
+        let queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "user_id", value: userId),
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "top_k", value: String(topK))
+        ]
+        let path = buildPath(path: "/debug/memory/retrieval", queryItems: queryItems)
+        let data = try await requestData(path: path, method: "GET", body: nil)
+        return prettyJSON(from: data)
+    }
+
+    func debugMemoryExtractions(userId: String, limit: Int = 20) async throws -> String {
+        let queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "user_id", value: userId),
+            URLQueryItem(name: "limit", value: String(limit))
+        ]
+        let path = buildPath(path: "/debug/memory/extractions", queryItems: queryItems)
+        let data = try await requestData(path: path, method: "GET", body: nil)
+        return prettyJSON(from: data)
+    }
+
+    func debugMemoryConflicts(userId: String, limit: Int = 20) async throws -> String {
+        let queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "user_id", value: userId),
+            URLQueryItem(name: "limit", value: String(limit))
+        ]
+        let path = buildPath(path: "/debug/memory/conflicts", queryItems: queryItems)
+        let data = try await requestData(path: path, method: "GET", body: nil)
+        return prettyJSON(from: data)
+    }
+
     private func request<T: Decodable>(path: String, method: String, body: Data?) async throws -> T {
+        let data = try await requestData(path: path, method: method, body: body)
+
+        do {
+            return try jsonDecoder.decode(T.self, from: data)
+        } catch {
+            throw APIClientError.decoding(error.localizedDescription)
+        }
+    }
+
+    private func requestData(path: String, method: String, body: Data?) async throws -> Data {
         let request = try makeURLRequest(path: path, method: method, body: body)
         let (data, response) = try await session.data(for: request)
 
@@ -200,11 +273,29 @@ final class AmaryllisAPIClient {
             throw APIClientError.server(text)
         }
 
-        do {
-            return try jsonDecoder.decode(T.self, from: data)
-        } catch {
-            throw APIClientError.decoding(error.localizedDescription)
+        return data
+    }
+
+    private func prettyJSON(from data: Data) -> String {
+        if let object = try? JSONSerialization.jsonObject(with: data),
+           let encoded = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
+           let text = String(data: encoded, encoding: .utf8) {
+            return text
         }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    private func buildPath(path: String, queryItems: [URLQueryItem]) -> String {
+        guard !queryItems.isEmpty else {
+            return path
+        }
+
+        var components = URLComponents()
+        components.queryItems = queryItems
+        if let encoded = components.percentEncodedQuery, !encoded.isEmpty {
+            return "\(path)?\(encoded)"
+        }
+        return path
     }
 
     private func makeURLRequest(path: String, method: String, body: Data?) throws -> URLRequest {

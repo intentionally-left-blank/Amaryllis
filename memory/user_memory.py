@@ -30,5 +30,8 @@ class UserMemory:
     def get_all(self, user_id: str) -> dict[str, str]:
         return self.database.get_user_memory(user_id=user_id)
 
+    def get(self, user_id: str, key: str) -> dict[str, Any] | None:
+        return self.database.get_user_memory_item(user_id=user_id, key=key)
+
     def items(self, user_id: str) -> list[dict[str, Any]]:
         return self.database.get_user_memory_items(user_id=user_id)

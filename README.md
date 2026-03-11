@@ -72,14 +72,18 @@ Local telemetry log:
 ├── api
 │   ├── agent_api.py
 │   ├── chat_api.py
+│   ├── memory_api.py
 │   └── model_api.py
 ├── controller
 │   └── meta_controller.py
 ├── memory
+│   ├── extraction_service.py
 │   ├── episodic_memory.py
 │   ├── memory_manager.py
+│   ├── models.py
 │   ├── semantic_memory.py
-│   └── user_memory.py
+│   ├── user_memory.py
+│   └── working_memory.py
 ├── models
 │   ├── model_manager.py
 │   └── providers
@@ -111,6 +115,8 @@ Local telemetry log:
 │   └── vector_store.py
 ├── tasks
 │   └── task_executor.py
+├── tests
+│   └── test_memory_manager.py
 ├── tools
 │   ├── builtin_tools
 │   │   ├── filesystem.py
@@ -209,6 +215,7 @@ In app settings:
   - OpenRouter (`https://openrouter.ai/api/v1`)
 - use `Start Runtime` to run the Python backend from UI
 - API keys entered in app settings are stored in macOS Keychain
+- use `Memory Debug` section to inspect context/retrieval/extractions/conflicts directly from UI
 
 Chat tab behavior:
 - create multiple chats (`New Chat`)
@@ -360,13 +367,43 @@ Implemented now:
   - `semantic` (retrieval memory)
   - `profile` (user preferences/profile)
 - typed memory context models (`memory/models.py`)
+- extraction rules moved to dedicated service (`memory/extraction_service.py`)
 - extraction records and conflict audit tables in SQLite
+- conflict policy (`latest/high-confidence wins`) for profile and semantic facts
+- semantic retrieval scoring (vector + recency + confidence + importance)
+- local telemetry events for memory (`memory_extract`, `memory_conflict`, `memory_retrieval`, `memory_retrieval_debug`)
 - backward-compatible memory manager API for existing agent loop
 
 SQLite tables added in migration `v2`:
 - `working_memory`
 - `memory_extractions`
 - `memory_conflicts`
+
+### Memory Debug API
+
+Get computed memory context for a user/session:
+
+```bash
+curl "http://localhost:8000/debug/memory/context?user_id=user-001&agent_id=<agent_id>&session_id=session-001&query=planning"
+```
+
+Get semantic retrieval trace with scoring components:
+
+```bash
+curl "http://localhost:8000/debug/memory/retrieval?user_id=user-001&query=my%20preferences&top_k=8"
+```
+
+Get extraction audit log:
+
+```bash
+curl "http://localhost:8000/debug/memory/extractions?user_id=user-001&limit=20"
+```
+
+Get conflict audit log:
+
+```bash
+curl "http://localhost:8000/debug/memory/conflicts?user_id=user-001&limit=20"
+```
 
 ## Plugins
 
@@ -377,6 +414,14 @@ Plugins are auto-discovered from:
 `tool.py` must expose either:
 - `register(registry, manifest)`
 - or `register_tool(registry, manifest)`
+
+## Tests
+
+Run memory policy/scoring unit tests:
+
+```bash
+~/Library/Application\ Support/amaryllis/runtime-src/.venv/bin/python -m unittest discover -s tests -p "test_*.py" -v
+```
 
 ## Notes on MLX and Ollama
 

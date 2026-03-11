@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from agents.agent_manager import AgentManager
 from api.agent_api import router as agent_router
 from api.chat_api import router as chat_router
+from api.memory_api import router as memory_router
 from api.model_api import router as model_router
 from controller.meta_controller import MetaController
 from memory.episodic_memory import EpisodicMemory
@@ -61,6 +62,7 @@ def create_services() -> ServiceContainer:
 
     database = Database(config.database_path)
     vector_store = VectorStore(config.vector_index_path)
+    telemetry = LocalTelemetry(config.telemetry_path)
 
     episodic = EpisodicMemory(database)
     semantic = SemanticMemory(database, vector_store)
@@ -71,6 +73,7 @@ def create_services() -> ServiceContainer:
         semantic=semantic,
         user_memory=user_memory,
         working_memory=working_memory,
+        telemetry=telemetry,
     )
 
     tool_registry = ToolRegistry()
@@ -80,7 +83,6 @@ def create_services() -> ServiceContainer:
     tool_executor = ToolExecutor(tool_registry)
 
     model_manager = ModelManager(config=config, database=database)
-    telemetry = LocalTelemetry(config.telemetry_path)
 
     meta_controller = MetaController()
     planner = Planner()
@@ -269,6 +271,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_router)
     app.include_router(model_router)
     app.include_router(agent_router)
+    app.include_router(memory_router)
 
     @app.get("/health")
     def health(request: Request) -> dict[str, Any]:

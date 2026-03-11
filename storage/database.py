@@ -210,6 +210,185 @@ class Database:
             self._conn.commit()
             return int(cursor.lastrowid)
 
+    def get_semantic_entry(
+        self,
+        semantic_id: int,
+        user_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            if user_id:
+                row = self._conn.execute(
+                    """
+                    SELECT
+                        id,
+                        user_id,
+                        text,
+                        metadata_json,
+                        kind,
+                        confidence,
+                        importance,
+                        fingerprint,
+                        is_active,
+                        superseded_by,
+                        created_at
+                    FROM semantic_memory
+                    WHERE id = ? AND user_id = ?
+                    """,
+                    (semantic_id, user_id),
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    """
+                    SELECT
+                        id,
+                        user_id,
+                        text,
+                        metadata_json,
+                        kind,
+                        confidence,
+                        importance,
+                        fingerprint,
+                        is_active,
+                        superseded_by,
+                        created_at
+                    FROM semantic_memory
+                    WHERE id = ?
+                    """,
+                    (semantic_id,),
+                ).fetchone()
+
+        if not row:
+            return None
+
+        item = dict(row)
+        try:
+            item["metadata"] = json.loads(item.pop("metadata_json") or "{}")
+        except Exception:
+            item["metadata"] = {}
+        return item
+
+    def list_semantic_entries(
+        self,
+        user_id: str,
+        kind: str | None = None,
+        active_only: bool = True,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+
+        with self._lock:
+            if kind and active_only:
+                rows = self._conn.execute(
+                    """
+                    SELECT
+                        id,
+                        user_id,
+                        text,
+                        metadata_json,
+                        kind,
+                        confidence,
+                        importance,
+                        fingerprint,
+                        is_active,
+                        superseded_by,
+                        created_at
+                    FROM semantic_memory
+                    WHERE user_id = ? AND kind = ? AND is_active = 1
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (user_id, kind, limit),
+                ).fetchall()
+            elif kind:
+                rows = self._conn.execute(
+                    """
+                    SELECT
+                        id,
+                        user_id,
+                        text,
+                        metadata_json,
+                        kind,
+                        confidence,
+                        importance,
+                        fingerprint,
+                        is_active,
+                        superseded_by,
+                        created_at
+                    FROM semantic_memory
+                    WHERE user_id = ? AND kind = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (user_id, kind, limit),
+                ).fetchall()
+            elif active_only:
+                rows = self._conn.execute(
+                    """
+                    SELECT
+                        id,
+                        user_id,
+                        text,
+                        metadata_json,
+                        kind,
+                        confidence,
+                        importance,
+                        fingerprint,
+                        is_active,
+                        superseded_by,
+                        created_at
+                    FROM semantic_memory
+                    WHERE user_id = ? AND is_active = 1
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (user_id, limit),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    """
+                    SELECT
+                        id,
+                        user_id,
+                        text,
+                        metadata_json,
+                        kind,
+                        confidence,
+                        importance,
+                        fingerprint,
+                        is_active,
+                        superseded_by,
+                        created_at
+                    FROM semantic_memory
+                    WHERE user_id = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (user_id, limit),
+                ).fetchall()
+
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["metadata"] = json.loads(item.pop("metadata_json") or "{}")
+            except Exception:
+                item["metadata"] = {}
+            result.append(item)
+        return result
+
+    def deactivate_semantic_entry(self, semantic_id: int, superseded_by: int | None = None) -> None:
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE semantic_memory
+                SET is_active = 0, superseded_by = ?
+                WHERE id = ?
+                """,
+                (superseded_by, semantic_id),
+            )
+            self._conn.commit()
+
     def set_user_memory(
         self,
         user_id: str,
@@ -256,6 +435,18 @@ class Database:
                 (user_id,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def get_user_memory_item(self, user_id: str, key: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT key, value, updated_at, confidence, importance, source
+                FROM user_memory
+                WHERE user_id = ? AND key = ?
+                """,
+                (user_id, key),
+            ).fetchone()
+        return dict(row) if row else None
 
     def upsert_working_memory(
         self,
