@@ -29,11 +29,19 @@ struct AgentsView: View {
     @State private var newAutomationHour: String = "9"
     @State private var newAutomationMinute: String = "0"
     @State private var newAutomationWeekdays: String = "MO,TU,WE,TH,FR"
+    @State private var newAutomationWatchPath: String = ""
+    @State private var newAutomationWatchPollSec: String = "10"
+    @State private var newAutomationWatchRecursive: Bool = true
+    @State private var newAutomationWatchGlob: String = "*"
+    @State private var newAutomationWatchMaxChangedFiles: String = "20"
     @State private var newAutomationTimezone: String = TimeZone.current.identifier
     @State private var automationStartImmediately: Bool = false
     @State private var automations: [APIAutomationRecord] = []
     @State private var selectedAutomationID: String?
     @State private var automationEvents: [APIAutomationEvent] = []
+    @State private var inboxItems: [APIInboxItem] = []
+    @State private var inboxUnreadOnly: Bool = true
+    @State private var inboxCategory: String = "automation"
 
     @State private var isLoadingAgents: Bool = false
     @State private var isCreatingAgent: Bool = false
@@ -44,6 +52,8 @@ struct AgentsView: View {
     @State private var isLoadingAutomations: Bool = false
     @State private var isCreatingAutomation: Bool = false
     @State private var isAutomationActionLoading: Bool = false
+    @State private var isLoadingInbox: Bool = false
+    @State private var isInboxActionLoading: Bool = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -57,12 +67,20 @@ struct AgentsView: View {
             await refreshAgents()
             await refreshRuns()
             await refreshAutomations()
+            await refreshInbox()
         }
         .onChange(of: selectedAgentID ?? "") { _ in
             Task {
                 await refreshRuns()
                 await refreshAutomations()
+                await refreshInbox()
             }
+        }
+        .onChange(of: inboxUnreadOnly) { _ in
+            Task { await refreshInbox() }
+        }
+        .onChange(of: userID) { _ in
+            Task { await refreshInbox() }
         }
     }
 
@@ -107,6 +125,7 @@ struct AgentsView: View {
                             await refreshAgents()
                             await refreshRuns()
                             await refreshAutomations()
+                            await refreshInbox()
                         }
                     }
                     .buttonStyle(AmaryllisSecondaryButtonStyle())
@@ -245,6 +264,9 @@ struct AgentsView: View {
                 .frame(maxHeight: 340)
 
             automationPanel
+                .frame(maxHeight: 420)
+
+            inboxPanel
                 .frame(maxHeight: .infinity)
         }
     }
@@ -412,9 +434,10 @@ struct AgentsView: View {
                             Text("interval").tag("interval")
                             Text("hourly").tag("hourly")
                             Text("weekly").tag("weekly")
+                            Text("watch_fs").tag("watch_fs")
                         }
                         .pickerStyle(.menu)
-                        .frame(width: 120)
+                        .frame(width: 140)
 
                         if newAutomationScheduleType == "interval" {
                             TextField("Interval (sec)", text: $newAutomationIntervalSec)
@@ -427,7 +450,7 @@ struct AgentsView: View {
                             TextField("Minute", text: $newAutomationMinute)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: 90)
-                        } else {
+                        } else if newAutomationScheduleType == "weekly" {
                             TextField("Weekdays (MO,TU,...)", text: $newAutomationWeekdays)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(minWidth: 170, maxWidth: 240)
@@ -437,6 +460,23 @@ struct AgentsView: View {
                             TextField("Minute", text: $newAutomationMinute)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: 80)
+                        } else {
+                            TextField("Watch path", text: $newAutomationWatchPath)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(minWidth: 220, maxWidth: 320)
+                            TextField("Poll sec", text: $newAutomationWatchPollSec)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 90)
+                            TextField("Glob", text: $newAutomationWatchGlob)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 110)
+                            TextField("Max files", text: $newAutomationWatchMaxChangedFiles)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 90)
+                            Toggle("Recursive", isOn: $newAutomationWatchRecursive)
+                                .toggleStyle(.switch)
+                                .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                                .frame(width: 110)
                         }
 
                         Toggle("Run now", isOn: $automationStartImmediately)
@@ -457,7 +497,12 @@ struct AgentsView: View {
                             }
                         }
                         .buttonStyle(AmaryllisPrimaryButtonStyle())
-                        .disabled(isCreatingAutomation || newAutomationMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(
+                            isCreatingAutomation
+                            || newAutomationMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || (newAutomationScheduleType == "watch_fs"
+                                && newAutomationWatchPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        )
 
                         Button("Apply") {
                             Task { await applyAutomationScheduleUpdate() }
@@ -503,6 +548,12 @@ struct AgentsView: View {
                                     Text("next: \(automation.nextRunAt) | tz: \(automation.timezone)")
                                         .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
                                         .foregroundStyle(AmaryllisTheme.textSecondary)
+
+                                    Text(
+                                        "failures: \(automation.consecutiveFailures) | escalation: \(automation.escalationLevel)"
+                                    )
+                                    .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                    .foregroundStyle(escalationColor(level: automation.escalationLevel))
 
                                     if let error = automation.lastError, !error.isEmpty {
                                         Text("last_error: \(error)")
@@ -593,6 +644,98 @@ struct AgentsView: View {
         .amaryllisCard()
     }
 
+    private var inboxPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Inbox")
+                    .font(AmaryllisTheme.sectionFont(size: 18))
+                    .foregroundStyle(AmaryllisTheme.textPrimary)
+                Spacer()
+                Text("items: \(inboxItems.count)")
+                    .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                    .foregroundStyle(AmaryllisTheme.textSecondary)
+            }
+
+            HStack(spacing: 8) {
+                Toggle("Unread only", isOn: $inboxUnreadOnly)
+                    .toggleStyle(.switch)
+                    .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                    .frame(width: 130)
+
+                TextField("Category", text: $inboxCategory)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 160)
+
+                Button("Refresh") {
+                    Task { await refreshInbox() }
+                }
+                .buttonStyle(AmaryllisSecondaryButtonStyle())
+                .disabled(isLoadingInbox || isInboxActionLoading)
+            }
+
+            if inboxItems.isEmpty {
+                Text("Inbox is empty.")
+                    .font(AmaryllisTheme.bodyFont(size: 12, weight: .medium))
+                    .foregroundStyle(AmaryllisTheme.textSecondary)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(inboxItems) { item in
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 8) {
+                                    Circle()
+                                        .fill(inboxSeverityColor(item.severity))
+                                        .frame(width: 8, height: 8)
+                                    Text(item.title)
+                                        .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
+                                        .foregroundStyle(AmaryllisTheme.textPrimary)
+                                        .lineLimit(2)
+                                    Spacer()
+                                    Text(item.isRead ? "READ" : "UNREAD")
+                                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                        .foregroundStyle(item.isRead ? AmaryllisTheme.textSecondary : AmaryllisTheme.accent)
+                                }
+
+                                Text(item.body)
+                                    .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                                    .foregroundStyle(AmaryllisTheme.textPrimary)
+                                    .lineLimit(4)
+
+                                HStack(spacing: 8) {
+                                    Text(item.createdAt)
+                                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                                        .lineLimit(1)
+                                    if let sourceId = item.sourceId {
+                                        Text("source: \(sourceId)")
+                                            .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+
+                                HStack(spacing: 8) {
+                                    Button(item.isRead ? "Mark unread" : "Mark read") {
+                                        Task {
+                                            await setInboxItemRead(itemID: item.id, isRead: !item.isRead)
+                                        }
+                                    }
+                                    .buttonStyle(AmaryllisSecondaryButtonStyle())
+                                    .disabled(isInboxActionLoading)
+                                }
+                            }
+                            .padding(8)
+                            .background(AmaryllisTheme.surface)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+                }
+                .frame(maxHeight: 220)
+            }
+        }
+        .amaryllisCard()
+    }
+
     private var selectedAgent: APIAgentRecord? {
         guard let id = selectedAgentID else { return nil }
         return agents.first(where: { $0.id == id })
@@ -629,6 +772,7 @@ struct AgentsView: View {
             await refreshAgents()
             await refreshRuns()
             await refreshAutomations()
+            await refreshInbox()
             appState.clearError()
         } catch {
             appState.lastError = error.localizedDescription
@@ -882,6 +1026,7 @@ struct AgentsView: View {
                 startImmediately: automationStartImmediately
             )
             await refreshAutomations()
+            await refreshInbox()
             appState.clearError()
         } catch {
             appState.lastError = error.localizedDescription
@@ -930,6 +1075,43 @@ struct AgentsView: View {
         }
     }
 
+    private func refreshInbox() async {
+        isLoadingInbox = true
+        defer { isLoadingInbox = false }
+
+        do {
+            let category = inboxCategory.trimmingCharacters(in: .whitespacesAndNewlines)
+            let response = try await appState.apiClient.listInbox(
+                userId: userID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : userID,
+                unreadOnly: inboxUnreadOnly,
+                category: category.isEmpty ? nil : category,
+                limit: 200
+            )
+            inboxItems = response.items
+            appState.clearError()
+        } catch {
+            appState.lastError = error.localizedDescription
+        }
+    }
+
+    private func setInboxItemRead(itemID: String, isRead: Bool) async {
+        isInboxActionLoading = true
+        defer { isInboxActionLoading = false }
+
+        do {
+            let updated = try await appState.apiClient.setInboxItemRead(itemId: itemID, isRead: isRead)
+            if let index = inboxItems.firstIndex(where: { $0.id == updated.id }) {
+                inboxItems[index] = updated
+            }
+            if inboxUnreadOnly && isRead {
+                inboxItems.removeAll { $0.id == itemID }
+            }
+            appState.clearError()
+        } catch {
+            appState.lastError = error.localizedDescription
+        }
+    }
+
     private func pauseAutomation(id: String) async {
         isAutomationActionLoading = true
         defer { isAutomationActionLoading = false }
@@ -937,6 +1119,7 @@ struct AgentsView: View {
             _ = try await appState.apiClient.pauseAutomation(automationId: id)
             selectedAutomationID = id
             await refreshAutomations()
+            await refreshInbox()
             appState.clearError()
         } catch {
             appState.lastError = error.localizedDescription
@@ -950,6 +1133,7 @@ struct AgentsView: View {
             _ = try await appState.apiClient.resumeAutomation(automationId: id)
             selectedAutomationID = id
             await refreshAutomations()
+            await refreshInbox()
             appState.clearError()
         } catch {
             appState.lastError = error.localizedDescription
@@ -963,6 +1147,7 @@ struct AgentsView: View {
             _ = try await appState.apiClient.runAutomationNow(automationId: id)
             selectedAutomationID = id
             await refreshAutomations()
+            await refreshInbox()
             appState.clearError()
         } catch {
             appState.lastError = error.localizedDescription
@@ -978,6 +1163,7 @@ struct AgentsView: View {
                 selectedAutomationID = nil
             }
             await refreshAutomations()
+            await refreshInbox()
             appState.clearError()
         } catch {
             appState.lastError = error.localizedDescription
@@ -986,6 +1172,18 @@ struct AgentsView: View {
 
     private func buildSchedulePayload() -> [String: JSONValue] {
         switch newAutomationScheduleType {
+        case "watch_fs":
+            let pollSec = clampInt(newAutomationWatchPollSec, fallback: 10, min: 2, max: 3_600)
+            let maxChangedFiles = clampInt(newAutomationWatchMaxChangedFiles, fallback: 20, min: 1, max: 500)
+            let path = newAutomationWatchPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            let glob = newAutomationWatchGlob.trimmingCharacters(in: .whitespacesAndNewlines)
+            return [
+                "path": .string(path),
+                "poll_sec": .number(Double(pollSec)),
+                "recursive": .bool(newAutomationWatchRecursive),
+                "glob": .string(glob.isEmpty ? "*" : glob),
+                "max_changed_files": .number(Double(maxChangedFiles)),
+            ]
         case "hourly":
             let intervalHours = clampInt(newAutomationIntervalHours, fallback: 1, min: 1, max: 24)
             let minute = clampInt(newAutomationMinute, fallback: 0, min: 0, max: 59)
@@ -1032,6 +1230,7 @@ struct AgentsView: View {
             )
 
             await refreshAutomations()
+            await refreshInbox()
             if let refreshed = automations.first(where: { $0.id == automationID }) {
                 applyAutomationToForm(refreshed)
             }
@@ -1064,10 +1263,30 @@ struct AgentsView: View {
         if let weekdays = jsonStringArrayValue(automation.schedule["byday"]), !weekdays.isEmpty {
             newAutomationWeekdays = weekdays.joined(separator: ",")
         }
+        if let path = automation.schedule["path"]?.stringValue {
+            newAutomationWatchPath = path
+        }
+        if let pollSec = jsonIntValue(automation.schedule["poll_sec"]) {
+            newAutomationWatchPollSec = String(pollSec)
+        }
+        if let recursive = jsonBoolValue(automation.schedule["recursive"]) {
+            newAutomationWatchRecursive = recursive
+        }
+        if let glob = automation.schedule["glob"]?.stringValue, !glob.isEmpty {
+            newAutomationWatchGlob = glob
+        }
+        if let maxChangedFiles = jsonIntValue(automation.schedule["max_changed_files"]) {
+            newAutomationWatchMaxChangedFiles = String(maxChangedFiles)
+        }
     }
 
     private func scheduleSummary(for automation: APIAutomationRecord) -> String {
         switch automation.scheduleType {
+        case "watch_fs":
+            let path = automation.schedule["path"]?.stringValue ?? "-"
+            let poll = jsonIntValue(automation.schedule["poll_sec"]) ?? 10
+            let glob = automation.schedule["glob"]?.stringValue ?? "*"
+            return "watch \(poll)s \(glob) \(path)"
         case "hourly":
             let hours = jsonIntValue(automation.schedule["interval_hours"]) ?? max(1, automation.intervalSec / 3600)
             let minute = jsonIntValue(automation.schedule["minute"]) ?? 0
@@ -1107,6 +1326,11 @@ struct AgentsView: View {
         }
     }
 
+    private func jsonBoolValue(_ value: JSONValue?) -> Bool? {
+        guard let value else { return nil }
+        return value.boolValue
+    }
+
     private func jsonStringArrayValue(_ value: JSONValue?) -> [String]? {
         guard let value else { return nil }
         switch value {
@@ -1132,5 +1356,27 @@ struct AgentsView: View {
     private func clampInt(_ raw: String, fallback: Int, min: Int, max: Int) -> Int {
         let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)) ?? fallback
         return Swift.max(min, Swift.min(max, parsed))
+    }
+
+    private func escalationColor(level: String) -> Color {
+        switch level.lowercased() {
+        case "critical":
+            return AmaryllisTheme.accent
+        case "warning":
+            return Color.orange
+        default:
+            return AmaryllisTheme.textSecondary
+        }
+    }
+
+    private func inboxSeverityColor(_ severity: String) -> Color {
+        switch severity.lowercased() {
+        case "error":
+            return AmaryllisTheme.accent
+        case "warning":
+            return Color.orange
+        default:
+            return Color.green
+        }
     }
 }

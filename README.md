@@ -37,6 +37,7 @@ Implemented in this version:
 - streaming chat UI
 - model load/download progress indicators
 - persistent local chat history (multi-chat sessions) in macOS app
+- Agents tab automation UI with `watch_fs` + inbox read/unread controls
 - centralized structured API errors (`error.type`, `error.message`, `error.request_id`)
 - provider diagnostics endpoint: `GET /health/providers`
 - SQLite migration framework (`schema_migrations`)
@@ -231,6 +232,7 @@ In app settings:
 - use `Start Runtime` to run the Python backend from UI
 - API keys entered in app settings are stored in macOS Keychain
 - use `Memory Debug` section to inspect context/retrieval/extractions/conflicts directly from UI
+- in `Agents` tab, configure interval/hourly/weekly/watcher automations and process inbox alerts
 
 Chat tab behavior:
 - create multiple chats (`New Chat`)
@@ -559,6 +561,9 @@ Implemented now:
 - inbox/notification feed in SQLite (`inbox_items`) with read/unread state
 - failure escalation policy (`none -> warning -> critical`) with auto-disable threshold
 - desktop UI controls in Agents tab
+  - create/edit watcher schedules (`watch_fs`) without CLI
+  - view escalation/failure counters directly on automation cards
+  - triage inbox notifications and mark read/unread
 
 Automation API:
 

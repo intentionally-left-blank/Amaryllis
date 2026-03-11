@@ -580,6 +580,8 @@ struct APIAutomationRecord: Decodable, Identifiable {
     let nextRunAt: String
     let lastRunAt: String?
     let lastError: String?
+    let consecutiveFailures: Int
+    let escalationLevel: String
     let createdAt: String
     let updatedAt: String
 
@@ -597,6 +599,8 @@ struct APIAutomationRecord: Decodable, Identifiable {
         case nextRunAt = "next_run_at"
         case lastRunAt = "last_run_at"
         case lastError = "last_error"
+        case consecutiveFailures = "consecutive_failures"
+        case escalationLevel = "escalation_level"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -662,6 +666,62 @@ struct APIAutomationEventsResponse: Decodable {
     private enum CodingKeys: String, CodingKey {
         case items
         case count
+        case requestId = "request_id"
+    }
+}
+
+struct APIInboxItem: Decodable, Identifiable {
+    let id: String
+    let userId: String
+    let category: String
+    let severity: String
+    let title: String
+    let body: String
+    let sourceType: String?
+    let sourceId: String?
+    let runId: String?
+    let metadata: [String: JSONValue]
+    let isRead: Bool
+    let requiresAction: Bool
+    let createdAt: String
+    let updatedAt: String
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case userId = "user_id"
+        case category
+        case severity
+        case title
+        case body
+        case sourceType = "source_type"
+        case sourceId = "source_id"
+        case runId = "run_id"
+        case metadata
+        case isRead = "is_read"
+        case requiresAction = "requires_action"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+struct APIInboxListResponse: Decodable {
+    let items: [APIInboxItem]
+    let count: Int
+    let requestId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case items
+        case count
+        case requestId = "request_id"
+    }
+}
+
+struct APIInboxSingleResponse: Decodable {
+    let item: APIInboxItem
+    let requestId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case item
         case requestId = "request_id"
     }
 }
@@ -998,6 +1058,24 @@ extension JSONValue {
             return Int(value)
         case .string(let value):
             return Int(value)
+        default:
+            return nil
+        }
+    }
+
+    var boolValue: Bool? {
+        switch self {
+        case .bool(let value):
+            return value
+        case .string(let value):
+            let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if ["1", "true", "yes", "on"].contains(normalized) {
+                return true
+            }
+            if ["0", "false", "no", "off"].contains(normalized) {
+                return false
+            }
+            return nil
         default:
             return nil
         }

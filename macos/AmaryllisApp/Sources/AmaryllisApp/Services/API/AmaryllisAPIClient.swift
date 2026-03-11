@@ -415,6 +415,36 @@ final class AmaryllisAPIClient {
         return try await request(path: path, method: "GET", body: Optional<Data>.none)
     }
 
+    func listInbox(
+        userId: String?,
+        unreadOnly: Bool = false,
+        category: String? = nil,
+        limit: Int = 200
+    ) async throws -> APIInboxListResponse {
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "unread_only", value: unreadOnly ? "true" : "false")
+        ]
+        if let userId, !userId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            queryItems.append(URLQueryItem(name: "user_id", value: userId))
+        }
+        if let category, !category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            queryItems.append(URLQueryItem(name: "category", value: category))
+        }
+        let path = buildPath(path: "/inbox", queryItems: queryItems)
+        return try await request(path: path, method: "GET", body: Optional<Data>.none)
+    }
+
+    func setInboxItemRead(itemId: String, isRead: Bool) async throws -> APIInboxItem {
+        let endpoint = isRead ? "read" : "unread"
+        let response: APIInboxSingleResponse = try await request(
+            path: "/inbox/\(itemId)/\(endpoint)",
+            method: "POST",
+            body: Optional<Data>.none
+        )
+        return response.item
+    }
+
     func debugMemoryContext(
         userId: String,
         agentId: String?,
