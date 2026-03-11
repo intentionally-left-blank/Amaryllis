@@ -23,6 +23,8 @@ class AppConfig:
     enable_ollama_fallback: bool
     openai_base_url: str
     openai_api_key: str | None
+    anthropic_base_url: str
+    anthropic_api_key: str | None
     openrouter_base_url: str
     openrouter_api_key: str | None
 
@@ -100,6 +102,10 @@ class AppConfig:
             enable_ollama_fallback=enable_ollama_fallback,
             openai_base_url=os.getenv("AMARYLLIS_OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
             openai_api_key=(os.getenv("AMARYLLIS_OPENAI_API_KEY") or "").strip() or None,
+            anthropic_base_url=os.getenv("AMARYLLIS_ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1").rstrip(
+                "/"
+            ),
+            anthropic_api_key=(os.getenv("AMARYLLIS_ANTHROPIC_API_KEY") or "").strip() or None,
             openrouter_base_url=os.getenv("AMARYLLIS_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/"),
             openrouter_api_key=(os.getenv("AMARYLLIS_OPENROUTER_API_KEY") or "").strip() or None,
         )

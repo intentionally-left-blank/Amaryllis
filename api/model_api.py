@@ -26,6 +26,18 @@ def list_models(request: Request) -> dict[str, Any]:
     return services.model_manager.list_models()
 
 
+@router.get("/models/capabilities")
+def model_capabilities(request: Request) -> dict[str, Any]:
+    services = request.app.state.services
+    return {
+        "active": {
+            "provider": services.model_manager.active_provider,
+            "model": services.model_manager.active_model,
+        },
+        "providers": services.model_manager.provider_capabilities(),
+    }
+
+
 @router.post("/models/download")
 def download_model(payload: DownloadModelRequest, request: Request) -> dict[str, Any]:
     services = request.app.state.services

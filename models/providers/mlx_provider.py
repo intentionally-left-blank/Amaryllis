@@ -127,6 +127,16 @@ class MLXProvider:
             "detail": f"local_provider_ready=true installed_models={len(installed_models)}",
         }
 
+    def capabilities(self) -> dict[str, Any]:
+        return {
+            "local": True,
+            "supports_download": True,
+            "supports_load": True,
+            "supports_stream": True,
+            "supports_tools": False,
+            "requires_api_key": False,
+        }
+
     def suggested_models(self, limit: int = 300) -> list[dict[str, str]]:
         suggestions: list[dict[str, str]] = []
         seen: set[str] = set()

@@ -24,8 +24,8 @@ Implemented in this version:
 - FastAPI backend runtime
 - native macOS UI (`SwiftUI`) with dark amaryllis theme
 - OpenAI-compatible endpoint: `POST /v1/chat/completions`
-- model manager with MLX primary provider, Ollama fallback, and optional OpenAI-compatible cloud provider
-- model APIs: list/download/load
+- model manager with MLX primary provider, Ollama fallback, and optional cloud providers (OpenAI / Anthropic / OpenRouter)
+- model APIs: list/download/load/capabilities
 - agent APIs: create/list/chat
 - memory layer: episodic + semantic + user memory
 - SQLite persistence
@@ -84,6 +84,7 @@ Local telemetry log:
 │   ├── model_manager.py
 │   └── providers
 │       ├── mlx_provider.py
+│       ├── anthropic_provider.py
 │       ├── openai_provider.py
 │       ├── openrouter_provider.py
 │       └── ollama_provider.py
@@ -225,6 +226,12 @@ Local chat file:
 curl http://localhost:8000/models
 ```
 
+### Provider capability matrix
+
+```bash
+curl http://localhost:8000/models/capabilities
+```
+
 ### Download model (MLX)
 
 ```bash
@@ -268,6 +275,17 @@ curl -X POST http://localhost:8000/models/load \
   -d '{
     "model_id": "openai/gpt-4o-mini",
     "provider": "openrouter"
+  }'
+```
+
+### Load remote Anthropic model (optional)
+
+```bash
+curl -X POST http://localhost:8000/models/load \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_id": "claude-3-5-sonnet-latest",
+    "provider": "anthropic"
   }'
 ```
 
@@ -348,14 +366,16 @@ Plugins are auto-discovered from:
 - MLX is the primary local inference provider.
 - If fallback is enabled, runtime can automatically try local providers:
   - `mlx -> ollama` when MLX fails
-  - `openai/openrouter -> mlx/ollama` when cloud calls fail (for example `429` quota/rate-limit)
-- You can optionally enable remote cloud providers: OpenAI and OpenRouter.
+  - `openai/anthropic/openrouter -> mlx/ollama` when cloud calls fail (for example `429` quota/rate-limit)
+- You can optionally enable remote cloud providers: OpenAI, Anthropic and OpenRouter.
 - Configure fallback via env:
   - `AMARYLLIS_OLLAMA_FALLBACK=true|false`
   - `AMARYLLIS_OLLAMA_URL=http://localhost:11434`
   - `AMARYLLIS_TELEMETRY_PATH=~/Library/Application Support/amaryllis/data/telemetry.jsonl`
   - `AMARYLLIS_OPENAI_BASE_URL=https://api.openai.com/v1`
   - `AMARYLLIS_OPENAI_API_KEY=<your_key>`
+  - `AMARYLLIS_ANTHROPIC_BASE_URL=https://api.anthropic.com/v1`
+  - `AMARYLLIS_ANTHROPIC_API_KEY=<your_key>`
   - `AMARYLLIS_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1`
   - `AMARYLLIS_OPENROUTER_API_KEY=<your_key>`
 
@@ -371,6 +391,8 @@ export AMARYLLIS_OLLAMA_FALLBACK=true
 export AMARYLLIS_TELEMETRY_PATH=~/Library/Application\ Support/amaryllis/data/telemetry.jsonl
 export AMARYLLIS_OPENAI_BASE_URL=https://api.openai.com/v1
 export AMARYLLIS_OPENAI_API_KEY=replace_me
+export AMARYLLIS_ANTHROPIC_BASE_URL=https://api.anthropic.com/v1
+export AMARYLLIS_ANTHROPIC_API_KEY=replace_me
 export AMARYLLIS_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 export AMARYLLIS_OPENROUTER_API_KEY=replace_me
 ```

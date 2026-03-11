@@ -49,6 +49,16 @@ class OpenAIProvider:
             "detail": "reachable=true",
         }
 
+    def capabilities(self) -> dict[str, Any]:
+        return {
+            "local": False,
+            "supports_download": False,
+            "supports_load": True,
+            "supports_stream": True,
+            "supports_tools": False,
+            "requires_api_key": True,
+        }
+
     def suggested_models(self, limit: int = 20) -> list[dict[str, str]]:
         return []
 

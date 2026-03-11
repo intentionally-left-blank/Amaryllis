@@ -4,10 +4,12 @@ import logging
 import time
 from typing import Any, Iterator
 
+from models.providers.anthropic_provider import AnthropicProvider
+from models.providers.base import ModelProvider
 from models.providers.mlx_provider import MLXProvider
 from models.providers.openai_provider import OpenAIProvider
-from models.providers.openrouter_provider import OpenRouterProvider
 from models.providers.ollama_provider import OllamaProvider
+from models.providers.openrouter_provider import OpenRouterProvider
 from runtime.config import AppConfig
 from storage.database import Database
 
@@ -18,7 +20,7 @@ class ModelManager:
         self.database = database
         self.logger = logging.getLogger("amaryllis.models.manager")
 
-        self.providers = {
+        self.providers: dict[str, ModelProvider] = {
             "mlx": MLXProvider(config.models_dir),
             "ollama": OllamaProvider(config.ollama_base_url),
         }
@@ -26,6 +28,11 @@ class ModelManager:
             self.providers["openai"] = OpenAIProvider(
                 base_url=config.openai_base_url,
                 api_key=config.openai_api_key,
+            )
+        if config.anthropic_api_key or config.anthropic_base_url != "https://api.anthropic.com/v1":
+            self.providers["anthropic"] = AnthropicProvider(
+                base_url=config.anthropic_base_url,
+                api_key=config.anthropic_api_key,
             )
         if config.openrouter_api_key or config.openrouter_base_url != "https://openrouter.ai/api/v1":
             self.providers["openrouter"] = OpenRouterProvider(
@@ -69,8 +76,33 @@ class ModelManager:
                 "model": self.active_model,
             },
             "providers": provider_payload,
+            "capabilities": self.provider_capabilities(),
             "suggested": self._get_suggested_models(),
         }
+
+    def provider_capabilities(self) -> dict[str, Any]:
+        matrix: dict[str, Any] = {}
+        for name, provider in self.providers.items():
+            getter = getattr(provider, "capabilities", None)
+            if callable(getter):
+                try:
+                    raw = getter()
+                except Exception as exc:
+                    self.logger.warning("provider_capabilities_failed provider=%s error=%s", name, exc)
+                    raw = {}
+            else:
+                raw = {}
+
+            payload = raw if isinstance(raw, dict) else {}
+            matrix[name] = {
+                "local": bool(payload.get("local", False)),
+                "supports_download": bool(payload.get("supports_download", False)),
+                "supports_load": bool(payload.get("supports_load", True)),
+                "supports_stream": bool(payload.get("supports_stream", True)),
+                "supports_tools": bool(payload.get("supports_tools", False)),
+                "requires_api_key": bool(payload.get("requires_api_key", False)),
+            }
+        return matrix
 
     def provider_health(self) -> dict[str, Any]:
         checks: dict[str, Any] = {}
@@ -311,6 +343,11 @@ class ModelManager:
     def _default_model_for_provider(self, provider_name: str) -> str:
         if provider_name == "openai":
             return self.database.get_setting("openai_default_model", "gpt-4o-mini") or "gpt-4o-mini"
+        if provider_name == "anthropic":
+            return (
+                self.database.get_setting("anthropic_default_model", "claude-3-5-sonnet-latest")
+                or "claude-3-5-sonnet-latest"
+            )
         if provider_name == "openrouter":
             return (
                 self.database.get_setting("openrouter_default_model", "openai/gpt-4o-mini")
@@ -332,7 +369,7 @@ class ModelManager:
                 targets.append(("ollama", ollama_model))
             return self._unique_targets(targets)
 
-        if provider_name in {"openai", "openrouter"}:
+        if provider_name in {"openai", "openrouter", "anthropic"}:
             if self.active_provider in {"mlx", "ollama"} and self.active_provider in self.providers:
                 local_active_model = self.active_model or self._default_model_for_provider(self.active_provider)
                 targets.append((self.active_provider, local_active_model))
