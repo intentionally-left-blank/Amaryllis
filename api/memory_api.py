@@ -5,6 +5,8 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
+from memory.models import ExtractionResult, MemoryContext
+
 router = APIRouter(tags=["memory"])
 
 
@@ -14,7 +16,21 @@ class MemoryContextResponse(BaseModel):
     agent_id: str | None = None
     session_id: str | None = None
     query: str
-    context: dict[str, Any]
+    context: MemoryContext
+
+
+class RetrievalDebugItem(BaseModel):
+    rank: int = Field(ge=1)
+    semantic_id: int | None = None
+    kind: str
+    text: str
+    score: float
+    vector_score: float
+    recency_score: float
+    confidence: float
+    importance: float
+    created_at: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class RetrievalDebugResponse(BaseModel):
@@ -22,7 +38,42 @@ class RetrievalDebugResponse(BaseModel):
     user_id: str
     query: str
     top_k: int
-    items: list[dict[str, Any]]
+    items: list[RetrievalDebugItem]
+
+
+class MemoryExtractionRecord(BaseModel):
+    user_id: str
+    agent_id: str | None = None
+    session_id: str | None = None
+    source_role: str
+    source_text: str
+    extracted_json: ExtractionResult
+    created_at: str
+
+
+class MemoryExtractionsResponse(BaseModel):
+    request_id: str
+    user_id: str
+    count: int
+    items: list[MemoryExtractionRecord]
+
+
+class MemoryConflictRecord(BaseModel):
+    layer: str
+    key: str
+    previous_value: str | None = None
+    incoming_value: str | None = None
+    resolution: str
+    confidence_prev: float | None = None
+    confidence_new: float | None = None
+    created_at: str
+
+
+class MemoryConflictsResponse(BaseModel):
+    request_id: str
+    user_id: str
+    count: int
+    items: list[MemoryConflictRecord]
 
 
 @router.get("/debug/memory/context", response_model=MemoryContextResponse)
@@ -53,7 +104,7 @@ def debug_memory_context(
         agent_id=agent_id,
         session_id=session_id,
         query=query,
-        context=context.model_dump(),
+        context=context,
     )
 
 
@@ -71,44 +122,47 @@ def debug_memory_retrieval(
         top_k=top_k,
     )
     request_id = str(getattr(request.state, "request_id", ""))
+    typed_items = [RetrievalDebugItem(**item) for item in items]
     return RetrievalDebugResponse(
         request_id=request_id,
         user_id=user_id,
         query=query,
         top_k=top_k,
-        items=items,
+        items=typed_items,
     )
 
 
-@router.get("/debug/memory/extractions")
+@router.get("/debug/memory/extractions", response_model=MemoryExtractionsResponse)
 def debug_memory_extractions(
     request: Request,
     user_id: str = Query(..., min_length=1),
     limit: int = Query(default=50, ge=1, le=200),
-) -> dict[str, Any]:
+) -> MemoryExtractionsResponse:
     services = request.app.state.services
     request_id = str(getattr(request.state, "request_id", ""))
     items = services.memory_manager.list_extractions(user_id=user_id, limit=limit)
-    return {
-        "request_id": request_id,
-        "user_id": user_id,
-        "count": len(items),
-        "items": items,
-    }
+    typed_items = [MemoryExtractionRecord(**item) for item in items]
+    return MemoryExtractionsResponse(
+        request_id=request_id,
+        user_id=user_id,
+        count=len(typed_items),
+        items=typed_items,
+    )
 
 
-@router.get("/debug/memory/conflicts")
+@router.get("/debug/memory/conflicts", response_model=MemoryConflictsResponse)
 def debug_memory_conflicts(
     request: Request,
     user_id: str = Query(..., min_length=1),
     limit: int = Query(default=50, ge=1, le=200),
-) -> dict[str, Any]:
+) -> MemoryConflictsResponse:
     services = request.app.state.services
     request_id = str(getattr(request.state, "request_id", ""))
     items = services.memory_manager.list_conflicts(user_id=user_id, limit=limit)
-    return {
-        "request_id": request_id,
-        "user_id": user_id,
-        "count": len(items),
-        "items": items,
-    }
+    typed_items = [MemoryConflictRecord(**item) for item in items]
+    return MemoryConflictsResponse(
+        request_id=request_id,
+        user_id=user_id,
+        count=len(typed_items),
+        items=typed_items,
+    )

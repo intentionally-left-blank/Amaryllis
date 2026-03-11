@@ -579,6 +579,12 @@ curl -X POST "http://localhost:8000/tools/permissions/prompts/<prompt_id>/deny"
 
 ## Memory Debug API
 
+Desktop app now includes a structured Memory Debug inspector in `Settings`:
+- layer view: `working / episodic / semantic / profile`
+- retrieval scoring preview (`score`, `vector_score`, `recency_score`)
+- extraction timeline and conflict log
+- optional raw JSON view for each debug call
+
 Get computed memory context for a user/session:
 
 ```bash

@@ -9,7 +9,13 @@ struct SettingsView: View {
     @State private var debugQuery: String = ""
     @State private var debugTopK: String = "8"
     @State private var debugLimit: String = "20"
-    @State private var debugOutput: String = "No debug output yet."
+    @State private var memoryDebugStatus: String = "No memory debug data yet."
+    @State private var memoryContext: APIMemoryContextResponse?
+    @State private var memoryRetrieval: APIMemoryRetrievalResponse?
+    @State private var memoryExtractions: APIMemoryExtractionsResponse?
+    @State private var memoryConflicts: APIMemoryConflictsResponse?
+    @State private var showMemoryRawJSON: Bool = false
+    @State private var memoryRawJSON: String = "{}"
     @State private var isDebugLoading: Bool = false
     @State private var isToolsLoading: Bool = false
 
@@ -346,11 +352,22 @@ struct SettingsView: View {
                     .buttonStyle(AmaryllisSecondaryButtonStyle())
                     .disabled(isDebugLoading)
 
+                    Button("Run All") {
+                        Task { await runAllMemoryDebug() }
+                    }
+                    .buttonStyle(AmaryllisPrimaryButtonStyle())
+                    .disabled(isDebugLoading)
+
                     Button("Clear") {
-                        debugOutput = "No debug output yet."
+                        clearMemoryDebugState()
                     }
                     .buttonStyle(AmaryllisSecondaryButtonStyle())
                     .disabled(isDebugLoading)
+
+                    Toggle("Raw JSON", isOn: $showMemoryRawJSON)
+                        .toggleStyle(.switch)
+                        .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                        .frame(width: 110)
 
                     if isDebugLoading {
                         ProgressView()
@@ -358,14 +375,22 @@ struct SettingsView: View {
                     }
                 }
 
+                Text(memoryDebugStatus)
+                    .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                    .foregroundStyle(AmaryllisTheme.textSecondary)
+
                 ScrollView {
-                    Text(debugOutput)
-                        .font(AmaryllisTheme.monoFont(size: 11, weight: .regular))
-                        .foregroundStyle(AmaryllisTheme.textSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
+                    if showMemoryRawJSON {
+                        Text(memoryRawJSON)
+                            .font(AmaryllisTheme.monoFont(size: 11, weight: .regular))
+                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    } else {
+                        memoryDebugResultsView
+                    }
                 }
-                .frame(maxWidth: .infinity, minHeight: 140, maxHeight: 220)
+                .frame(maxWidth: .infinity, minHeight: 140, maxHeight: 320)
                 .padding(10)
                 .background(AmaryllisTheme.surface)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -409,11 +434,192 @@ struct SettingsView: View {
         }
     }
 
+    private var memoryDebugResultsView: some View {
+        LazyVStack(alignment: .leading, spacing: 10) {
+            if memoryContext == nil,
+               memoryRetrieval == nil,
+               memoryExtractions == nil,
+               memoryConflicts == nil {
+                Text("Run Context, Retrieval, Extractions or Conflicts to inspect Memory 2.0 layers.")
+                    .font(AmaryllisTheme.bodyFont(size: 12, weight: .medium))
+                    .foregroundStyle(AmaryllisTheme.textSecondary)
+            }
+
+            if let payload = memoryContext {
+                memoryContextCard(payload)
+            }
+            if let payload = memoryRetrieval {
+                memoryRetrievalCard(payload)
+            }
+            if let payload = memoryExtractions {
+                memoryExtractionsCard(payload)
+            }
+            if let payload = memoryConflicts {
+                memoryConflictsCard(payload)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func memoryContextCard(_ payload: APIMemoryContextResponse) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Context Layers")
+                .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
+                .foregroundStyle(AmaryllisTheme.textPrimary)
+
+            HStack(spacing: 8) {
+                memoryCountBadge("Working", payload.context.working.count)
+                memoryCountBadge("Episodic", payload.context.episodic.count)
+                memoryCountBadge("Semantic", payload.context.semantic.count)
+                memoryCountBadge("Profile", payload.context.profile.count)
+            }
+
+            if !payload.context.profile.isEmpty {
+                Text("Profile")
+                    .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                    .foregroundStyle(AmaryllisTheme.textSecondary)
+                ForEach(Array(payload.context.profile.prefix(4))) { item in
+                    Text("\(item.key): \(item.value) (c=\(formatFloat(item.confidence)), i=\(formatFloat(item.importance)))")
+                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                }
+            }
+
+            if !payload.context.semantic.isEmpty {
+                Text("Top Semantic")
+                    .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                    .foregroundStyle(AmaryllisTheme.textSecondary)
+                ForEach(Array(payload.context.semantic.prefix(4))) { item in
+                    Text("\(item.kind) | score=\(formatFloat(item.score)) | \(truncate(item.text, limit: 90))")
+                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                }
+            }
+        }
+        .padding(10)
+        .background(AmaryllisTheme.surfaceAlt)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func memoryRetrievalCard(_ payload: APIMemoryRetrievalResponse) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Retrieval Scoring (\(payload.items.count))")
+                .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
+                .foregroundStyle(AmaryllisTheme.textPrimary)
+
+            ForEach(Array(payload.items.prefix(8))) { item in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("#\(item.rank) \(item.kind) score=\(formatFloat(item.score)) vec=\(formatFloat(item.vectorScore)) rec=\(formatFloat(item.recencyScore))")
+                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                    Text(truncate(item.text, limit: 120))
+                        .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                        .foregroundStyle(AmaryllisTheme.textPrimary)
+                }
+            }
+        }
+        .padding(10)
+        .background(AmaryllisTheme.surfaceAlt)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func memoryExtractionsCard(_ payload: APIMemoryExtractionsResponse) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Extraction Timeline (\(payload.items.count))")
+                .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
+                .foregroundStyle(AmaryllisTheme.textPrimary)
+
+            ForEach(Array(payload.items.reversed().prefix(6))) { item in
+                VStack(alignment: .leading, spacing: 2) {
+                    let total = item.extracted.facts.count + item.extracted.preferences.count + item.extracted.tasks.count
+                    Text("\(item.createdAt) | \(item.sourceRole) | extracted=\(total)")
+                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                    Text(truncate(item.sourceText, limit: 120))
+                        .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                        .foregroundStyle(AmaryllisTheme.textPrimary)
+                    Text("facts=\(item.extracted.facts.count), prefs=\(item.extracted.preferences.count), tasks=\(item.extracted.tasks.count)")
+                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                }
+            }
+        }
+        .padding(10)
+        .background(AmaryllisTheme.surfaceAlt)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func memoryConflictsCard(_ payload: APIMemoryConflictsResponse) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Conflict Log (\(payload.items.count))")
+                .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
+                .foregroundStyle(AmaryllisTheme.textPrimary)
+
+            ForEach(Array(payload.items.reversed().prefix(8))) { item in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(item.layer).\(item.key) | \(item.resolution)")
+                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                        .foregroundStyle(item.resolution.contains("kept_previous") ? AmaryllisTheme.accent : AmaryllisTheme.textSecondary)
+                    Text("prev=\(item.previousValue ?? "-") | new=\(item.incomingValue ?? "-")")
+                        .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                        .foregroundStyle(AmaryllisTheme.textPrimary)
+                    Text("conf_prev=\(formatFloat(item.confidencePrev)) conf_new=\(formatFloat(item.confidenceNew)) @ \(item.createdAt)")
+                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                }
+            }
+        }
+        .padding(10)
+        .background(AmaryllisTheme.surfaceAlt)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func memoryCountBadge(_ title: String, _ count: Int) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+            Text("\(count)")
+                .font(AmaryllisTheme.monoFont(size: 11, weight: .regular))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(AmaryllisTheme.surface)
+        .clipShape(Capsule())
+    }
+
+    private func truncate(_ text: String, limit: Int) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > limit else { return trimmed }
+        let index = trimmed.index(trimmed.startIndex, offsetBy: max(0, limit))
+        return "\(trimmed[..<index])..."
+    }
+
+    private func formatFloat(_ value: Double?) -> String {
+        guard let value else { return "-" }
+        return String(format: "%.3f", value)
+    }
+
+    private func clearMemoryDebugState() {
+        memoryContext = nil
+        memoryRetrieval = nil
+        memoryExtractions = nil
+        memoryConflicts = nil
+        memoryDebugStatus = "Memory debug state cleared."
+        memoryRawJSON = "{}"
+    }
+
     private enum MemoryDebugAction {
         case context
         case retrieval
         case extractions
         case conflicts
+    }
+
+    private func runAllMemoryDebug() async {
+        await runMemoryDebug(.context)
+        await runMemoryDebug(.retrieval)
+        await runMemoryDebug(.extractions)
+        await runMemoryDebug(.conflicts)
     }
 
     private func runMemoryDebug(_ action: MemoryDebugAction) async {
@@ -434,39 +640,47 @@ struct SettingsView: View {
 
             switch action {
             case .context:
-                let content = try await appState.apiClient.debugMemoryContext(
+                let response = try await appState.apiClient.debugMemoryContext(
                     userId: userID,
                     agentId: emptyToNil(debugAgentID),
                     sessionId: emptyToNil(debugSessionID),
                     query: query,
                     semanticTopK: topK
                 )
-                debugOutput = content
+                memoryContext = response
+                memoryRawJSON = prettyJSON(from: response)
+                memoryDebugStatus = "Context loaded: working \(response.context.working.count), episodic \(response.context.episodic.count), semantic \(response.context.semantic.count), profile \(response.context.profile.count)."
             case .retrieval:
                 let retrievalQuery = query.isEmpty ? "memory" : query
-                let content = try await appState.apiClient.debugMemoryRetrieval(
+                let response = try await appState.apiClient.debugMemoryRetrieval(
                     userId: userID,
                     query: retrievalQuery,
                     topK: topK
                 )
-                debugOutput = content
+                memoryRetrieval = response
+                memoryRawJSON = prettyJSON(from: response)
+                memoryDebugStatus = "Retrieval loaded: \(response.items.count) items for query \"\(retrievalQuery)\"."
             case .extractions:
-                let content = try await appState.apiClient.debugMemoryExtractions(
+                let response = try await appState.apiClient.debugMemoryExtractions(
                     userId: userID,
                     limit: limit
                 )
-                debugOutput = content
+                memoryExtractions = response
+                memoryRawJSON = prettyJSON(from: response)
+                memoryDebugStatus = "Extractions loaded: \(response.count) records."
             case .conflicts:
-                let content = try await appState.apiClient.debugMemoryConflicts(
+                let response = try await appState.apiClient.debugMemoryConflicts(
                     userId: userID,
                     limit: limit
                 )
-                debugOutput = content
+                memoryConflicts = response
+                memoryRawJSON = prettyJSON(from: response)
+                memoryDebugStatus = "Conflicts loaded: \(response.count) records."
             }
             appState.lastError = nil
         } catch {
             appState.lastError = error.localizedDescription
-            debugOutput = "Error: \(error.localizedDescription)"
+            memoryDebugStatus = "Error: \(error.localizedDescription)"
         }
     }
 
@@ -478,6 +692,16 @@ struct SettingsView: View {
     private func clampInt(_ raw: String, fallback: Int, min: Int, max: Int) -> Int {
         let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)) ?? fallback
         return Swift.max(min, Swift.min(max, parsed))
+    }
+
+    private func prettyJSON<T: Encodable>(from value: T) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(value),
+              let text = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return text
     }
 
     private func refreshToolingState() async {

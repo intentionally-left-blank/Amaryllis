@@ -352,7 +352,7 @@ final class AmaryllisAPIClient {
         workingLimit: Int = 12,
         episodicLimit: Int = 16,
         semanticTopK: Int = 8
-    ) async throws -> String {
+    ) async throws -> APIMemoryContextResponse {
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "user_id", value: userId),
             URLQueryItem(name: "query", value: query),
@@ -368,43 +368,39 @@ final class AmaryllisAPIClient {
         }
 
         let path = buildPath(path: "/debug/memory/context", queryItems: queryItems)
-        let data = try await requestData(path: path, method: "GET", body: nil)
-        return prettyJSON(from: data)
+        return try await request(path: path, method: "GET", body: Optional<Data>.none)
     }
 
     func debugMemoryRetrieval(
         userId: String,
         query: String,
         topK: Int = 8
-    ) async throws -> String {
+    ) async throws -> APIMemoryRetrievalResponse {
         let queryItems: [URLQueryItem] = [
             URLQueryItem(name: "user_id", value: userId),
             URLQueryItem(name: "query", value: query),
             URLQueryItem(name: "top_k", value: String(topK))
         ]
         let path = buildPath(path: "/debug/memory/retrieval", queryItems: queryItems)
-        let data = try await requestData(path: path, method: "GET", body: nil)
-        return prettyJSON(from: data)
+        return try await request(path: path, method: "GET", body: Optional<Data>.none)
     }
 
-    func debugMemoryExtractions(userId: String, limit: Int = 20) async throws -> String {
+    func debugMemoryExtractions(userId: String, limit: Int = 20) async throws -> APIMemoryExtractionsResponse {
         let queryItems: [URLQueryItem] = [
             URLQueryItem(name: "user_id", value: userId),
             URLQueryItem(name: "limit", value: String(limit))
         ]
         let path = buildPath(path: "/debug/memory/extractions", queryItems: queryItems)
-        let data = try await requestData(path: path, method: "GET", body: nil)
-        return prettyJSON(from: data)
+        return try await request(path: path, method: "GET", body: Optional<Data>.none)
     }
 
-    func debugMemoryConflicts(userId: String, limit: Int = 20) async throws -> String {
+    func debugMemoryConflicts(userId: String, limit: Int = 20) async throws -> APIMemoryConflictsResponse {
         let queryItems: [URLQueryItem] = [
             URLQueryItem(name: "user_id", value: userId),
             URLQueryItem(name: "limit", value: String(limit))
         ]
         let path = buildPath(path: "/debug/memory/conflicts", queryItems: queryItems)
-        let data = try await requestData(path: path, method: "GET", body: nil)
-        return prettyJSON(from: data)
+        return try await request(path: path, method: "GET", body: Optional<Data>.none)
     }
 
     private func request<T: Decodable>(path: String, method: String, body: Data?) async throws -> T {
@@ -435,15 +431,6 @@ final class AmaryllisAPIClient {
         }
 
         return data
-    }
-
-    private func prettyJSON(from data: Data) -> String {
-        if let object = try? JSONSerialization.jsonObject(with: data),
-           let encoded = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
-           let text = String(data: encoded, encoding: .utf8) {
-            return text
-        }
-        return String(data: data, encoding: .utf8) ?? ""
     }
 
     private func buildPath(path: String, queryItems: [URLQueryItem]) -> String {

@@ -510,6 +510,257 @@ struct APIAutomationEventsResponse: Decodable {
     }
 }
 
+struct APIMemoryWorkingItem: Codable, Identifiable {
+    let key: String
+    let value: String
+    let sessionId: String
+    let kind: String
+    let confidence: Double
+    let importance: Double
+    let updatedAt: String
+
+    var id: String { "\(sessionId):\(key)" }
+
+    private enum CodingKeys: String, CodingKey {
+        case key
+        case value
+        case sessionId = "session_id"
+        case kind
+        case confidence
+        case importance
+        case updatedAt = "updated_at"
+    }
+}
+
+struct APIMemoryEpisodicItem: Codable, Identifiable {
+    let role: String
+    let content: String
+    let createdAt: String
+    let sessionId: String?
+    let kind: String
+    let confidence: Double
+    let importance: Double
+    let fingerprint: String?
+
+    var id: String { "\(createdAt):\(role):\(fingerprint ?? String(content.prefix(12)))" }
+
+    private enum CodingKeys: String, CodingKey {
+        case role
+        case content
+        case createdAt = "created_at"
+        case sessionId = "session_id"
+        case kind
+        case confidence
+        case importance
+        case fingerprint
+    }
+}
+
+struct APIMemorySemanticItem: Codable, Identifiable {
+    let text: String
+    let score: Double
+    let vectorScore: Double?
+    let recencyScore: Double?
+    let metadata: [String: JSONValue]
+    let kind: String
+    let confidence: Double
+    let importance: Double
+
+    var id: String { "\(kind):\(text.prefix(24)):\(score)" }
+
+    private enum CodingKeys: String, CodingKey {
+        case text
+        case score
+        case vectorScore = "vector_score"
+        case recencyScore = "recency_score"
+        case metadata
+        case kind
+        case confidence
+        case importance
+    }
+}
+
+struct APIMemoryProfileItem: Codable, Identifiable {
+    let key: String
+    let value: String
+    let updatedAt: String
+    let confidence: Double
+    let importance: Double
+    let source: String?
+
+    var id: String { key }
+
+    private enum CodingKeys: String, CodingKey {
+        case key
+        case value
+        case updatedAt = "updated_at"
+        case confidence
+        case importance
+        case source
+    }
+}
+
+struct APIMemoryContextPayload: Codable {
+    let working: [APIMemoryWorkingItem]
+    let episodic: [APIMemoryEpisodicItem]
+    let semantic: [APIMemorySemanticItem]
+    let profile: [APIMemoryProfileItem]
+}
+
+struct APIMemoryContextResponse: Codable {
+    let requestId: String
+    let userId: String
+    let agentId: String?
+    let sessionId: String?
+    let query: String
+    let context: APIMemoryContextPayload
+
+    private enum CodingKeys: String, CodingKey {
+        case requestId = "request_id"
+        case userId = "user_id"
+        case agentId = "agent_id"
+        case sessionId = "session_id"
+        case query
+        case context
+    }
+}
+
+struct APIMemoryRetrievalItem: Codable, Identifiable {
+    let rank: Int
+    let semanticId: Int?
+    let kind: String
+    let text: String
+    let score: Double
+    let vectorScore: Double
+    let recencyScore: Double
+    let confidence: Double
+    let importance: Double
+    let createdAt: String?
+    let metadata: [String: JSONValue]
+
+    var id: String { "\(semanticId ?? -1):\(rank)" }
+
+    private enum CodingKeys: String, CodingKey {
+        case rank
+        case semanticId = "semantic_id"
+        case kind
+        case text
+        case score
+        case vectorScore = "vector_score"
+        case recencyScore = "recency_score"
+        case confidence
+        case importance
+        case createdAt = "created_at"
+        case metadata
+    }
+}
+
+struct APIMemoryRetrievalResponse: Codable {
+    let requestId: String
+    let userId: String
+    let query: String
+    let topK: Int
+    let items: [APIMemoryRetrievalItem]
+
+    private enum CodingKeys: String, CodingKey {
+        case requestId = "request_id"
+        case userId = "user_id"
+        case query
+        case topK = "top_k"
+        case items
+    }
+}
+
+struct APIMemoryExtractionCandidate: Codable, Identifiable {
+    let kind: String
+    let text: String
+    let key: String?
+    let value: String?
+    let confidence: Double
+
+    var id: String { "\(kind):\(text.prefix(16)):\(confidence)" }
+}
+
+struct APIMemoryExtractionPayload: Codable {
+    let facts: [APIMemoryExtractionCandidate]
+    let preferences: [APIMemoryExtractionCandidate]
+    let tasks: [APIMemoryExtractionCandidate]
+}
+
+struct APIMemoryExtractionItem: Codable, Identifiable {
+    let userId: String
+    let agentId: String?
+    let sessionId: String?
+    let sourceRole: String
+    let sourceText: String
+    let extracted: APIMemoryExtractionPayload
+    let createdAt: String
+
+    var id: String { "\(createdAt):\(sourceRole):\(sourceText.prefix(12))" }
+
+    private enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case agentId = "agent_id"
+        case sessionId = "session_id"
+        case sourceRole = "source_role"
+        case sourceText = "source_text"
+        case extracted = "extracted_json"
+        case createdAt = "created_at"
+    }
+}
+
+struct APIMemoryExtractionsResponse: Codable {
+    let requestId: String
+    let userId: String
+    let count: Int
+    let items: [APIMemoryExtractionItem]
+
+    private enum CodingKeys: String, CodingKey {
+        case requestId = "request_id"
+        case userId = "user_id"
+        case count
+        case items
+    }
+}
+
+struct APIMemoryConflictItem: Codable, Identifiable {
+    let layer: String
+    let key: String
+    let previousValue: String?
+    let incomingValue: String?
+    let resolution: String
+    let confidencePrev: Double?
+    let confidenceNew: Double?
+    let createdAt: String
+
+    var id: String { "\(createdAt):\(layer):\(key)" }
+
+    private enum CodingKeys: String, CodingKey {
+        case layer
+        case key
+        case previousValue = "previous_value"
+        case incomingValue = "incoming_value"
+        case resolution
+        case confidencePrev = "confidence_prev"
+        case confidenceNew = "confidence_new"
+        case createdAt = "created_at"
+    }
+}
+
+struct APIMemoryConflictsResponse: Codable {
+    let requestId: String
+    let userId: String
+    let count: Int
+    let items: [APIMemoryConflictItem]
+
+    private enum CodingKeys: String, CodingKey {
+        case requestId = "request_id"
+        case userId = "user_id"
+        case count
+        case items
+    }
+}
+
 struct LocalChatMessage: Codable, Identifiable, Equatable {
     let id: UUID
     let role: String
