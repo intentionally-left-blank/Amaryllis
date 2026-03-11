@@ -233,6 +233,10 @@ In app settings:
 - API keys entered in app settings are stored in macOS Keychain
 - use `Memory Debug` section to inspect context/retrieval/extractions/conflicts directly from UI
 - in `Agents` tab, configure interval/hourly/weekly/watcher automations and process inbox alerts
+- desktop UI theme uses retro terminal styling (80s-inspired) with bundled `OlivettiThin 9x14` bitmap font
+
+Font attribution:
+- see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 
 Chat tab behavior:
 - create multiple chats (`New Chat`)

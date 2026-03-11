@@ -69,4 +69,11 @@ cp "${BINARY}" "${APP_BUNDLE}/Contents/MacOS/Amaryllis"
 chmod +x "${APP_BUNDLE}/Contents/MacOS/Amaryllis"
 cp "${ICON_FILE}" "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
 
+RESOURCE_DIR="$(dirname "${BINARY}")"
+shopt -s nullglob
+for bundle in "${RESOURCE_DIR}"/*.bundle; do
+  cp -R "${bundle}" "${APP_BUNDLE}/Contents/Resources/"
+done
+shopt -u nullglob
+
 echo "Built app bundle: ${APP_BUNDLE}"

@@ -50,9 +50,7 @@ struct ChatView: View {
                 TextEditor(text: $inputText)
                     .font(AmaryllisTheme.bodyFont(size: 14, weight: .medium))
                     .frame(minHeight: 64, maxHeight: 120)
-                    .padding(6)
-                    .background(AmaryllisTheme.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .amaryllisEditorSurface()
 
                 Button(action: send) {
                     if isSending {
@@ -106,6 +104,7 @@ struct ChatView: View {
                 HStack(spacing: 8) {
                     Text(appState.currentChatTitle)
                         .font(AmaryllisTheme.bodyFont(size: 13, weight: .semibold))
+                        .tracking(0.5)
                         .foregroundStyle(AmaryllisTheme.textPrimary)
                         .lineLimit(1)
                     Image(systemName: "chevron.down")
@@ -117,10 +116,10 @@ struct ChatView: View {
                 .padding(.vertical, 7)
                 .background(AmaryllisTheme.surfaceAlt)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: 4)
                         .stroke(AmaryllisTheme.border.opacity(0.6), lineWidth: 1)
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
             }
             .menuStyle(.borderlessButton)
             .disabled(isSending)
@@ -209,9 +208,9 @@ struct ChatView: View {
             }
             .padding(10)
             .background(isUser ? AmaryllisTheme.accentSoft : AmaryllisTheme.surfaceAlt)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
             .overlay(
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: 4)
                     .stroke(isUser ? AmaryllisTheme.accent.opacity(0.9) : AmaryllisTheme.border.opacity(0.35), lineWidth: 1)
             )
             .frame(maxWidth: 680, alignment: .leading)

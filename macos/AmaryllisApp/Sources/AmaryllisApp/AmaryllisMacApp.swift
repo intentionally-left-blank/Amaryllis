@@ -4,6 +4,10 @@ import SwiftUI
 struct AmaryllisMacApp: App {
     @StateObject private var appState = AppState()
 
+    init() {
+        AmaryllisFontRegistry.registerBundledFonts()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()

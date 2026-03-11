@@ -92,17 +92,15 @@ struct AgentsView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 TextField("User ID", text: $userID)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                 TextField("Agent name", text: $newAgentName)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                 TextField("Tools (comma separated)", text: $newAgentTools)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                 TextEditor(text: $newAgentPrompt)
                     .font(AmaryllisTheme.bodyFont(size: 12, weight: .medium))
                     .frame(height: 80)
-                    .padding(8)
-                    .background(AmaryllisTheme.surfaceAlt)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .amaryllisEditorSurface()
 
                 HStack {
                     Button {
@@ -156,11 +154,11 @@ struct AgentsView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(10)
                             .background(
-                                RoundedRectangle(cornerRadius: 10)
+                                RoundedRectangle(cornerRadius: 4)
                                     .fill(selectedAgentID == agent.id ? AmaryllisTheme.accentSoft : AmaryllisTheme.surface)
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: 10)
+                                RoundedRectangle(cornerRadius: 4)
                                     .stroke(selectedAgentID == agent.id ? AmaryllisTheme.accent : AmaryllisTheme.border.opacity(0.4), lineWidth: 1)
                             )
                         }
@@ -203,7 +201,7 @@ struct AgentsView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(10)
                             .background(AmaryllisTheme.surface)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
                 }
             }
@@ -212,15 +210,15 @@ struct AgentsView: View {
 
             HStack(spacing: 8) {
                 TextField("Session ID", text: $sessionID)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                     .frame(width: 160)
 
                 TextField("Attempts", text: $runMaxAttempts)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                     .frame(width: 90)
 
                 TextField("Message", text: $chatInput)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(AmaryllisTerminalTextFieldStyle())
 
                 Button {
                     Task { await sendAgentMessage() }
@@ -351,7 +349,7 @@ struct AgentsView: View {
                                 }
                                 .padding(8)
                                 .background(AmaryllisTheme.surface)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
                                 .onTapGesture {
                                     selectedRunID = run.id
                                     runStatusMessage = "Selected run \(run.id)"
@@ -401,7 +399,7 @@ struct AgentsView: View {
                     }
                     .padding(8)
                     .background(AmaryllisTheme.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
             }
         }
@@ -422,10 +420,10 @@ struct AgentsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
                         TextField("Scheduled message", text: $newAutomationMessage)
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(AmaryllisTerminalTextFieldStyle())
 
                         TextField("Timezone", text: $newAutomationTimezone)
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                             .frame(width: 180)
                     }
 
@@ -441,37 +439,37 @@ struct AgentsView: View {
 
                         if newAutomationScheduleType == "interval" {
                             TextField("Interval (sec)", text: $newAutomationIntervalSec)
-                                .textFieldStyle(.roundedBorder)
+                                .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                                 .frame(width: 130)
                         } else if newAutomationScheduleType == "hourly" {
                             TextField("Every N hours", text: $newAutomationIntervalHours)
-                                .textFieldStyle(.roundedBorder)
+                                .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                                 .frame(width: 130)
                             TextField("Minute", text: $newAutomationMinute)
-                                .textFieldStyle(.roundedBorder)
+                                .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                                 .frame(width: 90)
                         } else if newAutomationScheduleType == "weekly" {
                             TextField("Weekdays (MO,TU,...)", text: $newAutomationWeekdays)
-                                .textFieldStyle(.roundedBorder)
+                                .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                                 .frame(minWidth: 170, maxWidth: 240)
                             TextField("Hour", text: $newAutomationHour)
-                                .textFieldStyle(.roundedBorder)
+                                .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                                 .frame(width: 80)
                             TextField("Minute", text: $newAutomationMinute)
-                                .textFieldStyle(.roundedBorder)
+                                .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                                 .frame(width: 80)
                         } else {
                             TextField("Watch path", text: $newAutomationWatchPath)
-                                .textFieldStyle(.roundedBorder)
+                                .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                                 .frame(minWidth: 220, maxWidth: 320)
                             TextField("Poll sec", text: $newAutomationWatchPollSec)
-                                .textFieldStyle(.roundedBorder)
+                                .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                                 .frame(width: 90)
                             TextField("Glob", text: $newAutomationWatchGlob)
-                                .textFieldStyle(.roundedBorder)
+                                .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                                 .frame(width: 110)
                             TextField("Max files", text: $newAutomationWatchMaxChangedFiles)
-                                .textFieldStyle(.roundedBorder)
+                                .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                                 .frame(width: 90)
                             Toggle("Recursive", isOn: $newAutomationWatchRecursive)
                                 .toggleStyle(.switch)
@@ -598,7 +596,7 @@ struct AgentsView: View {
                                 }
                                 .padding(8)
                                 .background(AmaryllisTheme.surface)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
                                 .onTapGesture {
                                     selectedAutomationID = automation.id
                                     applyAutomationToForm(automation)
@@ -636,7 +634,7 @@ struct AgentsView: View {
                         .frame(maxHeight: 140)
                         .padding(8)
                         .background(AmaryllisTheme.surface)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
                 }
             }
@@ -663,7 +661,7 @@ struct AgentsView: View {
                     .frame(width: 130)
 
                 TextField("Category", text: $inboxCategory)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                     .frame(width: 160)
 
                 Button("Refresh") {
@@ -726,7 +724,7 @@ struct AgentsView: View {
                             }
                             .padding(8)
                             .background(AmaryllisTheme.surface)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
                         }
                     }
                 }

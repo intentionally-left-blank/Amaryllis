@@ -31,37 +31,37 @@ struct SettingsView: View {
                     .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
                     .foregroundStyle(AmaryllisTheme.textSecondary)
                 TextField("http://localhost:8000", text: $appState.endpoint)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(AmaryllisTerminalTextFieldStyle())
 
                 Text("Runtime Directory")
                     .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
                     .foregroundStyle(AmaryllisTheme.textSecondary)
                 TextField("Path to repository root", text: $appState.runtimeDirectory)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(AmaryllisTerminalTextFieldStyle())
 
                 Text("OpenAI Base URL")
                     .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
                     .foregroundStyle(AmaryllisTheme.textSecondary)
                 TextField("https://api.openai.com/v1", text: $appState.openAIBaseURL)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(AmaryllisTerminalTextFieldStyle())
 
                 Text("OpenAI API Key")
                     .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
                     .foregroundStyle(AmaryllisTheme.textSecondary)
                 SecureField("sk-...", text: $appState.openAIAPIKey)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(AmaryllisTerminalTextFieldStyle())
 
                 Text("OpenRouter Base URL")
                     .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
                     .foregroundStyle(AmaryllisTheme.textSecondary)
                 TextField("https://openrouter.ai/api/v1", text: $appState.openRouterBaseURL)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(AmaryllisTerminalTextFieldStyle())
 
                 Text("OpenRouter API Key")
                     .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
                     .foregroundStyle(AmaryllisTheme.textSecondary)
                 SecureField("or-...", text: $appState.openRouterAPIKey)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(AmaryllisTerminalTextFieldStyle())
 
                 HStack(spacing: 8) {
                     Button("Save") {
@@ -125,7 +125,7 @@ struct SettingsView: View {
                             .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
                             .foregroundStyle(AmaryllisTheme.textSecondary)
                         TextField("10", text: $appState.mcpTimeoutSec)
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                             .frame(width: 140)
                     }
 
@@ -137,7 +137,7 @@ struct SettingsView: View {
                         .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
                         .foregroundStyle(AmaryllisTheme.textSecondary)
                     TextField("python_exec,filesystem", text: $appState.blockedTools)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -145,7 +145,7 @@ struct SettingsView: View {
                         .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
                         .foregroundStyle(AmaryllisTheme.textSecondary)
                     TextField("http://localhost:3001,http://localhost:3002", text: $appState.mcpEndpoints)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -153,7 +153,7 @@ struct SettingsView: View {
                         .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
                         .foregroundStyle(AmaryllisTheme.textSecondary)
                     SecureField("hmac-shared-secret", text: $appState.pluginSigningKey)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                 }
 
                 HStack(spacing: 8) {
@@ -231,7 +231,7 @@ struct SettingsView: View {
                                 }
                                 .padding(8)
                                 .background(AmaryllisTheme.surface)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
                             }
                         }
                     }
@@ -258,9 +258,9 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity, minHeight: 80, maxHeight: 140)
                     .padding(10)
                     .background(AmaryllisTheme.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: 6)
                             .stroke(AmaryllisTheme.border.opacity(0.35), lineWidth: 1)
                     )
                 }
@@ -278,7 +278,7 @@ struct SettingsView: View {
                             .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
                             .foregroundStyle(AmaryllisTheme.textSecondary)
                         TextField("user-001", text: $debugUserID)
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
@@ -286,7 +286,7 @@ struct SettingsView: View {
                             .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
                             .foregroundStyle(AmaryllisTheme.textSecondary)
                         TextField("agent-id", text: $debugAgentID)
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
@@ -294,7 +294,7 @@ struct SettingsView: View {
                             .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
                             .foregroundStyle(AmaryllisTheme.textSecondary)
                         TextField("session-001", text: $debugSessionID)
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                     }
                 }
 
@@ -304,7 +304,7 @@ struct SettingsView: View {
                             .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
                             .foregroundStyle(AmaryllisTheme.textSecondary)
                         TextField("name / preferences / task", text: $debugQuery)
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                     }
                     .frame(maxWidth: .infinity)
 
@@ -313,7 +313,7 @@ struct SettingsView: View {
                             .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
                             .foregroundStyle(AmaryllisTheme.textSecondary)
                         TextField("8", text: $debugTopK)
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                             .frame(width: 80)
                     }
 
@@ -322,7 +322,7 @@ struct SettingsView: View {
                             .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
                             .foregroundStyle(AmaryllisTheme.textSecondary)
                         TextField("20", text: $debugLimit)
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(AmaryllisTerminalTextFieldStyle())
                             .frame(width: 80)
                     }
                 }
@@ -393,9 +393,9 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, minHeight: 140, maxHeight: 320)
                 .padding(10)
                 .background(AmaryllisTheme.surface)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: 6)
                         .stroke(AmaryllisTheme.border.opacity(0.35), lineWidth: 1)
                 )
             }
@@ -419,9 +419,9 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(10)
                 .background(AmaryllisTheme.surface)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: 6)
                         .stroke(AmaryllisTheme.border.opacity(0.35), lineWidth: 1)
                 )
             }
@@ -498,7 +498,7 @@ struct SettingsView: View {
         }
         .padding(10)
         .background(AmaryllisTheme.surfaceAlt)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
     private func memoryRetrievalCard(_ payload: APIMemoryRetrievalResponse) -> some View {
@@ -520,7 +520,7 @@ struct SettingsView: View {
         }
         .padding(10)
         .background(AmaryllisTheme.surfaceAlt)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
     private func memoryExtractionsCard(_ payload: APIMemoryExtractionsResponse) -> some View {
@@ -546,7 +546,7 @@ struct SettingsView: View {
         }
         .padding(10)
         .background(AmaryllisTheme.surfaceAlt)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
     private func memoryConflictsCard(_ payload: APIMemoryConflictsResponse) -> some View {
@@ -571,7 +571,7 @@ struct SettingsView: View {
         }
         .padding(10)
         .background(AmaryllisTheme.surfaceAlt)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
     private func memoryCountBadge(_ title: String, _ count: Int) -> some View {

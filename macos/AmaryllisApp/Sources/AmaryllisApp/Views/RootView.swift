@@ -4,17 +4,21 @@ struct RootView: View {
     @EnvironmentObject private var appState: AppState
 
     var body: some View {
-        NavigationSplitView {
-            sidebar
-                .navigationSplitViewColumnWidth(min: 200, ideal: 220)
-        } detail: {
-            VStack(spacing: 0) {
-                topBar
-                content
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(14)
+        ZStack {
+            AmaryllisTerminalBackground()
+            NavigationSplitView {
+                sidebar
+                    .navigationSplitViewColumnWidth(min: 215, ideal: 235)
+            } detail: {
+                VStack(spacing: 0) {
+                    topBar
+                    content
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(14)
+                }
+                .background(Color.clear)
             }
-            .background(AmaryllisTheme.background)
+            .background(Color.clear)
         }
         .task {
             await appState.refreshHealth()
@@ -26,6 +30,7 @@ struct RootView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Amaryllis")
                 .font(AmaryllisTheme.titleFont(size: 30))
+                .tracking(1.2)
                 .foregroundStyle(AmaryllisTheme.textPrimary)
                 .padding(.top, 8)
 
@@ -36,15 +41,23 @@ struct RootView: View {
                     HStack(spacing: 10) {
                         Image(systemName: tab.icon)
                             .font(.system(size: 14, weight: .medium))
-                        Text(tab.rawValue)
+                        Text(tab.rawValue.uppercased())
                             .font(AmaryllisTheme.bodyFont(size: 14, weight: .semibold))
+                            .tracking(0.7)
                         Spacer()
                     }
                     .padding(.vertical, 8)
                     .padding(.horizontal, 10)
                     .background(
-                        RoundedRectangle(cornerRadius: 10)
+                        RoundedRectangle(cornerRadius: 3)
                             .fill(appState.selectedTab == tab ? AmaryllisTheme.accentSoft : Color.clear)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3)
+                            .stroke(
+                                appState.selectedTab == tab ? AmaryllisTheme.accent.opacity(0.9) : AmaryllisTheme.borderSoft,
+                                lineWidth: 1
+                            )
                     )
                 }
                 .buttonStyle(.plain)
@@ -54,12 +67,20 @@ struct RootView: View {
             Spacer()
         }
         .padding(14)
-        .background(AmaryllisTheme.surface)
+        .background(
+            RoundedRectangle(cornerRadius: 0)
+                .fill(AmaryllisTheme.surface.opacity(0.92))
+        )
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(AmaryllisTheme.borderSoft)
+                .frame(width: 1)
+        }
     }
 
     private var topBar: some View {
         HStack(spacing: 10) {
-            statusDot(label: "Runtime", on: appState.runtimeManager.isRunning)
+            statusDot(label: "RUNTIME", on: appState.runtimeManager.isRunning)
             statusDot(label: "API", on: appState.runtimeManager.connectionState == .online)
             Spacer()
             Text(appState.endpoint)
@@ -68,13 +89,18 @@ struct RootView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(AmaryllisTheme.surface)
+        .background(AmaryllisTheme.surface.opacity(0.86))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(AmaryllisTheme.borderSoft)
+                .frame(height: 1)
+        }
     }
 
     private func statusDot(label: String, on: Bool) -> some View {
         HStack(spacing: 6) {
-            Circle()
-                .fill(on ? Color.green : AmaryllisTheme.accent)
+            Rectangle()
+                .fill(on ? AmaryllisTheme.okGreen : AmaryllisTheme.accent)
                 .frame(width: 8, height: 8)
             Text(label)
                 .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
@@ -83,7 +109,11 @@ struct RootView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(AmaryllisTheme.surfaceAlt)
-        .clipShape(Capsule())
+        .overlay(
+            RoundedRectangle(cornerRadius: 3)
+                .stroke(AmaryllisTheme.border.opacity(0.75), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 3))
     }
 
     @ViewBuilder

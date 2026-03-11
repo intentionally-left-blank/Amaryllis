@@ -117,7 +117,7 @@ struct ModelsView: View {
 
             HStack(spacing: 8) {
                 TextField("Model id", text: $modelToDownload)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(AmaryllisTerminalTextFieldStyle())
 
                 Picker("Provider", selection: $providerForDownload) {
                     ForEach(providerOptions, id: \.self) { provider in
