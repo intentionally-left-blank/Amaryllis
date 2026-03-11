@@ -92,6 +92,90 @@ struct APIModelActionResponse: Decodable {
     let model: String
 }
 
+struct APIToolItem: Decodable, Identifiable {
+    let name: String
+    let description: String
+    let inputSchema: [String: JSONValue]
+    let source: String
+    let riskLevel: String
+    let approvalMode: String
+    let isolation: String
+
+    var id: String { name }
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case description
+        case inputSchema = "input_schema"
+        case source
+        case riskLevel = "risk_level"
+        case approvalMode = "approval_mode"
+        case isolation
+    }
+}
+
+struct APIListToolsResponse: Decodable {
+    let items: [APIToolItem]
+    let count: Int
+    let requestId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case items
+        case count
+        case requestId = "request_id"
+    }
+}
+
+struct APIPermissionPrompt: Decodable, Identifiable {
+    let id: String
+    let status: String
+    let toolName: String
+    let argumentsHash: String
+    let argumentsPreview: [String: JSONValue]
+    let reason: String
+    let requestId: String?
+    let userId: String?
+    let sessionId: String?
+    let createdAt: String
+    let updatedAt: String
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case status
+        case toolName = "tool_name"
+        case argumentsHash = "arguments_hash"
+        case argumentsPreview = "arguments_preview"
+        case reason
+        case requestId = "request_id"
+        case userId = "user_id"
+        case sessionId = "session_id"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+struct APIListPermissionPromptsResponse: Decodable {
+    let items: [APIPermissionPrompt]
+    let count: Int
+    let requestId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case items
+        case count
+        case requestId = "request_id"
+    }
+}
+
+struct APIPermissionPromptActionResponse: Decodable {
+    let prompt: APIPermissionPrompt
+    let requestId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case prompt
+        case requestId = "request_id"
+    }
+}
+
 struct APIChatMessage: Codable {
     let role: String
     let content: String

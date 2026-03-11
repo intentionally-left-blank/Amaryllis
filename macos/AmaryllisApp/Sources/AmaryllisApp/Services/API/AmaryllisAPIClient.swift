@@ -54,6 +54,39 @@ final class AmaryllisAPIClient {
         return try await request(path: "/models/load", method: "POST", body: body)
     }
 
+    func listTools() async throws -> APIListToolsResponse {
+        try await request(path: "/tools", method: "GET", body: Optional<Data>.none)
+    }
+
+    func listPermissionPrompts(
+        status: String? = nil,
+        limit: Int = 100
+    ) async throws -> APIListPermissionPromptsResponse {
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let status, !status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            queryItems.append(URLQueryItem(name: "status", value: status))
+        }
+
+        let path = buildPath(path: "/tools/permissions/prompts", queryItems: queryItems)
+        return try await request(path: path, method: "GET", body: Optional<Data>.none)
+    }
+
+    func approvePermissionPrompt(promptID: String) async throws -> APIPermissionPromptActionResponse {
+        try await request(
+            path: "/tools/permissions/prompts/\(promptID)/approve",
+            method: "POST",
+            body: Optional<Data>.none
+        )
+    }
+
+    func denyPermissionPrompt(promptID: String) async throws -> APIPermissionPromptActionResponse {
+        try await request(
+            path: "/tools/permissions/prompts/\(promptID)/deny",
+            method: "POST",
+            body: Optional<Data>.none
+        )
+    }
+
     func chatCompletions(
         model: String?,
         provider: String?,

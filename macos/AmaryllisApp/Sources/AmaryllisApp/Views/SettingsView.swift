@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct SettingsView: View {
@@ -10,12 +11,14 @@ struct SettingsView: View {
     @State private var debugLimit: String = "20"
     @State private var debugOutput: String = "No debug output yet."
     @State private var isDebugLoading: Bool = false
+    @State private var isToolsLoading: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Runtime Settings")
-                .font(AmaryllisTheme.titleFont(size: 30))
-                .foregroundStyle(AmaryllisTheme.textPrimary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Runtime Settings")
+                    .font(AmaryllisTheme.titleFont(size: 30))
+                    .foregroundStyle(AmaryllisTheme.textPrimary)
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("API Endpoint")
@@ -89,6 +92,171 @@ struct SettingsView: View {
                     Text(error)
                         .font(AmaryllisTheme.bodyFont(size: 12, weight: .medium))
                         .foregroundStyle(AmaryllisTheme.accent)
+                }
+            }
+            .amaryllisCard()
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Tools & MCP")
+                    .font(AmaryllisTheme.sectionFont(size: 17))
+                    .foregroundStyle(AmaryllisTheme.textPrimary)
+
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Approval Mode")
+                            .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                        Picker("Approval Mode", selection: $appState.toolApprovalEnforcement) {
+                            Text("prompt_and_allow").tag("prompt_and_allow")
+                            Text("strict").tag("strict")
+                        }
+                        .pickerStyle(.menu)
+                        .frame(width: 220)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("MCP Timeout (sec)")
+                            .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                        TextField("10", text: $appState.mcpTimeoutSec)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 140)
+                    }
+
+                    Spacer()
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Blocked Tools (comma-separated)")
+                        .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                    TextField("python_exec,filesystem", text: $appState.blockedTools)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("MCP Endpoints (comma-separated)")
+                        .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                    TextField("http://localhost:3001,http://localhost:3002", text: $appState.mcpEndpoints)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Plugin Signing Key (optional)")
+                        .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                    SecureField("hmac-shared-secret", text: $appState.pluginSigningKey)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                HStack(spacing: 8) {
+                    Button("Save + Restart Hint") {
+                        appState.persistSettings()
+                        appState.lastError = "Tools/MCP settings saved. Restart runtime to apply."
+                    }
+                    .buttonStyle(AmaryllisSecondaryButtonStyle())
+
+                    Button("Refresh Tools") {
+                        Task { await refreshToolingState() }
+                    }
+                    .buttonStyle(AmaryllisSecondaryButtonStyle())
+                    .disabled(isToolsLoading)
+
+                    if isToolsLoading {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+
+                Text("Pending approvals: \(appState.permissionPrompts.count) | Available tools: \(appState.availableTools.count)")
+                    .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                    .foregroundStyle(AmaryllisTheme.textSecondary)
+
+                if appState.permissionPrompts.isEmpty {
+                    Text("No pending permission prompts.")
+                        .font(AmaryllisTheme.bodyFont(size: 12, weight: .medium))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 8) {
+                            ForEach(appState.permissionPrompts) { prompt in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack {
+                                        Text(prompt.toolName)
+                                            .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
+                                            .foregroundStyle(AmaryllisTheme.textPrimary)
+                                        Spacer()
+                                        Text(prompt.status)
+                                            .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                                    }
+
+                                    Text(prompt.reason)
+                                        .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                                        .foregroundStyle(AmaryllisTheme.textSecondary)
+
+                                    Text("request_id: \(prompt.requestId ?? "-")")
+                                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                        .foregroundStyle(AmaryllisTheme.textSecondary)
+
+                                    Text(renderArgumentsPreview(prompt.argumentsPreview))
+                                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                                        .lineLimit(4)
+
+                                    HStack(spacing: 8) {
+                                        Button("Approve") {
+                                            Task {
+                                                await appState.approvePermissionPrompt(promptID: prompt.id)
+                                                await refreshToolingState()
+                                            }
+                                        }
+                                        .buttonStyle(AmaryllisPrimaryButtonStyle())
+
+                                        Button("Deny") {
+                                            Task {
+                                                await appState.denyPermissionPrompt(promptID: prompt.id)
+                                                await refreshToolingState()
+                                            }
+                                        }
+                                        .buttonStyle(AmaryllisSecondaryButtonStyle())
+                                    }
+                                }
+                                .padding(8)
+                                .background(AmaryllisTheme.surface)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 90, maxHeight: 190)
+                }
+
+                if !appState.availableTools.isEmpty {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 6) {
+                            ForEach(appState.availableTools) { tool in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text(tool.name)
+                                        .font(AmaryllisTheme.monoFont(size: 11, weight: .regular))
+                                        .foregroundStyle(AmaryllisTheme.textPrimary)
+                                        .frame(width: 180, alignment: .leading)
+                                    Text("\(tool.source) | \(tool.riskLevel) | \(tool.approvalMode)")
+                                        .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 80, maxHeight: 140)
+                    .padding(10)
+                    .background(AmaryllisTheme.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(AmaryllisTheme.border.opacity(0.35), lineWidth: 1)
+                    )
                 }
             }
             .amaryllisCard()
@@ -232,8 +400,12 @@ struct SettingsView: View {
                         .stroke(AmaryllisTheme.border.opacity(0.35), lineWidth: 1)
                 )
             }
-            .amaryllisCard()
-            .frame(maxHeight: .infinity)
+                .amaryllisCard()
+                .frame(minHeight: 180, maxHeight: 260)
+            }
+        }
+        .onAppear {
+            Task { await refreshToolingState() }
         }
     }
 
@@ -306,5 +478,21 @@ struct SettingsView: View {
     private func clampInt(_ raw: String, fallback: Int, min: Int, max: Int) -> Int {
         let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)) ?? fallback
         return Swift.max(min, Swift.min(max, parsed))
+    }
+
+    private func refreshToolingState() async {
+        isToolsLoading = true
+        defer { isToolsLoading = false }
+        await appState.refreshToolingState()
+    }
+
+    private func renderArgumentsPreview(_ arguments: [String: JSONValue]) -> String {
+        guard let data = try? JSONEncoder().encode(arguments),
+              let object = try? JSONSerialization.jsonObject(with: data, options: []),
+              let pretty = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
+              let text = String(data: pretty, encoding: .utf8) else {
+            return "{}"
+        }
+        return text
     }
 }

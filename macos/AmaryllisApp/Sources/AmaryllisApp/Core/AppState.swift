@@ -13,6 +13,13 @@ final class AppState: ObservableObject {
     @Published var openAIAPIKey: String
     @Published var openRouterBaseURL: String
     @Published var openRouterAPIKey: String
+    @Published var toolApprovalEnforcement: String
+    @Published var blockedTools: String
+    @Published var pluginSigningKey: String
+    @Published var mcpEndpoints: String
+    @Published var mcpTimeoutSec: String
+    @Published var availableTools: [APIToolItem] = []
+    @Published var permissionPrompts: [APIPermissionPrompt] = []
     @Published var chatSessions: [LocalChatSession] = []
     @Published var selectedChatID: UUID?
     @Published var isBusy: Bool = false
@@ -25,6 +32,11 @@ final class AppState: ObservableObject {
     private let selectedChatKey = "amaryllis.selectedChatID"
     private let openAIBaseURLKey = "amaryllis.openai.baseURL"
     private let openRouterBaseURLKey = "amaryllis.openrouter.baseURL"
+    private let toolApprovalEnforcementKey = "amaryllis.tools.approvalEnforcement"
+    private let blockedToolsKey = "amaryllis.tools.blockedTools"
+    private let pluginSigningKeyKey = "amaryllis.tools.pluginSigningKey"
+    private let mcpEndpointsKey = "amaryllis.mcp.endpoints"
+    private let mcpTimeoutSecKey = "amaryllis.mcp.timeoutSec"
     private let keychainService = "org.amaryllis.app.credentials"
     private let openAIKeychainAccount = "openai_api_key"
     private let openRouterKeychainAccount = "openrouter_api_key"
@@ -40,6 +52,11 @@ final class AppState: ObservableObject {
         self.openRouterBaseURL = defaults.string(forKey: openRouterBaseURLKey) ?? "https://openrouter.ai/api/v1"
         self.openAIAPIKey = KeychainStore.get(service: keychainService, account: openAIKeychainAccount) ?? ""
         self.openRouterAPIKey = KeychainStore.get(service: keychainService, account: openRouterKeychainAccount) ?? ""
+        self.toolApprovalEnforcement = defaults.string(forKey: toolApprovalEnforcementKey) ?? "prompt_and_allow"
+        self.blockedTools = defaults.string(forKey: blockedToolsKey) ?? ""
+        self.pluginSigningKey = defaults.string(forKey: pluginSigningKeyKey) ?? ""
+        self.mcpEndpoints = defaults.string(forKey: mcpEndpointsKey) ?? ""
+        self.mcpTimeoutSec = defaults.string(forKey: mcpTimeoutSecKey) ?? "10"
 
         let discoveredRuntimeDir = AppState.discoverRuntimeDirectory()
         let persistedRuntimeDir = defaults.string(forKey: runtimeDirKey)
@@ -59,6 +76,11 @@ final class AppState: ObservableObject {
         defaults.set(runtimeDirectory.trimmingCharacters(in: .whitespacesAndNewlines), forKey: runtimeDirKey)
         defaults.set(openAIBaseURL.trimmingCharacters(in: .whitespacesAndNewlines), forKey: openAIBaseURLKey)
         defaults.set(openRouterBaseURL.trimmingCharacters(in: .whitespacesAndNewlines), forKey: openRouterBaseURLKey)
+        defaults.set(normalizedApprovalMode(), forKey: toolApprovalEnforcementKey)
+        defaults.set(blockedTools.trimmingCharacters(in: .whitespacesAndNewlines), forKey: blockedToolsKey)
+        defaults.set(pluginSigningKey.trimmingCharacters(in: .whitespacesAndNewlines), forKey: pluginSigningKeyKey)
+        defaults.set(mcpEndpoints.trimmingCharacters(in: .whitespacesAndNewlines), forKey: mcpEndpointsKey)
+        defaults.set(normalizedMCPTimeout(), forKey: mcpTimeoutSecKey)
 
         saveSecret(openAIAPIKey, account: openAIKeychainAccount)
         saveSecret(openRouterAPIKey, account: openRouterKeychainAccount)
@@ -126,6 +148,52 @@ final class AppState: ObservableObject {
         do {
             _ = try await apiClient.downloadModel(modelId: modelId, provider: provider)
             await refreshModels()
+            lastError = nil
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func refreshToolingState() async {
+        guard await ensureRuntimeOnline() else {
+            return
+        }
+
+        do {
+            async let toolsResponse = apiClient.listTools()
+            async let promptsResponse = apiClient.listPermissionPrompts(status: "pending", limit: 200)
+            let (toolsPayload, promptsPayload) = try await (toolsResponse, promptsResponse)
+
+            availableTools = toolsPayload.items.sorted(by: { $0.name < $1.name })
+            permissionPrompts = promptsPayload.items
+            lastError = nil
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func approvePermissionPrompt(promptID: String) async {
+        guard await ensureRuntimeOnline() else {
+            return
+        }
+
+        do {
+            _ = try await apiClient.approvePermissionPrompt(promptID: promptID)
+            permissionPrompts.removeAll(where: { $0.id == promptID })
+            lastError = nil
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func denyPermissionPrompt(promptID: String) async {
+        guard await ensureRuntimeOnline() else {
+            return
+        }
+
+        do {
+            _ = try await apiClient.denyPermissionPrompt(promptID: promptID)
+            permissionPrompts.removeAll(where: { $0.id == promptID })
             lastError = nil
         } catch {
             lastError = error.localizedDescription
@@ -416,6 +484,9 @@ final class AppState: ObservableObject {
         let trimmedOpenAIKey = openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedOpenRouterBase = openRouterBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedOpenRouterKey = openRouterAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedBlockedTools = blockedTools.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPluginSigningKey = pluginSigningKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedMCPEndpoints = mcpEndpoints.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if !trimmedOpenAIBase.isEmpty {
             env["AMARYLLIS_OPENAI_BASE_URL"] = trimmedOpenAIBase
@@ -429,7 +500,28 @@ final class AppState: ObservableObject {
         if !trimmedOpenRouterKey.isEmpty {
             env["AMARYLLIS_OPENROUTER_API_KEY"] = trimmedOpenRouterKey
         }
+        env["AMARYLLIS_TOOL_APPROVAL_ENFORCEMENT"] = normalizedApprovalMode()
+        env["AMARYLLIS_MCP_TIMEOUT_SEC"] = normalizedMCPTimeout()
+        env["AMARYLLIS_BLOCKED_TOOLS"] = trimmedBlockedTools
+        env["AMARYLLIS_PLUGIN_SIGNING_KEY"] = trimmedPluginSigningKey
+        env["AMARYLLIS_MCP_ENDPOINTS"] = trimmedMCPEndpoints
         return env
+    }
+
+    private func normalizedApprovalMode() -> String {
+        let raw = toolApprovalEnforcement
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if raw == "strict" {
+            return "strict"
+        }
+        return "prompt_and_allow"
+    }
+
+    private func normalizedMCPTimeout() -> String {
+        let raw = mcpTimeoutSec.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parsed = Double(raw) ?? 10.0
+        return String(max(1.0, parsed))
     }
 
     private func saveSecret(_ rawValue: String, account: String) {
