@@ -33,6 +33,22 @@ class OpenRouterProvider:
             )
         return result
 
+    def health_check(self) -> dict[str, Any]:
+        if not self.api_key:
+            return {
+                "status": "disabled",
+                "detail": "API key is not configured",
+            }
+
+        with httpx.Client(base_url=self.base_url, timeout=8.0, headers=self._headers()) as client:
+            response = client.get("/models")
+            response.raise_for_status()
+
+        return {
+            "status": "ok",
+            "detail": "reachable=true",
+        }
+
     def suggested_models(self, limit: int = 20) -> list[dict[str, str]]:
         return []
 

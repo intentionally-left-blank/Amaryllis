@@ -78,6 +78,17 @@ class OllamaProvider:
             )
         return result
 
+    def health_check(self) -> dict[str, Any]:
+        with httpx.Client(base_url=self.base_url, timeout=2.5) as client:
+            response = client.get("/api/tags")
+            response.raise_for_status()
+            payload = response.json()
+        model_count = len(payload.get("models", []))
+        return {
+            "status": "ok",
+            "detail": f"reachable=true models={model_count}",
+        }
+
     def suggested_models(self, limit: int = 200) -> list[dict[str, str]]:
         suggestions: list[dict[str, str]] = []
         seen: set[str] = set()

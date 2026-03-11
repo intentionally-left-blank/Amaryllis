@@ -72,6 +72,36 @@ class ModelManager:
             "suggested": self._get_suggested_models(),
         }
 
+    def provider_health(self) -> dict[str, Any]:
+        checks: dict[str, Any] = {}
+        for name, provider in self.providers.items():
+            start = time.perf_counter()
+            try:
+                checker = getattr(provider, "health_check", None)
+                if callable(checker):
+                    raw = checker()
+                else:
+                    provider.list_models()
+                    raw = {"status": "ok"}
+
+                latency_ms = round((time.perf_counter() - start) * 1000.0, 2)
+                payload = raw if isinstance(raw, dict) else {"status": "ok", "detail": str(raw)}
+                checks[name] = {
+                    "status": str(payload.get("status", "ok")),
+                    "latency_ms": latency_ms,
+                    "active": name == self.active_provider,
+                    "detail": payload.get("detail"),
+                }
+            except Exception as exc:
+                latency_ms = round((time.perf_counter() - start) * 1000.0, 2)
+                checks[name] = {
+                    "status": "error",
+                    "latency_ms": latency_ms,
+                    "active": name == self.active_provider,
+                    "detail": str(exc),
+                }
+        return checks
+
     def download_model(self, model_id: str, provider: str | None = None) -> dict[str, Any]:
         provider_name = provider or self.active_provider
         selected = self.providers.get(provider_name)
@@ -127,29 +157,40 @@ class ModelManager:
                 "model": model_name,
             }
         except Exception as primary_exc:
-            if provider_name != "mlx" or not self.config.enable_ollama_fallback:
-                raise
-
-            self.logger.warning(
-                "mlx_failed_fallback_to_ollama model=%s error=%s",
-                model_name,
-                primary_exc,
-            )
-
-            fallback_model = self.database.get_setting("ollama_fallback_model", model_name) or model_name
-            content = self._provider_chat(
-                provider_name="ollama",
-                model_name=fallback_model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-            return {
-                "content": content,
-                "provider": "ollama",
-                "model": fallback_model,
-                "fallback": True,
-            }
+            for fallback_provider, fallback_model in self._fallback_targets(
+                provider_name=provider_name,
+                model_name=model_name,
+            ):
+                self.logger.warning(
+                    "chat_fallback_try from_provider=%s from_model=%s to_provider=%s to_model=%s error=%s",
+                    provider_name,
+                    model_name,
+                    fallback_provider,
+                    fallback_model,
+                    primary_exc,
+                )
+                try:
+                    content = self._provider_chat(
+                        provider_name=fallback_provider,
+                        model_name=fallback_model,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                    )
+                    return {
+                        "content": content,
+                        "provider": fallback_provider,
+                        "model": fallback_model,
+                        "fallback": True,
+                    }
+                except Exception as fallback_exc:
+                    self.logger.warning(
+                        "chat_fallback_failed provider=%s model=%s error=%s",
+                        fallback_provider,
+                        fallback_model,
+                        fallback_exc,
+                    )
+            raise
 
     def stream_chat(
         self,
@@ -160,35 +201,52 @@ class ModelManager:
         max_tokens: int = 512,
     ) -> tuple[Iterator[str], str, str]:
         provider_name, model_name = self._resolve_target(model=model, provider=provider)
+        targets = [(provider_name, model_name)] + self._fallback_targets(
+            provider_name=provider_name,
+            model_name=model_name,
+        )
+        last_exc: Exception | None = None
 
-        try:
-            iterator = self._provider_stream_chat(
-                provider_name=provider_name,
-                model_name=model_name,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-            return iterator, provider_name, model_name
-        except Exception as primary_exc:
-            if provider_name != "mlx" or not self.config.enable_ollama_fallback:
-                raise
+        for idx, (target_provider, target_model) in enumerate(targets):
+            if idx > 0 and last_exc is not None:
+                self.logger.warning(
+                    "stream_fallback_try from_provider=%s from_model=%s to_provider=%s to_model=%s error=%s",
+                    provider_name,
+                    model_name,
+                    target_provider,
+                    target_model,
+                    last_exc,
+                )
 
-            self.logger.warning(
-                "mlx_stream_failed_fallback_to_ollama model=%s error=%s",
-                model_name,
-                primary_exc,
-            )
+            try:
+                iterator = self._provider_stream_chat(
+                    provider_name=target_provider,
+                    model_name=target_model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                primed_iterator, has_content = self._prime_stream_iterator(iterator)
+                if not has_content and idx > 0:
+                    self.logger.warning(
+                        "stream_fallback_empty provider=%s model=%s",
+                        target_provider,
+                        target_model,
+                    )
+                return primed_iterator, target_provider, target_model
+            except Exception as exc:
+                last_exc = exc
+                if idx > 0:
+                    self.logger.warning(
+                        "stream_fallback_failed provider=%s model=%s error=%s",
+                        target_provider,
+                        target_model,
+                        exc,
+                    )
 
-            fallback_model = self.database.get_setting("ollama_fallback_model", model_name) or model_name
-            iterator = self._provider_stream_chat(
-                provider_name="ollama",
-                model_name=fallback_model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-            return iterator, "ollama", fallback_model
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("stream_chat failed without an explicit error")
 
     def _get_suggested_models(self) -> dict[str, list[dict[str, str]]]:
         now = time.time()
@@ -261,6 +319,58 @@ class ModelManager:
         if provider_name == "ollama":
             return self.database.get_setting("ollama_fallback_model", "llama3.2") or "llama3.2"
         return self.config.default_model
+
+    def _fallback_targets(self, provider_name: str, model_name: str) -> list[tuple[str, str]]:
+        if not self.config.enable_ollama_fallback:
+            return []
+
+        targets: list[tuple[str, str]] = []
+
+        if provider_name == "mlx":
+            if "ollama" in self.providers:
+                ollama_model = self.database.get_setting("ollama_fallback_model", model_name) or model_name
+                targets.append(("ollama", ollama_model))
+            return self._unique_targets(targets)
+
+        if provider_name in {"openai", "openrouter"}:
+            if self.active_provider in {"mlx", "ollama"} and self.active_provider in self.providers:
+                local_active_model = self.active_model or self._default_model_for_provider(self.active_provider)
+                targets.append((self.active_provider, local_active_model))
+
+            if "mlx" in self.providers:
+                targets.append(("mlx", self.config.default_model))
+
+            if "ollama" in self.providers:
+                ollama_model = self.database.get_setting("ollama_fallback_model", "llama3.2") or "llama3.2"
+                targets.append(("ollama", ollama_model))
+
+        return self._unique_targets(targets)
+
+    @staticmethod
+    def _unique_targets(targets: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        result: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for provider_name, model_name in targets:
+            key = f"{provider_name}:{model_name}"
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append((provider_name, model_name))
+        return result
+
+    @staticmethod
+    def _prime_stream_iterator(iterator: Iterator[str]) -> tuple[Iterator[str], bool]:
+        try:
+            first = next(iterator)
+        except StopIteration:
+            return iter(()), False
+
+        def chain() -> Iterator[str]:
+            yield first
+            for chunk in iterator:
+                yield chunk
+
+        return chain(), True
 
     def _provider_chat(
         self,

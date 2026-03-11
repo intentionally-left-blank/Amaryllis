@@ -103,6 +103,18 @@ final class AmaryllisAPIClient {
                         throw APIClientError.invalidResponse
                     }
                     guard (200 ... 299).contains(http.statusCode) else {
+                        var chunks: [String] = []
+                        for try await line in bytes.lines {
+                            chunks.append(line)
+                        }
+                        let text = chunks.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                        if let data = text.data(using: .utf8),
+                           let detail = parseErrorDetail(from: data) {
+                            throw APIClientError.server(detail)
+                        }
+                        if !text.isEmpty {
+                            throw APIClientError.server(text)
+                        }
                         throw APIClientError.server("Streaming request failed with status \(http.statusCode)")
                     }
 
@@ -180,8 +192,7 @@ final class AmaryllisAPIClient {
         }
 
         guard (200 ... 299).contains(http.statusCode) else {
-            if let errorObject = try? jsonDecoder.decode([String: String].self, from: data),
-               let detail = errorObject["detail"] {
+            if let detail = parseErrorDetail(from: data) {
                 throw APIClientError.server(detail)
             }
 
@@ -209,5 +220,22 @@ final class AmaryllisAPIClient {
         request.addValue("application/json", forHTTPHeaderField: "Accept")
         request.httpBody = body
         return request
+    }
+
+    private func parseErrorDetail(from data: Data) -> String? {
+        if let errorObject = try? jsonDecoder.decode([String: String].self, from: data),
+           let detail = errorObject["detail"],
+           !detail.isEmpty {
+            return detail
+        }
+
+        if let wrapped = try? jsonDecoder.decode([String: [String: String]].self, from: data),
+           let error = wrapped["error"],
+           let message = error["message"],
+           !message.isEmpty {
+            return message
+        }
+
+        return nil
     }
 }

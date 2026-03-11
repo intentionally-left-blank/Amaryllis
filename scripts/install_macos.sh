@@ -32,6 +32,7 @@ mkdir -p "${RUNTIME_SOURCE_DIR}"
 echo "Syncing runtime source to ${RUNTIME_SOURCE_DIR}"
 rsync -a --delete \
   --exclude '.git' \
+  --exclude '.venv' \
   --exclude '.build' \
   --exclude '__pycache__' \
   --exclude '.pytest_cache' \

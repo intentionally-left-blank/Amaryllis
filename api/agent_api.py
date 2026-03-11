@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Path, Query, Request
 from pydantic import BaseModel, Field
+
+from runtime.errors import NotFoundError, ProviderError, ValidationError
 
 router = APIRouter(tags=["agents"])
 
@@ -34,8 +36,10 @@ def create_agent(payload: CreateAgentRequest, request: Request) -> dict[str, Any
             user_id=payload.user_id,
         )
         return agent.to_record()
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise ProviderError(str(exc)) from exc
 
 
 @router.get("/agents")
@@ -63,6 +67,6 @@ def chat_agent(
             session_id=payload.session_id,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise NotFoundError(str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise ProviderError(str(exc)) from exc

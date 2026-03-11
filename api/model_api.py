@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
+
+from runtime.errors import ProviderError, ValidationError
 
 router = APIRouter(tags=["models"])
 
@@ -32,8 +34,10 @@ def download_model(payload: DownloadModelRequest, request: Request) -> dict[str,
             model_id=payload.model_id,
             provider=payload.provider,
         )
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise ProviderError(str(exc)) from exc
 
 
 @router.post("/models/load")
@@ -44,5 +48,7 @@ def load_model(payload: LoadModelRequest, request: Request) -> dict[str, Any]:
             model_id=payload.model_id,
             provider=payload.provider,
         )
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise ProviderError(str(exc)) from exc

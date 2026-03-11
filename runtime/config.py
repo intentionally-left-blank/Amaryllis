@@ -16,6 +16,7 @@ class AppConfig:
     plugins_dir: Path
     database_path: Path
     vector_index_path: Path
+    telemetry_path: Path
     default_provider: str
     default_model: str
     ollama_base_url: str
@@ -69,6 +70,13 @@ class AppConfig:
             )
         ).expanduser()
 
+        telemetry_path = Path(
+            os.getenv(
+                "AMARYLLIS_TELEMETRY_PATH",
+                str(data_dir / "telemetry.jsonl"),
+            )
+        ).expanduser()
+
         fallback_raw = os.getenv("AMARYLLIS_OLLAMA_FALLBACK", "true").strip().lower()
         enable_ollama_fallback = fallback_raw in {"1", "true", "yes", "on"}
 
@@ -82,6 +90,7 @@ class AppConfig:
             plugins_dir=plugins_dir,
             database_path=database_path,
             vector_index_path=vector_index_path,
+            telemetry_path=telemetry_path,
             default_provider=os.getenv("AMARYLLIS_DEFAULT_PROVIDER", "mlx"),
             default_model=os.getenv(
                 "AMARYLLIS_DEFAULT_MODEL",

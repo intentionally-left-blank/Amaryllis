@@ -120,6 +120,13 @@ class MLXProvider:
 
         return models
 
+    def health_check(self) -> dict[str, Any]:
+        installed_models = self.list_models()
+        return {
+            "status": "ok",
+            "detail": f"local_provider_ready=true installed_models={len(installed_models)}",
+        }
+
     def suggested_models(self, limit: int = 300) -> list[dict[str, str]]:
         suggestions: list[dict[str, str]] = []
         seen: set[str] = set()

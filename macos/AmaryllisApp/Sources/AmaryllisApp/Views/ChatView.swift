@@ -247,6 +247,16 @@ struct ChatView: View {
                             appState.updateCurrentChatMessage(id: assistantID, content: combined)
                         }
                     }
+
+                    if combined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        await MainActor.run {
+                            appState.updateCurrentChatMessage(
+                                id: assistantID,
+                                content: "Error: Empty response from provider. Check API key, quota, and model access."
+                            )
+                            appState.lastError = "Empty response from provider."
+                        }
+                    }
                 } else {
                     let response = try await appState.apiClient.chatCompletions(
                         model: model,

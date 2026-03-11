@@ -5,9 +5,11 @@ import time
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+
+from runtime.errors import ProviderError, ValidationError
 
 router = APIRouter(tags=["chat"])
 
@@ -151,11 +153,12 @@ def _chat_with_tool_loop(
 @router.post("/v1/chat/completions")
 def chat_completions(payload: ChatCompletionsRequest, request: Request):
     if not payload.messages:
-        raise HTTPException(status_code=400, detail="messages must not be empty")
+        raise ValidationError("messages must not be empty")
 
     services = request.app.state.services
     normalized_messages = _normalize_messages(payload.messages)
     tool_names = _tool_names_from_request(payload=payload, request=request)
+    request_id = str(getattr(request.state, "request_id", ""))
 
     if payload.stream:
         stream_messages = list(normalized_messages)
@@ -176,7 +179,7 @@ def chat_completions(payload: ChatCompletionsRequest, request: Request):
                 max_tokens=payload.max_tokens,
             )
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise ProviderError(str(exc)) from exc
 
         completion_id = f"chatcmpl-{uuid4().hex}"
         created = int(time.time())
@@ -188,6 +191,7 @@ def chat_completions(payload: ChatCompletionsRequest, request: Request):
                 "created": created,
                 "model": model_used,
                 "provider": provider_used,
+                "request_id": request_id,
                 "choices": [
                     {
                         "index": 0,
@@ -207,6 +211,7 @@ def chat_completions(payload: ChatCompletionsRequest, request: Request):
                         "created": created,
                         "model": model_used,
                         "provider": provider_used,
+                        "request_id": request_id,
                         "choices": [
                             {
                                 "index": 0,
@@ -224,6 +229,7 @@ def chat_completions(payload: ChatCompletionsRequest, request: Request):
                     "created": created,
                     "model": model_used,
                     "provider": provider_used,
+                    "request_id": request_id,
                     "choices": [
                         {
                             "index": 0,
@@ -240,6 +246,7 @@ def chat_completions(payload: ChatCompletionsRequest, request: Request):
                 "created": created,
                 "model": model_used,
                 "provider": provider_used,
+                "request_id": request_id,
                 "choices": [
                     {
                         "index": 0,
@@ -261,7 +268,7 @@ def chat_completions(payload: ChatCompletionsRequest, request: Request):
             tool_names=tool_names,
         )
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise ProviderError(str(exc)) from exc
 
     completion_id = f"chatcmpl-{uuid4().hex}"
     created = int(time.time())
@@ -272,6 +279,7 @@ def chat_completions(payload: ChatCompletionsRequest, request: Request):
         "created": created,
         "model": model_used,
         "provider": provider_used,
+        "request_id": request_id,
         "choices": [
             {
                 "index": 0,

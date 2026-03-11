@@ -14,7 +14,7 @@ This MVP is intentionally simple and modular, so it can evolve into a richer cog
 
 ## Privacy and Anonymity
 
-- no telemetry by default
+- no remote telemetry; runtime writes local telemetry file only
 - no personal paths or machine-specific identifiers in repository files
 - local-first runtime, data stays on your machine unless tools/providers call external services
 
@@ -37,6 +37,10 @@ Implemented in this version:
 - streaming chat UI
 - model load/download progress indicators
 - persistent local chat history (multi-chat sessions) in macOS app
+- centralized structured API errors (`error.type`, `error.message`, `error.request_id`)
+- provider diagnostics endpoint: `GET /health/providers`
+- SQLite migration framework (`schema_migrations`)
+- local structured telemetry (`telemetry.jsonl`)
 
 Out of scope for MVP:
 - distributed execution
@@ -54,6 +58,9 @@ Model storage location:
 
 Data storage location:
 - `~/Library/Application Support/amaryllis/data/`
+
+Local telemetry log:
+- `~/Library/Application Support/amaryllis/data/telemetry.jsonl`
 
 ## Project Structure
 
@@ -148,6 +155,12 @@ Health check:
 
 ```bash
 curl http://localhost:8000/health
+```
+
+Provider health:
+
+```bash
+curl http://localhost:8000/health/providers
 ```
 
 ## Native macOS App (.app)
@@ -333,11 +346,14 @@ Plugins are auto-discovered from:
 ## Notes on MLX and Ollama
 
 - MLX is the primary local inference provider.
-- If MLX fails and fallback is enabled, runtime can try Ollama.
+- If fallback is enabled, runtime can automatically try local providers:
+  - `mlx -> ollama` when MLX fails
+  - `openai/openrouter -> mlx/ollama` when cloud calls fail (for example `429` quota/rate-limit)
 - You can optionally enable remote cloud providers: OpenAI and OpenRouter.
 - Configure fallback via env:
   - `AMARYLLIS_OLLAMA_FALLBACK=true|false`
   - `AMARYLLIS_OLLAMA_URL=http://localhost:11434`
+  - `AMARYLLIS_TELEMETRY_PATH=~/Library/Application Support/amaryllis/data/telemetry.jsonl`
   - `AMARYLLIS_OPENAI_BASE_URL=https://api.openai.com/v1`
   - `AMARYLLIS_OPENAI_API_KEY=<your_key>`
   - `AMARYLLIS_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1`
@@ -352,6 +368,7 @@ export AMARYLLIS_DEFAULT_PROVIDER=mlx
 export AMARYLLIS_DEFAULT_MODEL=mlx-community/Qwen2.5-1.5B-Instruct-4bit
 export AMARYLLIS_OLLAMA_URL=http://localhost:11434
 export AMARYLLIS_OLLAMA_FALLBACK=true
+export AMARYLLIS_TELEMETRY_PATH=~/Library/Application\ Support/amaryllis/data/telemetry.jsonl
 export AMARYLLIS_OPENAI_BASE_URL=https://api.openai.com/v1
 export AMARYLLIS_OPENAI_API_KEY=replace_me
 export AMARYLLIS_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1

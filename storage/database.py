@@ -1,69 +1,30 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any
 
+from storage.migrations import apply_migrations
+
 
 class Database:
     def __init__(self, database_path: Path) -> None:
+        self.logger = logging.getLogger("amaryllis.storage.database")
         self.database_path = Path(database_path)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = Lock()
 
         self._conn = sqlite3.connect(self.database_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
-        self._init_schema()
 
-    def _init_schema(self) -> None:
         with self._lock:
-            self._conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS settings (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS episodic_memory (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id TEXT NOT NULL,
-                    agent_id TEXT,
-                    role TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS semantic_memory (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id TEXT NOT NULL,
-                    text TEXT NOT NULL,
-                    metadata_json TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS user_memory (
-                    user_id TEXT NOT NULL,
-                    key TEXT NOT NULL,
-                    value TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    PRIMARY KEY (user_id, key)
-                );
-
-                CREATE TABLE IF NOT EXISTS agents (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    system_prompt TEXT NOT NULL,
-                    model TEXT,
-                    tools_json TEXT NOT NULL,
-                    user_id TEXT,
-                    created_at TEXT NOT NULL
-                );
-                """
-            )
-            self._conn.commit()
+            applied = apply_migrations(self._conn)
+        if applied:
+            self.logger.info("sqlite_migrations_applied versions=%s", ",".join(str(v) for v in applied))
 
     @staticmethod
     def _utc_now() -> str:
