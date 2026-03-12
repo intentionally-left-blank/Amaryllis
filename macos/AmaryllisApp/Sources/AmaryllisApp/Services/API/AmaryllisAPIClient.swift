@@ -90,6 +90,8 @@ final class AmaryllisAPIClient {
     func chatCompletions(
         model: String?,
         provider: String?,
+        userId: String? = nil,
+        sessionId: String? = nil,
         messages: [APIChatMessage],
         tools: [APIChatToolDefinition]? = nil,
         permissionIds: [String]? = nil,
@@ -100,6 +102,8 @@ final class AmaryllisAPIClient {
         let payload = APIChatCompletionsRequest(
             model: model,
             provider: provider,
+            userId: userId,
+            sessionId: sessionId,
             messages: messages,
             stream: false,
             temperature: temperature,
@@ -115,6 +119,8 @@ final class AmaryllisAPIClient {
     func streamChatCompletions(
         model: String?,
         provider: String?,
+        userId: String? = nil,
+        sessionId: String? = nil,
         messages: [APIChatMessage],
         tools: [APIChatToolDefinition]? = nil,
         routing: APIChatRoutingOptions? = nil,
@@ -127,6 +133,8 @@ final class AmaryllisAPIClient {
                     let payload = APIChatCompletionsRequest(
                         model: model,
                         provider: provider,
+                        userId: userId,
+                        sessionId: sessionId,
                         messages: messages,
                         stream: true,
                         temperature: temperature,

@@ -100,6 +100,54 @@ class ToolBudgetGuardTests(unittest.TestCase):
         with self.assertRaises(ToolBudgetLimitError):
             executor.execute("low_a", {}, session_id="s1")
 
+    def test_telemetry_emits_budget_blocked_event(self) -> None:
+        guard = ToolBudgetGuard(
+            window_sec=60,
+            max_calls_per_tool=1,
+            max_total_calls=20,
+            max_high_risk_calls=20,
+        )
+        events: list[tuple[str, dict[str, object]]] = []
+
+        def emit(event_type: str, payload: dict[str, object]) -> None:
+            events.append((event_type, payload))
+
+        executor = ToolExecutor(
+            registry=self.registry,
+            budget_guard=guard,
+            telemetry_emitter=emit,
+        )
+        executor.execute("low_a", {}, session_id="s1")
+        with self.assertRaises(ToolBudgetLimitError):
+            executor.execute("low_a", {}, session_id="s1")
+
+        event_types = [item[0] for item in events]
+        self.assertIn("tool_budget_recorded", event_types)
+        self.assertIn("tool_budget_blocked", event_types)
+
+    def test_debug_snapshot_returns_scope_usage(self) -> None:
+        guard = ToolBudgetGuard(
+            window_sec=60,
+            max_calls_per_tool=5,
+            max_total_calls=20,
+            max_high_risk_calls=20,
+        )
+        executor = ToolExecutor(registry=self.registry, budget_guard=guard)
+        executor.execute("low_a", {}, session_id="s-debug")
+        executor.execute("low_b", {}, session_id="s-debug")
+
+        snapshot = executor.debug_guardrails(
+            session_id="s-debug",
+            scopes_limit=10,
+            top_tools_limit=3,
+        )
+        budget = snapshot["budget"]
+        selected = budget["selected_scope"]
+        self.assertEqual(selected["scope"], "session:s-debug")
+        self.assertEqual(selected["total_calls"], 2)
+        self.assertEqual(selected["tools_count"], 2)
+        self.assertTrue(len(selected["top_tools"]) >= 2)
+
 
 if __name__ == "__main__":
     unittest.main()

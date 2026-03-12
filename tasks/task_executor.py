@@ -394,6 +394,7 @@ class TaskExecutor:
         first, model_calls = self._chat_with_limits(
             messages=reasoning_messages,
             model=agent.model,
+            session_id=session_id,
             model_calls=model_calls,
             started=started,
             run_deadline_monotonic=run_deadline_monotonic,
@@ -541,6 +542,7 @@ class TaskExecutor:
             followup, model_calls = self._chat_with_limits(
                 messages=reasoning_messages,
                 model=agent.model,
+                session_id=session_id,
                 model_calls=model_calls,
                 started=started,
                 run_deadline_monotonic=run_deadline_monotonic,
@@ -571,6 +573,7 @@ class TaskExecutor:
         *,
         messages: list[dict[str, Any]],
         model: str | None,
+        session_id: str | None,
         model_calls: int,
         started: float | None,
         run_deadline_monotonic: float | None,
@@ -587,6 +590,7 @@ class TaskExecutor:
         response = self.model_manager.chat(
             messages=messages,
             model=model,
+            session_id=session_id,
         )
         model_calls += 1
 

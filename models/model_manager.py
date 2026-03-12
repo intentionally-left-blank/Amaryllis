@@ -8,6 +8,11 @@ from threading import Lock
 import time
 from typing import Any, Iterator
 
+from models.provider_errors import (
+    ProviderErrorInfo,
+    ProviderOperationError,
+    classify_provider_error,
+)
 from models.providers.anthropic_provider import AnthropicProvider
 from models.providers.base import ModelProvider
 from models.providers.mlx_provider import MLXProvider
@@ -71,6 +76,9 @@ class ModelManager:
         self._cloud_rate_records: dict[str, deque[float]] = {}
         self._cloud_budget_records: dict[str, deque[tuple[float, int]]] = {}
         self._guardrail_lock = Lock()
+        self._session_route_pins: dict[str, dict[str, Any]] = {}
+        self._recent_failover_events: deque[dict[str, Any]] = deque(maxlen=500)
+        self._route_lock = Lock()
 
     def list_models(self) -> dict[str, Any]:
         provider_payload: dict[str, Any] = {}
@@ -292,7 +300,9 @@ class ModelManager:
             score = score_candidate(candidate, constraints)
             if score is None:
                 continue
-            scored.append((score, candidate))
+            penalty = self._provider_guardrail_penalty(candidate.provider)
+            final_score = score - penalty
+            scored.append((final_score, candidate))
 
         if not scored:
             raise ValueError("No model candidates satisfy routing constraints.")
@@ -308,6 +318,7 @@ class ModelManager:
         selected_score, selected_candidate = scored[0]
         selected = selected_candidate.to_dict()
         selected["score"] = selected_score
+        selected["guardrail_penalty"] = self._provider_guardrail_penalty(selected_candidate.provider)
 
         fallback_items: list[dict[str, Any]] = []
         seen = {f"{selected_candidate.provider}:{selected_candidate.model}"}
@@ -318,6 +329,7 @@ class ModelManager:
             seen.add(key)
             payload = candidate.to_dict()
             payload["score"] = score
+            payload["guardrail_penalty"] = self._provider_guardrail_penalty(candidate.provider)
             fallback_items.append(payload)
             if len(fallback_items) >= 6:
                 break
@@ -374,33 +386,19 @@ class ModelManager:
         max_tokens: int = 512,
         routing: dict[str, Any] | None = None,
         fallback_targets: list[tuple[str, str]] | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
-        route_payload: dict[str, Any] | None = None
-        routed_fallbacks: list[tuple[str, str]] = []
-
-        if routing and provider is None and model is None:
-            route_payload = self.choose_route(
-                mode=str(routing.get("mode", "balanced")),
-                provider=None,
-                model=None,
-                require_stream=bool(routing.get("require_stream", True)),
-                require_tools=bool(routing.get("require_tools", False)),
-                prefer_local=routing.get("prefer_local"),
-                min_params_b=self._to_float_or_none(routing.get("min_params_b")),
-                max_params_b=self._to_float_or_none(routing.get("max_params_b")),
-                include_suggested=bool(routing.get("include_suggested", False)),
-            )
-            (provider_name, model_name), routed_fallbacks = self._targets_from_route(route_payload)
-        else:
-            provider_name, model_name = self._resolve_target(model=model, provider=provider)
-
-        targets = fallback_targets if fallback_targets is not None else (
-            routed_fallbacks if routed_fallbacks else self._fallback_targets(
-                provider_name=provider_name,
-                model_name=model_name,
-            )
+        (provider_name, model_name), targets, route_payload = self._resolve_runtime_targets(
+            model=model,
+            provider=provider,
+            routing=routing,
+            fallback_targets=fallback_targets,
+            session_id=session_id,
+            require_stream=False,
+            require_tools=False,
         )
 
+        failover_events: list[dict[str, Any]] = []
         try:
             content = self._provider_chat(
                 provider_name=provider_name,
@@ -409,45 +407,128 @@ class ModelManager:
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
+            self._set_session_pin(
+                session_id=session_id,
+                provider_name=provider_name,
+                model_name=model_name,
+                reason="primary_success",
+            )
             return {
                 "content": content,
                 "provider": provider_name,
                 "model": model_name,
-                "routing": route_payload,
+                "routing": self._build_route_trace(
+                    route_payload=route_payload,
+                    final_provider=provider_name,
+                    final_model=model_name,
+                    fallback_used=False,
+                    failover_events=failover_events,
+                    session_id=session_id,
+                ),
             }
         except Exception as primary_exc:
-            for fallback_provider, fallback_model in targets:
-                self.logger.warning(
-                    "chat_fallback_try from_provider=%s from_model=%s to_provider=%s to_model=%s error=%s",
-                    provider_name,
-                    model_name,
-                    fallback_provider,
-                    fallback_model,
-                    primary_exc,
+            primary_info = classify_provider_error(
+                provider=provider_name,
+                operation="chat",
+                error=primary_exc,
+            )
+            event = {
+                "attempt": 1,
+                "provider": provider_name,
+                "model": model_name,
+                "error_class": primary_info.error_class,
+                "retryable": primary_info.retryable,
+                "message": primary_info.message,
+            }
+            failover_events.append(event)
+            self._record_failover_event(
+                session_id=session_id,
+                provider_name=provider_name,
+                model_name=model_name,
+                info=primary_info,
+                attempt=1,
+            )
+
+        ordered_targets = self._prioritize_failover_targets(
+            primary_provider=provider_name,
+            primary_model=model_name,
+            targets=targets,
+            error_info=primary_info,
+            session_id=session_id,
+        )
+        last_error_info: ProviderErrorInfo = primary_info
+
+        for attempt_index, (fallback_provider, fallback_model) in enumerate(ordered_targets, start=2):
+            self.logger.warning(
+                "chat_fallback_try from_provider=%s from_model=%s to_provider=%s to_model=%s error_class=%s message=%s",
+                provider_name,
+                model_name,
+                fallback_provider,
+                fallback_model,
+                primary_info.error_class,
+                primary_info.message,
+            )
+            try:
+                content = self._provider_chat(
+                    provider_name=fallback_provider,
+                    model_name=fallback_model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
                 )
-                try:
-                    content = self._provider_chat(
-                        provider_name=fallback_provider,
-                        model_name=fallback_model,
-                        messages=messages,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                    )
-                    return {
-                        "content": content,
+                self._set_session_pin(
+                    session_id=session_id,
+                    provider_name=fallback_provider,
+                    model_name=fallback_model,
+                    reason=f"fallback_success:{primary_info.error_class}",
+                )
+                return {
+                    "content": content,
+                    "provider": fallback_provider,
+                    "model": fallback_model,
+                    "fallback": True,
+                    "routing": self._build_route_trace(
+                        route_payload=route_payload,
+                        final_provider=fallback_provider,
+                        final_model=fallback_model,
+                        fallback_used=True,
+                        failover_events=failover_events,
+                        session_id=session_id,
+                    ),
+                }
+            except Exception as fallback_exc:
+                fallback_info = classify_provider_error(
+                    provider=fallback_provider,
+                    operation="chat",
+                    error=fallback_exc,
+                )
+                last_error_info = fallback_info
+                failover_events.append(
+                    {
+                        "attempt": attempt_index,
                         "provider": fallback_provider,
                         "model": fallback_model,
-                        "fallback": True,
-                        "routing": route_payload,
+                        "error_class": fallback_info.error_class,
+                        "retryable": fallback_info.retryable,
+                        "message": fallback_info.message,
                     }
-                except Exception as fallback_exc:
-                    self.logger.warning(
-                        "chat_fallback_failed provider=%s model=%s error=%s",
-                        fallback_provider,
-                        fallback_model,
-                        fallback_exc,
-                    )
-            raise
+                )
+                self._record_failover_event(
+                    session_id=session_id,
+                    provider_name=fallback_provider,
+                    model_name=fallback_model,
+                    info=fallback_info,
+                    attempt=attempt_index,
+                )
+                self.logger.warning(
+                    "chat_fallback_failed provider=%s model=%s error_class=%s message=%s",
+                    fallback_provider,
+                    fallback_model,
+                    fallback_info.error_class,
+                    fallback_info.message,
+                )
+
+        raise ProviderOperationError(last_error_info)
 
     def stream_chat(
         self,
@@ -458,44 +539,26 @@ class ModelManager:
         max_tokens: int = 512,
         routing: dict[str, Any] | None = None,
         fallback_targets: list[tuple[str, str]] | None = None,
-    ) -> tuple[Iterator[str], str, str]:
-        routed_fallbacks: list[tuple[str, str]] = []
-        if routing and provider is None and model is None:
-            route_payload = self.choose_route(
-                mode=str(routing.get("mode", "balanced")),
-                provider=None,
-                model=None,
-                require_stream=bool(routing.get("require_stream", True)),
-                require_tools=bool(routing.get("require_tools", False)),
-                prefer_local=routing.get("prefer_local"),
-                min_params_b=self._to_float_or_none(routing.get("min_params_b")),
-                max_params_b=self._to_float_or_none(routing.get("max_params_b")),
-                include_suggested=bool(routing.get("include_suggested", False)),
-            )
-            (provider_name, model_name), routed_fallbacks = self._targets_from_route(route_payload)
-        else:
-            provider_name, model_name = self._resolve_target(model=model, provider=provider)
-
-        effective_fallbacks = fallback_targets if fallback_targets is not None else (
-            routed_fallbacks if routed_fallbacks else self._fallback_targets(
-                provider_name=provider_name,
-                model_name=model_name,
-            )
+        session_id: str | None = None,
+    ) -> tuple[Iterator[str], str, str, dict[str, Any] | None]:
+        (provider_name, model_name), targets, route_payload = self._resolve_runtime_targets(
+            model=model,
+            provider=provider,
+            routing=routing,
+            fallback_targets=fallback_targets,
+            session_id=session_id,
+            require_stream=True,
+            require_tools=False,
         )
-        targets = [(provider_name, model_name)] + effective_fallbacks
-        last_exc: Exception | None = None
 
-        for idx, (target_provider, target_model) in enumerate(targets):
-            if idx > 0 and last_exc is not None:
-                self.logger.warning(
-                    "stream_fallback_try from_provider=%s from_model=%s to_provider=%s to_model=%s error=%s",
-                    provider_name,
-                    model_name,
-                    target_provider,
-                    target_model,
-                    last_exc,
-                )
+        failover_events: list[dict[str, Any]] = []
+        last_error_info: ProviderErrorInfo | None = None
+        attempt_targets: list[tuple[str, str]] = [(provider_name, model_name)]
+        ordered_targets = targets
 
+        while attempt_targets:
+            target_provider, target_model = attempt_targets.pop(0)
+            attempt = len(failover_events) + 1
             try:
                 iterator = self._provider_stream_chat(
                     provider_name=target_provider,
@@ -505,26 +568,302 @@ class ModelManager:
                     max_tokens=max_tokens,
                 )
                 primed_iterator, has_content = self._prime_stream_iterator(iterator)
-                if not has_content and idx > 0:
-                    self.logger.warning(
-                        "stream_fallback_empty provider=%s model=%s",
-                        target_provider,
-                        target_model,
-                    )
-                return primed_iterator, target_provider, target_model
-            except Exception as exc:
-                last_exc = exc
-                if idx > 0:
-                    self.logger.warning(
-                        "stream_fallback_failed provider=%s model=%s error=%s",
-                        target_provider,
-                        target_model,
-                        exc,
-                    )
+                if not has_content:
+                    raise RuntimeError("Empty streaming response")
 
-        if last_exc is not None:
-            raise last_exc
+                self._set_session_pin(
+                    session_id=session_id,
+                    provider_name=target_provider,
+                    model_name=target_model,
+                    reason="stream_success" if attempt == 1 else f"stream_fallback_success:{attempt}",
+                )
+                route_trace = self._build_route_trace(
+                    route_payload=route_payload,
+                    final_provider=target_provider,
+                    final_model=target_model,
+                    fallback_used=attempt > 1,
+                    failover_events=failover_events,
+                    session_id=session_id,
+                )
+                return primed_iterator, target_provider, target_model, route_trace
+            except Exception as exc:
+                info = classify_provider_error(
+                    provider=target_provider,
+                    operation="stream_chat",
+                    error=exc,
+                )
+                last_error_info = info
+                failover_events.append(
+                    {
+                        "attempt": attempt,
+                        "provider": target_provider,
+                        "model": target_model,
+                        "error_class": info.error_class,
+                        "retryable": info.retryable,
+                        "message": info.message,
+                    }
+                )
+                self._record_failover_event(
+                    session_id=session_id,
+                    provider_name=target_provider,
+                    model_name=target_model,
+                    info=info,
+                    attempt=attempt,
+                )
+
+                if attempt == 1:
+                    ordered_targets = self._prioritize_failover_targets(
+                        primary_provider=provider_name,
+                        primary_model=model_name,
+                        targets=ordered_targets,
+                        error_info=info,
+                        session_id=session_id,
+                    )
+                    attempt_targets.extend(ordered_targets)
+                self.logger.warning(
+                    "stream_fallback_failed provider=%s model=%s error_class=%s message=%s",
+                    target_provider,
+                    target_model,
+                    info.error_class,
+                    info.message,
+                )
+
+        if last_error_info is not None:
+            raise ProviderOperationError(last_error_info)
         raise RuntimeError("stream_chat failed without an explicit error")
+
+    def debug_failover_state(
+        self,
+        *,
+        session_id: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        normalized_limit = max(1, min(500, int(limit)))
+        with self._route_lock:
+            items = list(self._recent_failover_events)[-normalized_limit:]
+            pins = dict(self._session_route_pins)
+
+        selected_pin: dict[str, Any] | None = None
+        if session_id:
+            selected_pin = pins.get(session_id)
+
+        return {
+            "session_id": session_id,
+            "selected_pin": selected_pin,
+            "pins_count": len(pins),
+            "pins": [
+                {"session_id": key, **value}
+                for key, value in sorted(pins.items(), key=lambda item: item[0])[:100]
+            ],
+            "recent_failovers": items,
+            "recent_failovers_count": len(items),
+        }
+
+    def _resolve_runtime_targets(
+        self,
+        *,
+        model: str | None,
+        provider: str | None,
+        routing: dict[str, Any] | None,
+        fallback_targets: list[tuple[str, str]] | None,
+        session_id: str | None,
+        require_stream: bool,
+        require_tools: bool,
+    ) -> tuple[tuple[str, str], list[tuple[str, str]], dict[str, Any] | None]:
+        route_payload: dict[str, Any] | None = None
+        routed_fallbacks: list[tuple[str, str]] = []
+        explicit_target = provider is not None or model is not None
+        primary_reason = "default_target"
+
+        if explicit_target:
+            provider_name, model_name = self._resolve_target(model=model, provider=provider)
+            primary_reason = "explicit_target"
+        else:
+            pin = self._get_session_pin(session_id)
+            if pin is not None:
+                provider_name = str(pin.get("provider", "")).strip()
+                model_name = str(pin.get("model", "")).strip()
+                if provider_name in self.providers and model_name:
+                    primary_reason = "session_pin"
+                    route_payload = {
+                        "mode": "session_pin",
+                        "selected": {
+                            "provider": provider_name,
+                            "model": model_name,
+                            "reason": "session_pin",
+                        },
+                        "requested_mode": str(routing.get("mode", "balanced")) if isinstance(routing, dict) else None,
+                        "session_pin": pin,
+                        "fallbacks": [],
+                    }
+                else:
+                    provider_name, model_name = self._resolve_target(model=model, provider=provider)
+            elif routing:
+                route_payload = self.choose_route(
+                    mode=str(routing.get("mode", "balanced")),
+                    provider=None,
+                    model=None,
+                    require_stream=require_stream,
+                    require_tools=require_tools,
+                    prefer_local=routing.get("prefer_local"),
+                    min_params_b=self._to_float_or_none(routing.get("min_params_b")),
+                    max_params_b=self._to_float_or_none(routing.get("max_params_b")),
+                    include_suggested=bool(routing.get("include_suggested", False)),
+                )
+                (provider_name, model_name), routed_fallbacks = self._targets_from_route(route_payload)
+                primary_reason = "route_selected"
+            else:
+                provider_name, model_name = self._resolve_target(model=model, provider=provider)
+
+        if route_payload is None:
+            route_payload = {
+                "mode": str(routing.get("mode", "direct")) if isinstance(routing, dict) else "direct",
+                "selected": {
+                    "provider": provider_name,
+                    "model": model_name,
+                    "reason": primary_reason,
+                },
+            }
+
+        targets = fallback_targets if fallback_targets is not None else (
+            routed_fallbacks if routed_fallbacks else self._fallback_targets(
+                provider_name=provider_name,
+                model_name=model_name,
+            )
+        )
+        if isinstance(route_payload, dict) and "fallbacks" not in route_payload:
+            route_payload["fallbacks"] = [
+                {"provider": item_provider, "model": item_model}
+                for item_provider, item_model in targets
+            ]
+        return (provider_name, model_name), targets, route_payload
+
+    def _build_route_trace(
+        self,
+        *,
+        route_payload: dict[str, Any] | None,
+        final_provider: str,
+        final_model: str,
+        fallback_used: bool,
+        failover_events: list[dict[str, Any]],
+        session_id: str | None,
+    ) -> dict[str, Any] | None:
+        if route_payload is None and not failover_events:
+            return None
+
+        payload = dict(route_payload or {})
+        payload["final"] = {
+            "provider": final_provider,
+            "model": final_model,
+            "fallback_used": fallback_used,
+        }
+        if failover_events:
+            payload["failover_events"] = failover_events
+        if session_id:
+            pin = self._get_session_pin(session_id)
+            if pin is not None:
+                payload["session_pin"] = pin
+        return payload
+
+    def _prioritize_failover_targets(
+        self,
+        *,
+        primary_provider: str,
+        primary_model: str,
+        targets: list[tuple[str, str]],
+        error_info: ProviderErrorInfo,
+        session_id: str | None,
+    ) -> list[tuple[str, str]]:
+        local_providers = {"mlx", "ollama"}
+        pin = self._get_session_pin(session_id)
+        pinned_key = None
+        if pin is not None:
+            pinned_provider = str(pin.get("provider", "")).strip()
+            pinned_model = str(pin.get("model", "")).strip()
+            if pinned_provider and pinned_model:
+                pinned_key = f"{pinned_provider}:{pinned_model}"
+
+        ranked: list[tuple[tuple[float, float, int], tuple[str, str]]] = []
+        seen: set[str] = set()
+        for idx, (target_provider, target_model) in enumerate(targets):
+            if target_provider not in self.providers:
+                continue
+            key = f"{target_provider}:{target_model}"
+            if key == f"{primary_provider}:{primary_model}" or key in seen:
+                continue
+            seen.add(key)
+
+            group = 1.0
+            if pinned_key is not None and key == pinned_key:
+                group = -1.0
+            elif error_info.error_class in {"rate_limit", "quota", "budget_limit", "auth"}:
+                group = 0.0 if target_provider in local_providers else 2.0
+            elif error_info.error_class in {"timeout", "server", "network", "unavailable", "circuit_open"}:
+                group = 0.0 if target_provider != primary_provider else 2.0
+                if target_provider in local_providers:
+                    group -= 0.2
+            elif error_info.error_class == "invalid_request":
+                group = 0.0 if target_provider in local_providers else 2.5
+            if self._is_provider_circuit_open(target_provider):
+                group += 2.5
+
+            pressure = self._provider_guardrail_pressure(target_provider)
+            ranked.append(((group, pressure, idx), (target_provider, target_model)))
+
+        ranked.sort(key=lambda item: item[0])
+        return [target for _, target in ranked]
+
+    def _record_failover_event(
+        self,
+        *,
+        session_id: str | None,
+        provider_name: str,
+        model_name: str,
+        info: ProviderErrorInfo,
+        attempt: int,
+    ) -> None:
+        row = {
+            "timestamp": self._utc_now_iso(),
+            "session_id": session_id,
+            "provider": provider_name,
+            "model": model_name,
+            "operation": info.operation,
+            "error_class": info.error_class,
+            "retryable": info.retryable,
+            "message": info.message,
+            "status_code": info.status_code,
+            "attempt": attempt,
+        }
+        with self._route_lock:
+            self._recent_failover_events.append(row)
+
+    def _get_session_pin(self, session_id: str | None) -> dict[str, Any] | None:
+        if not session_id:
+            return None
+        with self._route_lock:
+            pin = self._session_route_pins.get(session_id)
+            if pin is None:
+                return None
+            return dict(pin)
+
+    def _set_session_pin(
+        self,
+        *,
+        session_id: str | None,
+        provider_name: str,
+        model_name: str,
+        reason: str,
+    ) -> None:
+        if not session_id:
+            return
+        row = {
+            "provider": provider_name,
+            "model": model_name,
+            "reason": reason,
+            "updated_at": self._utc_now_iso(),
+        }
+        with self._route_lock:
+            self._session_route_pins[session_id] = row
 
     def _get_suggested_models(self) -> dict[str, list[dict[str, str]]]:
         now = time.time()
@@ -912,13 +1251,25 @@ class ModelManager:
     ) -> Any:
         if self._is_provider_circuit_open(provider_name):
             remaining = self._provider_cooldown_remaining(provider_name)
-            raise RuntimeError(
-                f"Provider '{provider_name}' circuit is open "
-                f"(cooldown_remaining_sec={remaining:.2f})."
+            raise ProviderOperationError(
+                ProviderErrorInfo(
+                    provider=provider_name,
+                    operation=operation,
+                    error_class="circuit_open",
+                    message=(
+                        f"Provider '{provider_name}' circuit is open "
+                        f"(cooldown_remaining_sec={remaining:.2f})."
+                    ),
+                    raw_message=(
+                        f"Provider '{provider_name}' circuit is open "
+                        f"(cooldown_remaining_sec={remaining:.2f})."
+                    ),
+                    retryable=True,
+                )
             )
 
         attempts = max(1, int(self.config.provider_retry_attempts))
-        last_exc: Exception | None = None
+        last_info: ProviderErrorInfo | None = None
         for attempt in range(1, attempts + 1):
             try:
                 if callable(before_call):
@@ -927,19 +1278,30 @@ class ModelManager:
                 self._record_provider_success(provider_name)
                 return result
             except Exception as exc:  # noqa: BLE001
-                last_exc = exc
+                info = classify_provider_error(
+                    provider=provider_name,
+                    operation=operation,
+                    error=exc,
+                )
+                last_info = info
                 self._record_provider_failure(provider_name)
-                retryable = self._is_retryable_provider_error(exc)
+                retryable = info.retryable
                 if attempt >= attempts or not retryable:
                     break
                 delay = self._provider_retry_delay(attempt=attempt)
                 if delay > 0:
                     time.sleep(delay)
 
-        assert last_exc is not None
-        raise RuntimeError(
-            f"Provider '{provider_name}' {operation} failed: {last_exc}"
-        ) from last_exc
+        if last_info is None:
+            last_info = ProviderErrorInfo(
+                provider=provider_name,
+                operation=operation,
+                error_class="unknown",
+                message=f"Provider '{provider_name}' {operation} failed with unknown error.",
+                raw_message=f"Provider '{provider_name}' {operation} failed with unknown error.",
+                retryable=False,
+            )
+        raise ProviderOperationError(last_info)
 
     def _record_provider_success(self, provider_name: str) -> None:
         self._provider_failure_counts[provider_name] = 0
@@ -984,30 +1346,6 @@ class ModelManager:
         return max(0.0, delay)
 
     @staticmethod
-    def _is_retryable_provider_error(exc: Exception) -> bool:
-        if isinstance(exc, TimeoutError):
-            return True
-        if isinstance(exc, OSError):
-            return True
-        message = str(exc).lower()
-        retry_keywords = (
-            "timeout",
-            "tempor",
-            "connection",
-            "network",
-            "unavailable",
-            "overloaded",
-            "429",
-            "too many requests",
-            "rate limit",
-            "502",
-            "503",
-            "504",
-            "try again",
-        )
-        return any(keyword in message for keyword in retry_keywords)
-
-    @staticmethod
     def _is_cloud_provider(provider_name: str) -> bool:
         return provider_name in {"openai", "openrouter", "anthropic"}
 
@@ -1048,6 +1386,32 @@ class ModelManager:
                 "budget_used_units": used_units,
                 "budget_remaining_units": max(0, self.config.cloud_budget_max_units - used_units),
             }
+
+    def _provider_guardrail_pressure(self, provider_name: str) -> float:
+        status = self._provider_guardrail_status(provider_name)
+        if not bool(status.get("enabled", False)):
+            return 0.0
+
+        rate_max = max(1, int(status.get("rate_max_requests", 1)))
+        rate_used = max(0, int(status.get("rate_used_requests", 0)))
+        budget_max = max(1, int(status.get("budget_max_units", 1)))
+        budget_used = max(0, int(status.get("budget_used_units", 0)))
+
+        rate_ratio = float(rate_used) / float(rate_max)
+        budget_ratio = float(budget_used) / float(budget_max)
+        return max(0.0, min(1.0, max(rate_ratio, budget_ratio)))
+
+    def _provider_guardrail_penalty(self, provider_name: str) -> float:
+        pressure = self._provider_guardrail_pressure(provider_name)
+        if pressure >= 0.95:
+            return 1.1
+        if pressure >= 0.85:
+            return 0.55
+        if pressure >= 0.75:
+            return 0.25
+        if pressure >= 0.60:
+            return 0.10
+        return 0.0
 
     def _enforce_cloud_guardrails(
         self,

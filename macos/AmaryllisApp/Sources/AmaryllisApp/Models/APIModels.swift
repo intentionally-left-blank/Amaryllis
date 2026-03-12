@@ -204,6 +204,8 @@ struct APIChatToolDefinition: Encodable {
 struct APIChatCompletionsRequest: Encodable {
     let model: String?
     let provider: String?
+    let userId: String?
+    let sessionId: String?
     let messages: [APIChatMessage]
     let stream: Bool
     let temperature: Double
@@ -215,6 +217,8 @@ struct APIChatCompletionsRequest: Encodable {
     private enum CodingKeys: String, CodingKey {
         case model
         case provider
+        case userId = "user_id"
+        case sessionId = "session_id"
         case messages
         case stream
         case temperature
@@ -249,6 +253,46 @@ struct APIChatRouteTarget: Decodable {
     let provider: String
     let model: String
     let score: Double?
+    let reason: String?
+    let guardrailPenalty: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case provider
+        case model
+        case score
+        case reason
+        case guardrailPenalty = "guardrail_penalty"
+    }
+}
+
+struct APIChatRoutingFinal: Decodable {
+    let provider: String
+    let model: String
+    let fallbackUsed: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case provider
+        case model
+        case fallbackUsed = "fallback_used"
+    }
+}
+
+struct APIChatRoutingFailoverEvent: Decodable {
+    let attempt: Int?
+    let provider: String?
+    let model: String?
+    let errorClass: String?
+    let retryable: Bool?
+    let message: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case attempt
+        case provider
+        case model
+        case errorClass = "error_class"
+        case retryable
+        case message
+    }
 }
 
 struct APIChatRoutingDecision: Decodable {
@@ -256,12 +300,16 @@ struct APIChatRoutingDecision: Decodable {
     let selected: APIChatRouteTarget?
     let fallbacks: [APIChatRouteTarget]?
     let consideredCount: Int?
+    let final: APIChatRoutingFinal?
+    let failoverEvents: [APIChatRoutingFailoverEvent]?
 
     private enum CodingKeys: String, CodingKey {
         case mode
         case selected
         case fallbacks
         case consideredCount = "considered_count"
+        case final
+        case failoverEvents = "failover_events"
     }
 }
 

@@ -49,6 +49,8 @@ class ChatRoutingOptions(BaseModel):
 class ChatCompletionsRequest(BaseModel):
     model: str | None = None
     provider: str | None = None
+    user_id: str | None = None
+    session_id: str | None = None
     messages: list[ChatMessage]
     stream: bool = False
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
@@ -104,24 +106,6 @@ def _tool_names_from_request(payload: ChatCompletionsRequest, request: Request) 
     return names
 
 
-def _route_fallback_targets(route: dict[str, Any] | None) -> list[tuple[str, str]]:
-    if not isinstance(route, dict):
-        return []
-    raw = route.get("fallbacks")
-    if not isinstance(raw, list):
-        return []
-
-    targets: list[tuple[str, str]] = []
-    for item in raw:
-        if not isinstance(item, dict):
-            continue
-        provider = str(item.get("provider", "")).strip()
-        model = str(item.get("model", "")).strip()
-        if provider and model:
-            targets.append((provider, model))
-    return targets
-
-
 def _chat_once(
     request: Request,
     payload: ChatCompletionsRequest,
@@ -129,7 +113,6 @@ def _chat_once(
     provider: str | None,
     model: str | None,
     routing: dict[str, Any] | None,
-    fallback_targets: list[tuple[str, str]] | None,
 ) -> dict[str, Any]:
     services = request.app.state.services
     return services.model_manager.chat(
@@ -139,7 +122,7 @@ def _chat_once(
         temperature=payload.temperature,
         max_tokens=payload.max_tokens,
         routing=routing,
-        fallback_targets=fallback_targets,
+        session_id=payload.session_id,
     )
 
 
@@ -151,7 +134,6 @@ def _chat_with_tool_loop(
     provider: str | None,
     model: str | None,
     routing: dict[str, Any] | None,
-    fallback_targets: list[tuple[str, str]] | None,
     max_tool_rounds: int,
 ) -> tuple[str, str, str, list[dict[str, Any]], dict[str, Any] | None]:
     services = request.app.state.services
@@ -172,7 +154,6 @@ def _chat_with_tool_loop(
         provider=provider,
         model=model,
         routing=routing,
-        fallback_targets=fallback_targets,
     )
     response_text = str(first.get("content", "")).strip()
     provider_used = str(first.get("provider", payload.provider or "unknown"))
@@ -209,6 +190,8 @@ def _chat_with_tool_loop(
                 tool_name,
                 arguments,
                 request_id=_request_id(request),
+                user_id=payload.user_id,
+                session_id=payload.session_id,
                 permission_ids=permission_ids,
             )
             event["status"] = "succeeded"
@@ -258,7 +241,6 @@ def _chat_with_tool_loop(
             provider=provider,
             model=model,
             routing=routing,
-            fallback_targets=fallback_targets,
         )
         response_text = str(followup.get("content", "")).strip()
         provider_used = str(followup.get("provider", provider_used))
@@ -281,32 +263,8 @@ def chat_completions(payload: ChatCompletionsRequest, request: Request):
     request_id = _request_id(request)
 
     route_payload = payload.routing.model_dump(exclude_none=True) if payload.routing is not None else None
-    resolved_route: dict[str, Any] | None = None
-    resolved_provider: str | None = payload.provider
-    resolved_model: str | None = payload.model
-    resolved_fallback_targets: list[tuple[str, str]] | None = None
-
-    if route_payload and resolved_provider is None and resolved_model is None:
-        try:
-            resolved_route = services.model_manager.choose_route(
-                mode=str(route_payload.get("mode", "balanced")),
-                provider=None,
-                model=None,
-                require_stream=bool(route_payload.get("require_stream", True)),
-                require_tools=bool(route_payload.get("require_tools", False)),
-                prefer_local=route_payload.get("prefer_local"),
-                min_params_b=route_payload.get("min_params_b"),
-                max_params_b=route_payload.get("max_params_b"),
-                include_suggested=bool(route_payload.get("include_suggested", False)),
-            )
-            selected = resolved_route.get("selected", {}) if isinstance(resolved_route, dict) else {}
-            resolved_provider = str(selected.get("provider", "")).strip() or None
-            resolved_model = str(selected.get("model", "")).strip() or None
-            resolved_fallback_targets = _route_fallback_targets(resolved_route)
-        except ValueError as exc:
-            raise ValidationError(str(exc)) from exc
-        except Exception as exc:
-            raise ProviderError(str(exc)) from exc
+    if route_payload is not None and tool_names and not bool(route_payload.get("require_tools", False)):
+        route_payload["require_tools"] = True
 
     if payload.stream:
         stream_messages = list(normalized_messages)
@@ -319,14 +277,14 @@ def chat_completions(payload: ChatCompletionsRequest, request: Request):
             )
 
         try:
-            iterator, provider_used, model_used = services.model_manager.stream_chat(
+            iterator, provider_used, model_used, routing_used = services.model_manager.stream_chat(
                 messages=stream_messages,
-                model=resolved_model,
-                provider=resolved_provider,
+                model=payload.model,
+                provider=payload.provider,
                 temperature=payload.temperature,
                 max_tokens=payload.max_tokens,
-                routing=route_payload if resolved_route is None else None,
-                fallback_targets=resolved_fallback_targets,
+                routing=route_payload,
+                session_id=payload.session_id,
             )
         except Exception as exc:
             raise ProviderError(str(exc)) from exc
@@ -342,7 +300,7 @@ def chat_completions(payload: ChatCompletionsRequest, request: Request):
                 "model": model_used,
                 "provider": provider_used,
                 "request_id": request_id,
-                "routing": resolved_route,
+                "routing": routing_used,
                 "choices": [
                     {
                         "index": 0,
@@ -363,7 +321,7 @@ def chat_completions(payload: ChatCompletionsRequest, request: Request):
                         "model": model_used,
                         "provider": provider_used,
                         "request_id": request_id,
-                        "routing": resolved_route,
+                        "routing": routing_used,
                         "choices": [
                             {
                                 "index": 0,
@@ -382,7 +340,7 @@ def chat_completions(payload: ChatCompletionsRequest, request: Request):
                     "model": model_used,
                     "provider": provider_used,
                     "request_id": request_id,
-                    "routing": resolved_route,
+                    "routing": routing_used,
                     "choices": [
                         {
                             "index": 0,
@@ -419,10 +377,9 @@ def chat_completions(payload: ChatCompletionsRequest, request: Request):
             payload=payload,
             messages=normalized_messages,
             tool_names=tool_names,
-            provider=resolved_provider,
-            model=resolved_model,
-            routing=route_payload if resolved_route is None else None,
-            fallback_targets=resolved_fallback_targets,
+            provider=payload.provider,
+            model=payload.model,
+            routing=route_payload,
             max_tool_rounds=services.config.task_max_tool_rounds,
         )
     except Exception as exc:
@@ -438,7 +395,7 @@ def chat_completions(payload: ChatCompletionsRequest, request: Request):
         "model": model_used,
         "provider": provider_used,
         "request_id": request_id,
-        "routing": resolved_route or routing_used,
+        "routing": routing_used,
         "choices": [
             {
                 "index": 0,

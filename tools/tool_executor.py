@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, Callable
 
 from tools.permission_manager import ToolPermissionManager
 from tools.policy import ToolIsolationPolicy
@@ -35,12 +35,14 @@ class ToolExecutor:
         permission_manager: ToolPermissionManager | None = None,
         budget_guard: ToolBudgetGuard | None = None,
         approval_enforcement_mode: str = "prompt_and_allow",
+        telemetry_emitter: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
         self.registry = registry
         self.policy = policy or ToolIsolationPolicy()
         self.permission_manager = permission_manager or ToolPermissionManager()
         self.budget_guard = budget_guard or ToolBudgetGuard()
         self.approval_enforcement_mode = approval_enforcement_mode
+        self.telemetry_emitter = telemetry_emitter
         self.logger = logging.getLogger("amaryllis.tools.executor")
 
     def execute(
@@ -60,6 +62,16 @@ class ToolExecutor:
 
         decision = self.policy.evaluate(tool=tool, arguments=arguments)
         if not decision.allow:
+            self._emit_telemetry(
+                "tool_policy_blocked",
+                {
+                    "tool": name,
+                    "request_id": request_id,
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "reason": decision.reason,
+                },
+            )
             raise ToolExecutionError(decision.reason or f"Tool '{name}' is blocked by policy")
 
         permission_prompt: dict[str, Any] | None = None
@@ -93,6 +105,17 @@ class ToolExecutor:
                 )
                 if self.approval_enforcement_mode == "strict":
                     prompt_id = str(permission_prompt.get("id"))
+                    self._emit_telemetry(
+                        "tool_permission_required",
+                        {
+                            "tool": name,
+                            "request_id": request_id,
+                            "user_id": user_id,
+                            "session_id": session_id,
+                            "prompt_id": prompt_id,
+                            "approval_mode": self.approval_enforcement_mode,
+                        },
+                    )
                     raise PermissionRequiredError(
                         f"Permission required for tool '{name}'. prompt_id={prompt_id}",
                         prompt_id=prompt_id,
@@ -117,7 +140,36 @@ class ToolExecutor:
                 budget_status.high_risk_calls,
                 budget_status.max_high_risk_calls,
             )
+            self._emit_telemetry(
+                "tool_budget_recorded",
+                {
+                    "tool": name,
+                    "risk_level": tool.risk_level,
+                    "scope": budget_status.scope,
+                    "request_id": request_id,
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "total_calls": budget_status.total_calls,
+                    "max_total_calls": budget_status.max_total_calls,
+                    "per_tool_calls": budget_status.per_tool_calls,
+                    "max_calls_per_tool": budget_status.max_calls_per_tool,
+                    "high_risk_calls": budget_status.high_risk_calls,
+                    "max_high_risk_calls": budget_status.max_high_risk_calls,
+                    "window_sec": budget_status.window_sec,
+                },
+            )
         except ToolBudgetExceededError as exc:
+            self._emit_telemetry(
+                "tool_budget_blocked",
+                {
+                    "tool": name,
+                    "risk_level": tool.risk_level,
+                    "request_id": request_id,
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "reason": str(exc),
+                },
+            )
             raise ToolBudgetLimitError(str(exc)) from exc
 
         try:
@@ -142,6 +194,34 @@ class ToolExecutor:
 
     def deny_permission_prompt(self, prompt_id: str) -> dict[str, Any]:
         return self.permission_manager.deny(prompt_id)
+
+    def debug_guardrails(
+        self,
+        *,
+        request_id: str | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        scopes_limit: int = 20,
+        top_tools_limit: int = 5,
+    ) -> dict[str, Any]:
+        return {
+            "approval_enforcement_mode": self.approval_enforcement_mode,
+            "isolation_policy": {
+                "profile": self.policy.profile,
+                "blocked_tools": sorted(self.policy.blocked_tools),
+                "allowed_high_risk_tools": sorted(self.policy.allowed_high_risk_tools),
+                "python_exec_max_timeout_sec": self.policy.python_exec_max_timeout_sec,
+                "python_exec_max_code_chars": self.policy.python_exec_max_code_chars,
+                "filesystem_allow_write": self.policy.filesystem_allow_write,
+            },
+            "budget": self.budget_guard.debug_snapshot(
+                request_id=request_id,
+                user_id=user_id,
+                session_id=session_id,
+                scopes_limit=scopes_limit,
+                top_tools_limit=top_tools_limit,
+            ),
+        }
 
     @staticmethod
     def parse_tool_call(text: str) -> dict[str, Any] | None:
@@ -173,3 +253,11 @@ class ToolExecutor:
             f"Allowed tools: {joined}. "
             "Some tools may require manual approval."
         )
+
+    def _emit_telemetry(self, event_type: str, payload: dict[str, Any]) -> None:
+        if self.telemetry_emitter is None:
+            return
+        try:
+            self.telemetry_emitter(event_type, payload)
+        except Exception as exc:
+            self.logger.warning("tool_telemetry_emit_failed event=%s error=%s", event_type, exc)

@@ -62,6 +62,11 @@ class ModelRouteRequest(BaseModel):
     limit_per_provider: int = Field(default=120, ge=1, le=500)
 
 
+class ModelFailoverDebugResponse(BaseModel):
+    request_id: str
+    diagnostics: dict[str, Any]
+
+
 @router.get("/models")
 def list_models(request: Request) -> dict[str, Any]:
     services = request.app.state.services
@@ -120,6 +125,23 @@ def model_route(payload: ModelRouteRequest, request: Request) -> dict[str, Any]:
         raise ValidationError(str(exc)) from exc
     except Exception as exc:
         raise ProviderError(str(exc)) from exc
+
+
+@router.get("/debug/models/failover", response_model=ModelFailoverDebugResponse)
+def debug_model_failover(
+    request: Request,
+    session_id: str | None = None,
+    limit: int = 100,
+) -> ModelFailoverDebugResponse:
+    services = request.app.state.services
+    diagnostics = services.model_manager.debug_failover_state(
+        session_id=session_id,
+        limit=max(1, min(limit, 500)),
+    )
+    return ModelFailoverDebugResponse(
+        request_id=_request_id(request),
+        diagnostics=diagnostics,
+    )
 
 
 @router.post("/models/download")

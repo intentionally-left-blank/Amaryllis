@@ -132,6 +132,68 @@ class ToolBudgetGuard:
                 max_calls_per_tool=self.limits.max_calls_per_tool,
             )
 
+    def debug_snapshot(
+        self,
+        *,
+        request_id: str | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        scopes_limit: int = 20,
+        top_tools_limit: int = 5,
+    ) -> dict[str, object]:
+        now = time.monotonic()
+        selected_scope = self._scope_key(
+            request_id=request_id,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        normalized_scopes_limit = max(1, int(scopes_limit))
+        normalized_top_tools_limit = max(1, int(top_tools_limit))
+
+        with self._lock:
+            for records in self._records_by_scope.values():
+                self._prune(records=records, now=now)
+
+            selected_records = self._records_by_scope.get(selected_scope, deque())
+            selected = self._scope_snapshot(
+                scope=selected_scope,
+                records=selected_records,
+                top_tools_limit=normalized_top_tools_limit,
+            )
+
+            rows: list[dict[str, object]] = []
+            for scope, records in self._records_by_scope.items():
+                if not records:
+                    continue
+                rows.append(
+                    self._scope_snapshot(
+                        scope=scope,
+                        records=records,
+                        top_tools_limit=normalized_top_tools_limit,
+                    )
+                )
+
+        rows.sort(
+            key=lambda item: (
+                int(item.get("total_calls", 0)),
+                int(item.get("high_risk_calls", 0)),
+                str(item.get("scope", "")),
+            ),
+            reverse=True,
+        )
+
+        return {
+            "limits": {
+                "window_sec": self.limits.window_sec,
+                "max_calls_per_tool": self.limits.max_calls_per_tool,
+                "max_total_calls": self.limits.max_total_calls,
+                "max_high_risk_calls": self.limits.max_high_risk_calls,
+            },
+            "selected_scope": selected,
+            "active_scopes": rows[:normalized_scopes_limit],
+            "active_scope_count": len(rows),
+        }
+
     def _scope_key(
         self,
         *,
@@ -151,3 +213,38 @@ class ToolBudgetGuard:
         cutoff = now - self.limits.window_sec
         while records and records[0].ts < cutoff:
             records.popleft()
+
+    def _scope_snapshot(
+        self,
+        *,
+        scope: str,
+        records: deque[_ToolCallRecord],
+        top_tools_limit: int,
+    ) -> dict[str, object]:
+        per_tool: dict[str, int] = {}
+        high_risk_calls = 0
+        for item in records:
+            per_tool[item.tool_name] = per_tool.get(item.tool_name, 0) + 1
+            if item.risk_level in {"high", "critical"}:
+                high_risk_calls += 1
+
+        top_tools = sorted(
+            (
+                {"tool": name, "calls": count}
+                for name, count in per_tool.items()
+            ),
+            key=lambda row: (int(row["calls"]), str(row["tool"])),
+            reverse=True,
+        )[: max(1, int(top_tools_limit))]
+
+        return {
+            "scope": scope,
+            "total_calls": len(records),
+            "high_risk_calls": high_risk_calls,
+            "tools_count": len(per_tool),
+            "top_tools": top_tools,
+            "window_sec": self.limits.window_sec,
+            "max_calls_per_tool": self.limits.max_calls_per_tool,
+            "max_total_calls": self.limits.max_total_calls,
+            "max_high_risk_calls": self.limits.max_high_risk_calls,
+        }

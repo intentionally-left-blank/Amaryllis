@@ -131,6 +131,7 @@ def create_services() -> ServiceContainer:
         permission_manager=tool_permission_manager,
         budget_guard=tool_budget_guard,
         approval_enforcement_mode=config.tool_approval_enforcement,
+        telemetry_emitter=telemetry.emit,
     )
 
     model_manager = ModelManager(config=config, database=database)

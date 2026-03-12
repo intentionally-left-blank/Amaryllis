@@ -280,6 +280,12 @@ curl -X POST http://localhost:8000/models/route \
   }'
 ```
 
+### Debug failover and session route pins
+
+```bash
+curl "http://localhost:8000/debug/models/failover?session_id=chat-001&limit=100"
+```
+
 ### Download model (MLX)
 
 ```bash
@@ -412,9 +418,24 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 ```
 
 Notes:
+- `session_id` can be provided in chat requests for session-level route pinning
 - non-stream responses include `tool_events` trace with status and duration
 - when a tool requires approval, `tool_events` includes `permission_prompt_id`
 - after approving prompt(s), resend with `permission_ids` to continue tool execution
+- `routing` in response now includes `final` target and `failover_events` diagnostics when fallback happens
+
+Session-pinned chat example:
+
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "chat-001",
+    "messages": [{"role": "user", "content": "Continue previous context"}],
+    "routing": {"mode": "balanced", "require_stream": false},
+    "stream": false
+  }'
+```
 
 ## Agent API
 
@@ -514,6 +535,17 @@ SQLite tables added in migration `v2`:
 - `memory_extractions`
 - `memory_conflicts`
 
+## Provider-Agnostic Core 2.0 Foundation (Current)
+
+Implemented now:
+- unified provider error taxonomy (`rate_limit`, `quota`, `timeout`, `auth`, `invalid_request`, `server`, `network`, `circuit_open`, `budget_limit`, `unavailable`, `unknown`)
+- policy-driven failover orchestration in `ModelManager` for both normal and streaming chat
+- budget-aware routing score penalty under cloud guardrail pressure
+- session-level route pinning via `session_id` (stable provider/model continuity per chat session)
+- failover diagnostics embedded into chat `routing` payload (`final`, `failover_events`)
+- failover state debug API:
+  - `GET /debug/models/failover?session_id=<id>&limit=100`
+
 ## Agents Work Mode Foundation (Current)
 
 Implemented now:
@@ -543,6 +575,7 @@ Run status values:
 
 Implemented now:
 - tool isolation policy (blocked tools + risk/approval metadata)
+- tool budget guardrails (window, per-tool, total, high-risk caps with session/user/request scoping)
 - permission prompts for risky tools (`pending -> approved/denied -> consumed`)
 - batch permission handoff in chat API via `permission_ids`
 - MCP server endpoints:
@@ -551,6 +584,11 @@ Implemented now:
 - MCP client aggregation from remote MCP endpoints into local tool registry
 - signed plugin manifest verification (HMAC-SHA256 when signing key is configured)
 - structured tool execution trace (`status`, `duration_ms`, `permission_prompt_id`) in chat responses
+- telemetry events for tool controls:
+  - `tool_budget_recorded`
+  - `tool_budget_blocked`
+  - `tool_policy_blocked`
+  - `tool_permission_required`
 
 ## Automation Layer 2.0 Foundation (Current)
 
@@ -669,6 +707,12 @@ Deny prompt:
 
 ```bash
 curl -X POST "http://localhost:8000/tools/permissions/prompts/<prompt_id>/deny"
+```
+
+Debug tool guardrails snapshot:
+
+```bash
+curl "http://localhost:8000/debug/tools/guardrails?session_id=session-001&scopes_limit=20&top_tools_limit=5"
 ```
 
 ## Memory Debug API

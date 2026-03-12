@@ -287,6 +287,7 @@ struct ChatView: View {
         let providerTarget = autoRoutingEnabled ? nil : provider
         let modelTarget = autoRoutingEnabled ? nil : model
         let shouldUseStreaming = isStreaming && tools.isEmpty
+        let chatSessionID = appState.selectedChatID?.uuidString
 
         Task {
             do {
@@ -295,6 +296,7 @@ struct ChatView: View {
                     let stream = appState.apiClient.streamChatCompletions(
                         model: modelTarget,
                         provider: providerTarget,
+                        sessionId: chatSessionID,
                         messages: payload,
                         tools: nil,
                         routing: route
@@ -326,6 +328,7 @@ struct ChatView: View {
                     var response = try await appState.apiClient.chatCompletions(
                         model: modelTarget,
                         provider: providerTarget,
+                        sessionId: chatSessionID,
                         messages: payload,
                         tools: tools.isEmpty ? nil : tools,
                         routing: route
@@ -359,6 +362,7 @@ struct ChatView: View {
                             response = try await appState.apiClient.chatCompletions(
                                 model: modelTarget,
                                 provider: providerTarget,
+                                sessionId: chatSessionID,
                                 messages: payload,
                                 tools: tools.isEmpty ? nil : tools,
                                 permissionIds: pendingPromptIDs,
@@ -481,6 +485,9 @@ struct ChatView: View {
         if let score = selected.score {
             lines[0] += String(format: " score=%.3f", score)
         }
+        if let reason = selected.reason, !reason.isEmpty {
+            lines[0] += " reason=\(reason)"
+        }
         if let fallbacks = routing.fallbacks, !fallbacks.isEmpty {
             let preview = fallbacks.prefix(3).map { item -> String in
                 if let score = item.score {
@@ -489,6 +496,25 @@ struct ChatView: View {
                 return "\(item.provider)/\(item.model)"
             }
             lines.append("Fallbacks: \(preview.joined(separator: ", "))")
+        }
+        if let final = routing.final {
+            let fallbackUsed = final.fallbackUsed == true ? "yes" : "no"
+            lines.append("Final: \(final.provider)/\(final.model) fallback=\(fallbackUsed)")
+        }
+        if let failovers = routing.failoverEvents, !failovers.isEmpty {
+            lines.append("Failover trace:")
+            for event in failovers.prefix(4) {
+                let provider = event.provider ?? "-"
+                let model = event.model ?? "-"
+                let errorClass = event.errorClass ?? "unknown"
+                let retryable = event.retryable == true ? "retryable" : "final"
+                let message = (event.message ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                var line = "- \(provider)/\(model): \(errorClass) [\(retryable)]"
+                if !message.isEmpty {
+                    line += " \(message)"
+                }
+                lines.append(line)
+            }
         }
         return lines.joined(separator: "\n")
     }

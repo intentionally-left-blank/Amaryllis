@@ -49,6 +49,13 @@ class MCPInvokeRequest(BaseModel):
     session_id: str | None = None
 
 
+class ToolGuardrailsDebugResponse(BaseModel):
+    request_id: str
+    approval_enforcement_mode: str
+    isolation_policy: dict[str, Any]
+    budget: dict[str, Any]
+
+
 @router.get("/tools")
 def list_tools(request: Request) -> dict[str, Any]:
     services = request.app.state.services
@@ -197,6 +204,31 @@ def list_mcp_tools(request: Request) -> dict[str, Any]:
         "items": items,
         "count": len(items),
     }
+
+
+@router.get("/debug/tools/guardrails", response_model=ToolGuardrailsDebugResponse)
+def debug_tool_guardrails(
+    request: Request,
+    user_id: str | None = Query(default=None),
+    session_id: str | None = Query(default=None),
+    scope_request_id: str | None = Query(default=None),
+    scopes_limit: int = Query(default=20, ge=1, le=200),
+    top_tools_limit: int = Query(default=5, ge=1, le=20),
+) -> ToolGuardrailsDebugResponse:
+    services = request.app.state.services
+    snapshot = services.tool_executor.debug_guardrails(
+        request_id=scope_request_id,
+        user_id=user_id,
+        session_id=session_id,
+        scopes_limit=scopes_limit,
+        top_tools_limit=top_tools_limit,
+    )
+    return ToolGuardrailsDebugResponse(
+        request_id=_request_id(request),
+        approval_enforcement_mode=str(snapshot.get("approval_enforcement_mode", "prompt_and_allow")),
+        isolation_policy=dict(snapshot.get("isolation_policy", {})),
+        budget=dict(snapshot.get("budget", {})),
+    )
 
 
 @router.post("/mcp/tools/{tool_name}/invoke")
