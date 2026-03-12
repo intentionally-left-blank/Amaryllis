@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import logging
+import random
 from queue import Empty, Queue
 from threading import Event, Thread
-from time import sleep
 from datetime import datetime, timezone
+import time
 from typing import Any, Protocol
 from uuid import uuid4
 
 from agents.agent import Agent
 from storage.database import Database
-from tasks.task_executor import TaskExecutor
+from tasks.task_executor import TaskExecutor, TaskGuardrailError, TaskTimeoutError
 
 
 class TelemetrySink(Protocol):
@@ -25,6 +26,10 @@ class AgentRunManager:
         task_executor: TaskExecutor,
         worker_count: int = 2,
         default_max_attempts: int = 2,
+        attempt_timeout_sec: float = 180.0,
+        retry_backoff_sec: float = 0.3,
+        retry_max_backoff_sec: float = 2.0,
+        retry_jitter_sec: float = 0.15,
         telemetry: TelemetrySink | None = None,
     ) -> None:
         self.logger = logging.getLogger("amaryllis.agents.runs")
@@ -32,6 +37,10 @@ class AgentRunManager:
         self.task_executor = task_executor
         self.worker_count = max(1, worker_count)
         self.default_max_attempts = max(1, default_max_attempts)
+        self.attempt_timeout_sec = max(5.0, float(attempt_timeout_sec))
+        self.retry_backoff_sec = max(0.0, float(retry_backoff_sec))
+        self.retry_max_backoff_sec = max(0.0, float(retry_max_backoff_sec))
+        self.retry_jitter_sec = max(0.0, float(retry_jitter_sec))
         self.telemetry = telemetry
 
         self._queue: Queue[str | None] = Queue()
@@ -277,6 +286,7 @@ class AgentRunManager:
                 "stage": "running",
                 "attempt": attempt,
                 "message": f"Execution started (attempt {attempt}/{max_attempts}).",
+                "attempt_timeout_sec": self.attempt_timeout_sec,
             },
         )
 
@@ -285,26 +295,27 @@ class AgentRunManager:
                 data = dict(payload)
                 data.setdefault("attempt", attempt)
                 self.database.append_agent_run_checkpoint(run_id=run_id, checkpoint=data)
-
-            result = self.task_executor.execute(
+            result = self._run_task_executor(
+                run=run,
                 agent=agent,
-                user_id=str(run["user_id"]),
-                session_id=run.get("session_id"),
-                user_message=str(run["input_message"]),
+                attempt=attempt,
                 checkpoint=push_checkpoint,
             )
         except Exception as exc:
             error_message = str(exc)
+            retryable = self._is_retryable_error(exc)
             self.database.append_agent_run_checkpoint(
                 run_id=run_id,
                 checkpoint={
                     "stage": "error",
                     "attempt": attempt,
                     "message": error_message,
+                    "retryable": retryable,
                 },
             )
 
-            if attempt < max_attempts and int(run.get("cancel_requested", 0)) != 1:
+            if attempt < max_attempts and int(run.get("cancel_requested", 0)) != 1 and retryable:
+                backoff_sec = self._retry_delay_seconds(attempt=attempt)
                 self.database.update_agent_run_fields(
                     run_id,
                     status="queued",
@@ -316,9 +327,11 @@ class AgentRunManager:
                         "stage": "retry_scheduled",
                         "attempt": attempt + 1,
                         "message": "Retry scheduled.",
+                        "backoff_sec": backoff_sec,
                     },
                 )
-                sleep(0.2)
+                if backoff_sec > 0:
+                    time.sleep(backoff_sec)
                 self._queue.put(run_id)
             else:
                 final_status = "canceled" if int(run.get("cancel_requested", 0)) == 1 else "failed"
@@ -387,6 +400,89 @@ class AgentRunManager:
             self.telemetry.emit(event_type, payload)
         except Exception:
             self.logger.debug("run_telemetry_emit_failed event=%s", event_type)
+
+    def _run_task_executor(
+        self,
+        *,
+        run: dict[str, Any],
+        agent: Agent,
+        attempt: int,
+        checkpoint: Any,
+    ) -> dict[str, Any]:
+        attempt_started = time.monotonic()
+        attempt_deadline = attempt_started + self.attempt_timeout_sec
+        result: dict[str, Any]
+        try:
+            result = self.task_executor.execute(
+                agent=agent,
+                user_id=str(run["user_id"]),
+                session_id=run.get("session_id"),
+                user_message=str(run["input_message"]),
+                checkpoint=checkpoint,
+                run_deadline_monotonic=attempt_deadline,
+            )
+        except TypeError as exc:
+            # Backward compatibility for custom executors used in tests/tools.
+            if "run_deadline_monotonic" not in str(exc):
+                raise
+            result = self.task_executor.execute(
+                agent=agent,
+                user_id=str(run["user_id"]),
+                session_id=run.get("session_id"),
+                user_message=str(run["input_message"]),
+                checkpoint=checkpoint,
+            )
+        elapsed = time.monotonic() - attempt_started
+        if elapsed > self.attempt_timeout_sec:
+            self.database.append_agent_run_checkpoint(
+                run_id=str(run["id"]),
+                checkpoint={
+                    "stage": "attempt_timeout_guardrail",
+                    "attempt": attempt,
+                    "message": (
+                        f"Attempt exceeded timeout: elapsed={elapsed:.2f}s "
+                        f"limit={self.attempt_timeout_sec:.2f}s"
+                    ),
+                },
+            )
+            raise TaskTimeoutError(
+                f"Run attempt exceeded timeout ({elapsed:.2f}s > {self.attempt_timeout_sec:.2f}s)."
+            )
+        return result
+
+    def _is_retryable_error(self, exc: Exception) -> bool:
+        if isinstance(exc, TaskGuardrailError):
+            return False
+        if isinstance(exc, TaskTimeoutError):
+            return True
+        if isinstance(exc, (ValueError, TypeError, AssertionError)):
+            return False
+        message = str(exc).lower()
+        retry_keywords = (
+            "timeout",
+            "temporarily",
+            "temporary",
+            "connection",
+            "429",
+            "too many requests",
+            "rate limit",
+            "503",
+            "502",
+            "504",
+            "network",
+            "unavailable",
+            "overloaded",
+            "try again",
+        )
+        return any(keyword in message for keyword in retry_keywords) or isinstance(exc, RuntimeError)
+
+    def _retry_delay_seconds(self, *, attempt: int) -> float:
+        if self.retry_backoff_sec <= 0:
+            return 0.0
+        exponential = self.retry_backoff_sec * (2 ** max(0, attempt - 1))
+        bounded = min(exponential, self.retry_max_backoff_sec) if self.retry_max_backoff_sec > 0 else exponential
+        jitter = random.uniform(0.0, self.retry_jitter_sec) if self.retry_jitter_sec > 0 else 0.0
+        return round(max(0.0, bounded + jitter), 3)
 
     @staticmethod
     def _utc_now() -> str:

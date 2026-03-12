@@ -11,6 +11,37 @@ from tools.tool_executor import PermissionRequiredError
 router = APIRouter(tags=["tools"])
 
 
+def _request_id(request: Request) -> str:
+    return str(getattr(request.state, "request_id", ""))
+
+
+def _sign_action(
+    request: Request,
+    *,
+    action: str,
+    payload: dict[str, Any],
+    actor: str | None = None,
+    target_type: str | None = None,
+    target_id: str | None = None,
+    status: str = "succeeded",
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    services = request.app.state.services
+    try:
+        return services.security_manager.signed_action(
+            action=action,
+            payload=payload,
+            request_id=_request_id(request),
+            actor=actor,
+            target_type=target_type,
+            target_id=target_id,
+            status=status,
+            details=details,
+        )
+    except Exception:
+        return {}
+
+
 class MCPInvokeRequest(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
     permission_id: str | None = None
@@ -38,7 +69,7 @@ def list_tools(request: Request) -> dict[str, Any]:
     return {
         "items": items,
         "count": len(items),
-        "request_id": str(getattr(request.state, "request_id", "")),
+        "request_id": _request_id(request),
     }
 
 
@@ -53,7 +84,7 @@ def list_permission_prompts(
     return {
         "items": rows,
         "count": len(rows),
-        "request_id": str(getattr(request.state, "request_id", "")),
+        "request_id": _request_id(request),
     }
 
 
@@ -65,13 +96,39 @@ def approve_permission_prompt(
     services = request.app.state.services
     try:
         item = services.tool_executor.approve_permission_prompt(prompt_id=prompt_id)
+        receipt = _sign_action(
+            request,
+            action="tool_permission_approve",
+            payload={"prompt_id": prompt_id},
+            target_type="tool_permission_prompt",
+            target_id=prompt_id,
+        )
         return {
             "prompt": item,
-            "request_id": str(getattr(request.state, "request_id", "")),
+            "action_receipt": receipt,
+            "request_id": _request_id(request),
         }
     except ValueError as exc:
+        _sign_action(
+            request,
+            action="tool_permission_approve",
+            payload={"prompt_id": prompt_id},
+            target_type="tool_permission_prompt",
+            target_id=prompt_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise NotFoundError(str(exc)) from exc
     except Exception as exc:
+        _sign_action(
+            request,
+            action="tool_permission_approve",
+            payload={"prompt_id": prompt_id},
+            target_type="tool_permission_prompt",
+            target_id=prompt_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise ProviderError(str(exc)) from exc
 
 
@@ -83,13 +140,39 @@ def deny_permission_prompt(
     services = request.app.state.services
     try:
         item = services.tool_executor.deny_permission_prompt(prompt_id=prompt_id)
+        receipt = _sign_action(
+            request,
+            action="tool_permission_deny",
+            payload={"prompt_id": prompt_id},
+            target_type="tool_permission_prompt",
+            target_id=prompt_id,
+        )
         return {
             "prompt": item,
-            "request_id": str(getattr(request.state, "request_id", "")),
+            "action_receipt": receipt,
+            "request_id": _request_id(request),
         }
     except ValueError as exc:
+        _sign_action(
+            request,
+            action="tool_permission_deny",
+            payload={"prompt_id": prompt_id},
+            target_type="tool_permission_prompt",
+            target_id=prompt_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise NotFoundError(str(exc)) from exc
     except Exception as exc:
+        _sign_action(
+            request,
+            action="tool_permission_deny",
+            payload={"prompt_id": prompt_id},
+            target_type="tool_permission_prompt",
+            target_id=prompt_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise ProviderError(str(exc)) from exc
 
 
@@ -130,18 +213,73 @@ def invoke_mcp_tool(
         result = services.tool_executor.execute(
             name=tool_name,
             arguments=payload.arguments,
-            request_id=str(getattr(request.state, "request_id", "")),
+            request_id=_request_id(request),
             user_id=payload.user_id,
             session_id=payload.session_id,
             permission_id=payload.permission_id,
         )
+        receipt = _sign_action(
+            request,
+            action="tool_invoke",
+            payload={
+                "tool_name": tool_name,
+                "arguments": payload.arguments,
+            },
+            actor=payload.user_id,
+            target_type="tool",
+            target_id=tool_name,
+            details={
+                "session_id": payload.session_id,
+                "permission_id": payload.permission_id,
+            },
+        )
         return {
             "result": result,
-            "request_id": str(getattr(request.state, "request_id", "")),
+            "action_receipt": receipt,
+            "request_id": _request_id(request),
         }
     except PermissionRequiredError as exc:
+        _sign_action(
+            request,
+            action="tool_invoke",
+            payload={
+                "tool_name": tool_name,
+                "arguments": payload.arguments,
+            },
+            actor=payload.user_id,
+            target_type="tool",
+            target_id=tool_name,
+            status="failed",
+            details={"error": str(exc), "session_id": payload.session_id},
+        )
         raise PermissionDeniedError(str(exc)) from exc
     except ValueError as exc:
+        _sign_action(
+            request,
+            action="tool_invoke",
+            payload={
+                "tool_name": tool_name,
+                "arguments": payload.arguments,
+            },
+            actor=payload.user_id,
+            target_type="tool",
+            target_id=tool_name,
+            status="failed",
+            details={"error": str(exc), "session_id": payload.session_id},
+        )
         raise ValidationError(str(exc)) from exc
     except Exception as exc:
+        _sign_action(
+            request,
+            action="tool_invoke",
+            payload={
+                "tool_name": tool_name,
+                "arguments": payload.arguments,
+            },
+            actor=payload.user_id,
+            target_type="tool",
+            target_id=tool_name,
+            status="failed",
+            details={"error": str(exc), "session_id": payload.session_id},
+        )
         raise ProviderError(str(exc)) from exc

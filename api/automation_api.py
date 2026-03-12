@@ -10,6 +10,36 @@ from runtime.errors import NotFoundError, ProviderError, ValidationError
 router = APIRouter(tags=["automations"])
 
 
+def _request_id(request: Request) -> str:
+    return str(getattr(request.state, "request_id", ""))
+
+
+def _sign_action(
+    request: Request,
+    *,
+    action: str,
+    payload: dict[str, Any],
+    actor: str | None = None,
+    target_id: str | None = None,
+    status: str = "succeeded",
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    services = request.app.state.services
+    try:
+        return services.security_manager.signed_action(
+            action=action,
+            payload=payload,
+            request_id=_request_id(request),
+            actor=actor,
+            target_type="automation",
+            target_id=target_id,
+            status=status,
+            details=details,
+        )
+    except Exception:
+        return {}
+
+
 class CreateAutomationRequest(BaseModel):
     agent_id: str = Field(min_length=1)
     user_id: str = Field(min_length=1)
@@ -37,13 +67,37 @@ def create_automation(payload: CreateAutomationRequest, request: Request) -> dic
             timezone_name=payload.timezone,
             start_immediately=payload.start_immediately,
         )
+        receipt = _sign_action(
+            request,
+            action="automation_create",
+            payload=payload.model_dump(),
+            actor=payload.user_id,
+            target_id=str(automation.get("id")),
+        )
         return {
             "automation": automation,
-            "request_id": str(getattr(request.state, "request_id", "")),
+            "action_receipt": receipt,
+            "request_id": _request_id(request),
         }
     except ValueError as exc:
+        _sign_action(
+            request,
+            action="automation_create",
+            payload=payload.model_dump(),
+            actor=payload.user_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise ValidationError(str(exc)) from exc
     except Exception as exc:
+        _sign_action(
+            request,
+            action="automation_create",
+            payload=payload.model_dump(),
+            actor=payload.user_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise ProviderError(str(exc)) from exc
 
 
@@ -73,15 +127,39 @@ def update_automation(
             schedule=payload.schedule,
             timezone_name=payload.timezone,
         )
+        receipt = _sign_action(
+            request,
+            action="automation_update",
+            payload=payload.model_dump(exclude_none=True),
+            actor=str(automation.get("user_id") or ""),
+            target_id=automation_id,
+        )
         return {
             "automation": automation,
-            "request_id": str(getattr(request.state, "request_id", "")),
+            "action_receipt": receipt,
+            "request_id": _request_id(request),
         }
     except ValueError as exc:
+        _sign_action(
+            request,
+            action="automation_update",
+            payload=payload.model_dump(exclude_none=True),
+            target_id=automation_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         if "not found" in str(exc).lower():
             raise NotFoundError(str(exc)) from exc
         raise ValidationError(str(exc)) from exc
     except Exception as exc:
+        _sign_action(
+            request,
+            action="automation_update",
+            payload=payload.model_dump(exclude_none=True),
+            target_id=automation_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise ProviderError(str(exc)) from exc
 
 
@@ -104,7 +182,7 @@ def list_automations(
         return {
             "items": items,
             "count": len(items),
-            "request_id": str(getattr(request.state, "request_id", "")),
+            "request_id": _request_id(request),
         }
     except Exception as exc:
         raise ProviderError(str(exc)) from exc
@@ -121,7 +199,7 @@ def get_automation(
         raise NotFoundError(f"Automation not found: {automation_id}")
     return {
         "automation": automation,
-        "request_id": str(getattr(request.state, "request_id", "")),
+        "request_id": _request_id(request),
     }
 
 
@@ -133,13 +211,37 @@ def pause_automation(
     services = request.app.state.services
     try:
         automation = services.automation_scheduler.pause_automation(automation_id)
+        receipt = _sign_action(
+            request,
+            action="automation_pause",
+            payload={"automation_id": automation_id},
+            actor=str(automation.get("user_id") or ""),
+            target_id=automation_id,
+        )
         return {
             "automation": automation,
-            "request_id": str(getattr(request.state, "request_id", "")),
+            "action_receipt": receipt,
+            "request_id": _request_id(request),
         }
     except ValueError as exc:
+        _sign_action(
+            request,
+            action="automation_pause",
+            payload={"automation_id": automation_id},
+            target_id=automation_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise NotFoundError(str(exc)) from exc
     except Exception as exc:
+        _sign_action(
+            request,
+            action="automation_pause",
+            payload={"automation_id": automation_id},
+            target_id=automation_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise ProviderError(str(exc)) from exc
 
 
@@ -151,13 +253,37 @@ def resume_automation(
     services = request.app.state.services
     try:
         automation = services.automation_scheduler.resume_automation(automation_id)
+        receipt = _sign_action(
+            request,
+            action="automation_resume",
+            payload={"automation_id": automation_id},
+            actor=str(automation.get("user_id") or ""),
+            target_id=automation_id,
+        )
         return {
             "automation": automation,
-            "request_id": str(getattr(request.state, "request_id", "")),
+            "action_receipt": receipt,
+            "request_id": _request_id(request),
         }
     except ValueError as exc:
+        _sign_action(
+            request,
+            action="automation_resume",
+            payload={"automation_id": automation_id},
+            target_id=automation_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise NotFoundError(str(exc)) from exc
     except Exception as exc:
+        _sign_action(
+            request,
+            action="automation_resume",
+            payload={"automation_id": automation_id},
+            target_id=automation_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise ProviderError(str(exc)) from exc
 
 
@@ -169,13 +295,37 @@ def run_automation_now(
     services = request.app.state.services
     try:
         automation = services.automation_scheduler.run_now(automation_id)
+        receipt = _sign_action(
+            request,
+            action="automation_run_now",
+            payload={"automation_id": automation_id},
+            actor=str(automation.get("user_id") or ""),
+            target_id=automation_id,
+        )
         return {
             "automation": automation,
-            "request_id": str(getattr(request.state, "request_id", "")),
+            "action_receipt": receipt,
+            "request_id": _request_id(request),
         }
     except ValueError as exc:
+        _sign_action(
+            request,
+            action="automation_run_now",
+            payload={"automation_id": automation_id},
+            target_id=automation_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise NotFoundError(str(exc)) from exc
     except Exception as exc:
+        _sign_action(
+            request,
+            action="automation_run_now",
+            payload={"automation_id": automation_id},
+            target_id=automation_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise ProviderError(str(exc)) from exc
 
 
@@ -189,14 +339,37 @@ def delete_automation(
         deleted = services.automation_scheduler.delete_automation(automation_id)
         if not deleted:
             raise NotFoundError(f"Automation not found: {automation_id}")
+        receipt = _sign_action(
+            request,
+            action="automation_delete",
+            payload={"automation_id": automation_id},
+            target_id=automation_id,
+        )
         return {
             "status": "deleted",
             "automation_id": automation_id,
-            "request_id": str(getattr(request.state, "request_id", "")),
+            "action_receipt": receipt,
+            "request_id": _request_id(request),
         }
     except NotFoundError:
+        _sign_action(
+            request,
+            action="automation_delete",
+            payload={"automation_id": automation_id},
+            target_id=automation_id,
+            status="failed",
+            details={"error": f"Automation not found: {automation_id}"},
+        )
         raise
     except Exception as exc:
+        _sign_action(
+            request,
+            action="automation_delete",
+            payload={"automation_id": automation_id},
+            target_id=automation_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise ProviderError(str(exc)) from exc
 
 
@@ -215,7 +388,7 @@ def list_automation_events(
         return {
             "items": items,
             "count": len(items),
-            "request_id": str(getattr(request.state, "request_id", "")),
+            "request_id": _request_id(request),
         }
     except Exception as exc:
         raise ProviderError(str(exc)) from exc

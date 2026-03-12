@@ -659,6 +659,86 @@ class Database:
         result.reverse()
         return result
 
+    def add_security_audit_event(
+        self,
+        *,
+        event_type: str,
+        action: str | None = None,
+        actor: str | None = None,
+        request_id: str | None = None,
+        target_type: str | None = None,
+        target_id: str | None = None,
+        status: str = "succeeded",
+        details: dict[str, Any] | None = None,
+        signature: dict[str, Any] | None = None,
+    ) -> int:
+        details_json = json.dumps(details or {}, ensure_ascii=False)
+        signature_json = json.dumps(signature or {}, ensure_ascii=False)
+        normalized_status = str(status or "succeeded").strip().lower() or "succeeded"
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                INSERT INTO security_audit_events(
+                    event_type,
+                    action,
+                    actor,
+                    request_id,
+                    target_type,
+                    target_id,
+                    status,
+                    details_json,
+                    signature_json,
+                    created_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_type,
+                    action,
+                    actor,
+                    request_id,
+                    target_type,
+                    target_id,
+                    normalized_status,
+                    details_json,
+                    signature_json,
+                    self._utc_now(),
+                ),
+            )
+            self._conn.commit()
+            return int(cursor.lastrowid)
+
+    def list_security_audit_events(
+        self,
+        *,
+        limit: int = 200,
+        action: str | None = None,
+        status: str | None = None,
+        actor: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+
+        query = "SELECT * FROM security_audit_events WHERE 1 = 1"
+        params: list[Any] = []
+        if action:
+            query += " AND action = ?"
+            params.append(action)
+        if status:
+            query += " AND status = ?"
+            params.append(str(status).strip().lower())
+        if actor:
+            query += " AND actor = ?"
+            params.append(actor)
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+
+        with self._lock:
+            rows = self._conn.execute(query, tuple(params)).fetchall()
+        result = [self._decode_security_audit_row(dict(row)) for row in rows]
+        result.reverse()
+        return result
+
     def create_agent_run(
         self,
         run_id: str,
@@ -1209,6 +1289,25 @@ class Database:
         if severity not in {"info", "warning", "error"}:
             severity = "info"
         row["severity"] = severity
+        return row
+
+    @staticmethod
+    def _decode_security_audit_row(row: dict[str, Any]) -> dict[str, Any]:
+        details_json = row.pop("details_json", "{}")
+        signature_json = row.pop("signature_json", "{}")
+        try:
+            details = json.loads(details_json or "{}")
+        except Exception:
+            details = {}
+        try:
+            signature = json.loads(signature_json or "{}")
+        except Exception:
+            signature = {}
+
+        row["details"] = details if isinstance(details, dict) else {}
+        row["signature"] = signature if isinstance(signature, dict) else {}
+        row["status"] = str(row.get("status") or "succeeded").strip().lower() or "succeeded"
+        row["event_type"] = str(row.get("event_type") or "signed_action").strip() or "signed_action"
         return row
 
     def upsert_agent(self, agent: dict[str, Any]) -> None:

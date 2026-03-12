@@ -18,6 +18,7 @@ from api.chat_api import router as chat_router
 from api.inbox_api import router as inbox_router
 from api.memory_api import router as memory_router
 from api.model_api import router as model_router
+from api.security_api import router as security_router
 from api.tool_api import router as tool_router
 from automation.automation_scheduler import AutomationScheduler
 from controller.meta_controller import MetaController
@@ -30,6 +31,7 @@ from models.model_manager import ModelManager
 from planner.planner import Planner
 from runtime.config import AppConfig
 from runtime.errors import AmaryllisError, InternalError
+from runtime.security import LocalIdentityManager, SecurityManager
 from runtime.telemetry import LocalTelemetry
 from storage.database import Database
 from storage.vector_store import VectorStore
@@ -57,6 +59,8 @@ class ServiceContainer:
     agent_manager: AgentManager
     automation_scheduler: AutomationScheduler
     telemetry: LocalTelemetry
+    identity_manager: LocalIdentityManager
+    security_manager: SecurityManager
 
 
 logging.basicConfig(
@@ -73,6 +77,12 @@ def create_services() -> ServiceContainer:
     database = Database(config.database_path)
     vector_store = VectorStore(config.vector_index_path)
     telemetry = LocalTelemetry(config.telemetry_path)
+    identity_manager = LocalIdentityManager(config.identity_path)
+    security_manager = SecurityManager(
+        identity_manager=identity_manager,
+        database=database,
+        telemetry=telemetry,
+    )
 
     episodic = EpisodicMemory(database)
     semantic = SemanticMemory(database, vector_store)
@@ -117,6 +127,10 @@ def create_services() -> ServiceContainer:
         tool_executor=tool_executor,
         meta_controller=meta_controller,
         planner=planner,
+        max_duration_sec=config.task_max_duration_sec,
+        max_model_calls=config.task_max_model_calls,
+        max_prompt_chars=config.task_max_prompt_chars,
+        max_tool_rounds=config.task_max_tool_rounds,
     )
 
     agent_run_manager = AgentRunManager(
@@ -124,6 +138,10 @@ def create_services() -> ServiceContainer:
         task_executor=task_executor,
         worker_count=config.run_workers,
         default_max_attempts=config.run_max_attempts,
+        attempt_timeout_sec=config.run_attempt_timeout_sec,
+        retry_backoff_sec=config.run_retry_backoff_sec,
+        retry_max_backoff_sec=config.run_retry_max_backoff_sec,
+        retry_jitter_sec=config.run_retry_jitter_sec,
         telemetry=telemetry,
     )
     agent_run_manager.start()
@@ -159,6 +177,8 @@ def create_services() -> ServiceContainer:
         agent_manager=agent_manager,
         automation_scheduler=automation_scheduler,
         telemetry=telemetry,
+        identity_manager=identity_manager,
+        security_manager=security_manager,
     )
 
 
@@ -324,6 +344,7 @@ def create_app() -> FastAPI:
     app.include_router(inbox_router)
     app.include_router(memory_router)
     app.include_router(tool_router)
+    app.include_router(security_router)
 
     @app.get("/health")
     def health(request: Request) -> dict[str, Any]:

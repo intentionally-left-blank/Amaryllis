@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
+import random
 import time
 from typing import Any, Iterator
 
@@ -63,22 +64,44 @@ class ModelManager:
         self._suggested_cache: dict[str, list[dict[str, str]]] = {}
         self._suggested_cache_until: float = 0.0
         self._suggested_cache_ttl_seconds = 6 * 60 * 60
+        self._provider_failure_counts: dict[str, int] = {}
+        self._provider_circuit_until: dict[str, float] = {}
 
     def list_models(self) -> dict[str, Any]:
         provider_payload: dict[str, Any] = {}
 
         for name, provider in self.providers.items():
             try:
+                if self._is_provider_circuit_open(name):
+                    provider_payload[name] = {
+                        "available": False,
+                        "error": (
+                            f"Provider circuit is open. "
+                            f"cooldown_remaining_sec={self._provider_cooldown_remaining(name):.2f}"
+                        ),
+                        "items": [],
+                        "failure_count": self._provider_failure_counts.get(name, 0),
+                        "circuit_open": True,
+                    }
+                    continue
                 provider_payload[name] = {
                     "available": True,
                     "error": None,
-                    "items": provider.list_models(),
+                    "items": self._call_provider_resilient(
+                        provider_name=name,
+                        operation="list_models",
+                        call=provider.list_models,
+                    ),
+                    "failure_count": self._provider_failure_counts.get(name, 0),
+                    "circuit_open": False,
                 }
             except Exception as exc:
                 provider_payload[name] = {
                     "available": False,
                     "error": str(exc),
                     "items": [],
+                    "failure_count": self._provider_failure_counts.get(name, 0),
+                    "circuit_open": self._is_provider_circuit_open(name),
                 }
 
         return {
@@ -127,11 +150,32 @@ class ModelManager:
         for name, provider in self.providers.items():
             start = time.perf_counter()
             try:
+                if self._is_provider_circuit_open(name):
+                    latency_ms = round((time.perf_counter() - start) * 1000.0, 2)
+                    checks[name] = {
+                        "status": "circuit_open",
+                        "latency_ms": latency_ms,
+                        "active": name == self.active_provider,
+                        "detail": (
+                            f"cooldown_remaining_sec={self._provider_cooldown_remaining(name):.2f}"
+                        ),
+                        "failure_count": self._provider_failure_counts.get(name, 0),
+                        "circuit_open": True,
+                    }
+                    continue
                 checker = getattr(provider, "health_check", None)
                 if callable(checker):
-                    raw = checker()
+                    raw = self._call_provider_resilient(
+                        provider_name=name,
+                        operation="health_check",
+                        call=checker,
+                    )
                 else:
-                    provider.list_models()
+                    self._call_provider_resilient(
+                        provider_name=name,
+                        operation="list_models",
+                        call=provider.list_models,
+                    )
                     raw = {"status": "ok"}
 
                 latency_ms = round((time.perf_counter() - start) * 1000.0, 2)
@@ -141,6 +185,8 @@ class ModelManager:
                     "latency_ms": latency_ms,
                     "active": name == self.active_provider,
                     "detail": payload.get("detail"),
+                    "failure_count": self._provider_failure_counts.get(name, 0),
+                    "circuit_open": self._is_provider_circuit_open(name),
                 }
             except Exception as exc:
                 latency_ms = round((time.perf_counter() - start) * 1000.0, 2)
@@ -149,6 +195,8 @@ class ModelManager:
                     "latency_ms": latency_ms,
                     "active": name == self.active_provider,
                     "detail": str(exc),
+                    "failure_count": self._provider_failure_counts.get(name, 0),
+                    "circuit_open": self._is_provider_circuit_open(name),
                 }
         return checks
 
@@ -531,7 +579,11 @@ class ModelManager:
 
             provider_models: list[dict[str, Any]] = []
             try:
-                provider_models = provider.list_models()
+                provider_models = self._call_provider_resilient(
+                    provider_name=provider_name,
+                    operation="list_models",
+                    call=provider.list_models,
+                )
             except Exception as exc:
                 self.logger.debug("candidate_list_models_failed provider=%s error=%s", provider_name, exc)
                 provider_models = []
@@ -799,11 +851,15 @@ class ModelManager:
         max_tokens: int,
     ) -> str:
         provider = self.providers[provider_name]
-        return provider.chat(
-            messages=messages,
-            model=model_name,
-            temperature=temperature,
-            max_tokens=max_tokens,
+        return self._call_provider_resilient(
+            provider_name=provider_name,
+            operation="chat",
+            call=lambda: provider.chat(
+                messages=messages,
+                model=model_name,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            ),
         )
 
     def _provider_stream_chat(
@@ -815,9 +871,115 @@ class ModelManager:
         max_tokens: int,
     ) -> Iterator[str]:
         provider = self.providers[provider_name]
-        return provider.stream_chat(
-            messages=messages,
-            model=model_name,
-            temperature=temperature,
-            max_tokens=max_tokens,
+        return self._call_provider_resilient(
+            provider_name=provider_name,
+            operation="stream_chat",
+            call=lambda: provider.stream_chat(
+                messages=messages,
+                model=model_name,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            ),
         )
+
+    def _call_provider_resilient(
+        self,
+        *,
+        provider_name: str,
+        operation: str,
+        call: Any,
+    ) -> Any:
+        if self._is_provider_circuit_open(provider_name):
+            remaining = self._provider_cooldown_remaining(provider_name)
+            raise RuntimeError(
+                f"Provider '{provider_name}' circuit is open "
+                f"(cooldown_remaining_sec={remaining:.2f})."
+            )
+
+        attempts = max(1, int(self.config.provider_retry_attempts))
+        last_exc: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                result = call()
+                self._record_provider_success(provider_name)
+                return result
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                self._record_provider_failure(provider_name)
+                retryable = self._is_retryable_provider_error(exc)
+                if attempt >= attempts or not retryable:
+                    break
+                delay = self._provider_retry_delay(attempt=attempt)
+                if delay > 0:
+                    time.sleep(delay)
+
+        assert last_exc is not None
+        raise RuntimeError(
+            f"Provider '{provider_name}' {operation} failed: {last_exc}"
+        ) from last_exc
+
+    def _record_provider_success(self, provider_name: str) -> None:
+        self._provider_failure_counts[provider_name] = 0
+        self._provider_circuit_until.pop(provider_name, None)
+
+    def _record_provider_failure(self, provider_name: str) -> None:
+        failures = self._provider_failure_counts.get(provider_name, 0) + 1
+        self._provider_failure_counts[provider_name] = failures
+        threshold = max(1, int(self.config.provider_circuit_failure_threshold))
+        if failures >= threshold:
+            cooldown = max(1.0, float(self.config.provider_circuit_cooldown_sec))
+            self._provider_circuit_until[provider_name] = time.monotonic() + cooldown
+            self.logger.warning(
+                "provider_circuit_open provider=%s failures=%s cooldown_sec=%.2f",
+                provider_name,
+                failures,
+                cooldown,
+            )
+
+    def _is_provider_circuit_open(self, provider_name: str) -> bool:
+        until = self._provider_circuit_until.get(provider_name)
+        if until is None:
+            return False
+        if time.monotonic() >= until:
+            self._provider_circuit_until.pop(provider_name, None)
+            self._provider_failure_counts[provider_name] = 0
+            return False
+        return True
+
+    def _provider_cooldown_remaining(self, provider_name: str) -> float:
+        until = self._provider_circuit_until.get(provider_name)
+        if until is None:
+            return 0.0
+        return max(0.0, until - time.monotonic())
+
+    def _provider_retry_delay(self, *, attempt: int) -> float:
+        base = max(0.0, float(self.config.provider_retry_backoff_sec))
+        jitter = max(0.0, float(self.config.provider_retry_jitter_sec))
+        delay = base * (2 ** max(0, attempt - 1))
+        if jitter > 0:
+            delay += random.uniform(0.0, jitter)
+        return max(0.0, delay)
+
+    @staticmethod
+    def _is_retryable_provider_error(exc: Exception) -> bool:
+        if isinstance(exc, TimeoutError):
+            return True
+        if isinstance(exc, OSError):
+            return True
+        message = str(exc).lower()
+        retry_keywords = (
+            "timeout",
+            "tempor",
+            "connection",
+            "network",
+            "unavailable",
+            "overloaded",
+            "429",
+            "too many requests",
+            "rate limit",
+            "502",
+            "503",
+            "504",
+            "try again",
+        )
+        return any(keyword in message for keyword in retry_keywords)

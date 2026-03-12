@@ -240,6 +240,34 @@ MIGRATIONS: list[Migration] = [
             ON inbox_items(source_type, source_id, created_at);
         """,
     ),
+    Migration(
+        version=7,
+        name="security_audit_events_v1",
+        sql="""
+        CREATE TABLE IF NOT EXISTS security_audit_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT NOT NULL,
+            action TEXT,
+            actor TEXT,
+            request_id TEXT,
+            target_type TEXT,
+            target_id TEXT,
+            status TEXT NOT NULL DEFAULT 'succeeded',
+            details_json TEXT NOT NULL DEFAULT '{}',
+            signature_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_security_audit_time
+            ON security_audit_events(created_at);
+        CREATE INDEX IF NOT EXISTS idx_security_audit_action_status
+            ON security_audit_events(action, status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_security_audit_actor
+            ON security_audit_events(actor, created_at);
+        CREATE INDEX IF NOT EXISTS idx_security_audit_request
+            ON security_audit_events(request_id, created_at);
+        """,
+    ),
 ]
 
 

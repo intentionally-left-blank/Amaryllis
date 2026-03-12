@@ -29,16 +29,33 @@ class AppConfig:
     openrouter_api_key: str | None
     run_workers: int
     run_max_attempts: int
+    run_attempt_timeout_sec: float
+    run_retry_backoff_sec: float
+    run_retry_max_backoff_sec: float
+    run_retry_jitter_sec: float
     automation_poll_sec: float
     automation_batch_size: int
     automation_escalation_warning: int
     automation_escalation_critical: int
     automation_escalation_disable: int
+    task_max_duration_sec: float
+    task_max_model_calls: int
+    task_max_prompt_chars: int
+    task_max_tool_rounds: int
+    provider_retry_attempts: int
+    provider_retry_backoff_sec: float
+    provider_retry_jitter_sec: float
+    provider_circuit_failure_threshold: int
+    provider_circuit_cooldown_sec: float
+    chat_max_messages: int
+    chat_max_input_chars: int
+    chat_max_tokens: int
     tool_approval_enforcement: str
     blocked_tools: tuple[str, ...]
     plugin_signing_key: str | None
     mcp_endpoints: tuple[str, ...]
     mcp_timeout_sec: float
+    identity_path: Path
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -90,6 +107,12 @@ class AppConfig:
                 str(data_dir / "telemetry.jsonl"),
             )
         ).expanduser()
+        identity_path = Path(
+            os.getenv(
+                "AMARYLLIS_IDENTITY_PATH",
+                str(data_dir / "identity.json"),
+            )
+        ).expanduser()
 
         fallback_raw = os.getenv("AMARYLLIS_OLLAMA_FALLBACK", "true").strip().lower()
         enable_ollama_fallback = fallback_raw in {"1", "true", "yes", "on"}
@@ -130,6 +153,10 @@ class AppConfig:
             openrouter_api_key=(os.getenv("AMARYLLIS_OPENROUTER_API_KEY") or "").strip() or None,
             run_workers=max(1, int(os.getenv("AMARYLLIS_RUN_WORKERS", "2"))),
             run_max_attempts=max(1, int(os.getenv("AMARYLLIS_RUN_MAX_ATTEMPTS", "2"))),
+            run_attempt_timeout_sec=max(5.0, float(os.getenv("AMARYLLIS_RUN_ATTEMPT_TIMEOUT_SEC", "180"))),
+            run_retry_backoff_sec=max(0.0, float(os.getenv("AMARYLLIS_RUN_RETRY_BACKOFF_SEC", "0.3"))),
+            run_retry_max_backoff_sec=max(0.0, float(os.getenv("AMARYLLIS_RUN_RETRY_MAX_BACKOFF_SEC", "2.0"))),
+            run_retry_jitter_sec=max(0.0, float(os.getenv("AMARYLLIS_RUN_RETRY_JITTER_SEC", "0.15"))),
             automation_poll_sec=max(0.5, float(os.getenv("AMARYLLIS_AUTOMATION_POLL_SEC", "2"))),
             automation_batch_size=max(1, int(os.getenv("AMARYLLIS_AUTOMATION_BATCH_SIZE", "10"))),
             automation_escalation_warning=max(1, int(os.getenv("AMARYLLIS_AUTOMATION_ESCALATION_WARNING", "2"))),
@@ -137,11 +164,28 @@ class AppConfig:
                 1, int(os.getenv("AMARYLLIS_AUTOMATION_ESCALATION_CRITICAL", "4"))
             ),
             automation_escalation_disable=max(1, int(os.getenv("AMARYLLIS_AUTOMATION_ESCALATION_DISABLE", "6"))),
+            task_max_duration_sec=max(10.0, float(os.getenv("AMARYLLIS_TASK_MAX_DURATION_SEC", "120"))),
+            task_max_model_calls=max(1, int(os.getenv("AMARYLLIS_TASK_MAX_MODEL_CALLS", "6"))),
+            task_max_prompt_chars=max(2000, int(os.getenv("AMARYLLIS_TASK_MAX_PROMPT_CHARS", "40000"))),
+            task_max_tool_rounds=max(1, int(os.getenv("AMARYLLIS_TASK_MAX_TOOL_ROUNDS", "3"))),
+            provider_retry_attempts=max(1, int(os.getenv("AMARYLLIS_PROVIDER_RETRY_ATTEMPTS", "2"))),
+            provider_retry_backoff_sec=max(0.0, float(os.getenv("AMARYLLIS_PROVIDER_RETRY_BACKOFF_SEC", "0.5"))),
+            provider_retry_jitter_sec=max(0.0, float(os.getenv("AMARYLLIS_PROVIDER_RETRY_JITTER_SEC", "0.2"))),
+            provider_circuit_failure_threshold=max(
+                1, int(os.getenv("AMARYLLIS_PROVIDER_CIRCUIT_FAILURE_THRESHOLD", "3"))
+            ),
+            provider_circuit_cooldown_sec=max(
+                1.0, float(os.getenv("AMARYLLIS_PROVIDER_CIRCUIT_COOLDOWN_SEC", "20"))
+            ),
+            chat_max_messages=max(1, int(os.getenv("AMARYLLIS_CHAT_MAX_MESSAGES", "80"))),
+            chat_max_input_chars=max(2000, int(os.getenv("AMARYLLIS_CHAT_MAX_INPUT_CHARS", "50000"))),
+            chat_max_tokens=max(64, int(os.getenv("AMARYLLIS_CHAT_MAX_TOKENS", "4096"))),
             tool_approval_enforcement=tool_approval_enforcement,
             blocked_tools=blocked_tools,
             plugin_signing_key=(os.getenv("AMARYLLIS_PLUGIN_SIGNING_KEY") or "").strip() or None,
             mcp_endpoints=mcp_endpoints,
             mcp_timeout_sec=max(1.0, float(os.getenv("AMARYLLIS_MCP_TIMEOUT_SEC", "10"))),
+            identity_path=identity_path,
         )
 
     def ensure_directories(self) -> None:
@@ -149,6 +193,7 @@ class AppConfig:
         self.models_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.plugins_dir.mkdir(parents=True, exist_ok=True)
+        self.identity_path.parent.mkdir(parents=True, exist_ok=True)
 
 
 def _csv_items(value: str) -> list[str]:

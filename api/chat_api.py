@@ -15,6 +15,10 @@ from tools.tool_executor import PermissionRequiredError
 router = APIRouter(tags=["chat"])
 
 
+def _request_id(request: Request) -> str:
+    return str(getattr(request.state, "request_id", ""))
+
+
 class ChatMessage(BaseModel):
     role: str
     content: str | None = None
@@ -52,6 +56,32 @@ class ChatCompletionsRequest(BaseModel):
     tools: list[ToolDefinition] | None = None
     permission_ids: list[str] = Field(default_factory=list)
     routing: ChatRoutingOptions | None = None
+
+
+def _validate_chat_request_limits(payload: ChatCompletionsRequest, request: Request) -> None:
+    services = request.app.state.services
+    max_messages = max(1, int(services.config.chat_max_messages))
+    max_input_chars = max(1, int(services.config.chat_max_input_chars))
+    max_tokens = max(1, int(services.config.chat_max_tokens))
+
+    if len(payload.messages) > max_messages:
+        raise ValidationError(
+            f"messages limit exceeded ({len(payload.messages)} > {max_messages})"
+        )
+
+    input_chars = 0
+    for item in payload.messages:
+        if item.content:
+            input_chars += len(item.content)
+    if input_chars > max_input_chars:
+        raise ValidationError(
+            f"input size limit exceeded ({input_chars} chars > {max_input_chars})"
+        )
+
+    if payload.max_tokens > max_tokens:
+        raise ValidationError(
+            f"max_tokens exceeds server limit ({payload.max_tokens} > {max_tokens})"
+        )
 
 
 def _normalize_messages(messages: list[ChatMessage]) -> list[dict[str, Any]]:
@@ -122,6 +152,7 @@ def _chat_with_tool_loop(
     model: str | None,
     routing: dict[str, Any] | None,
     fallback_targets: list[tuple[str, str]] | None,
+    max_tool_rounds: int,
 ) -> tuple[str, str, str, list[dict[str, Any]], dict[str, Any] | None]:
     services = request.app.state.services
     reasoning_messages = list(messages)
@@ -153,7 +184,7 @@ def _chat_with_tool_loop(
     if not tool_names:
         return response_text, provider_used, model_used, tool_events, routing_used
 
-    for attempt in range(1, 3):
+    for attempt in range(1, max(1, max_tool_rounds) + 1):
         parsed = services.tool_executor.parse_tool_call(response_text)
         if not parsed:
             break
@@ -177,7 +208,7 @@ def _chat_with_tool_loop(
             tool_result = services.tool_executor.execute(
                 tool_name,
                 arguments,
-                request_id=str(getattr(request.state, "request_id", "")),
+                request_id=_request_id(request),
                 permission_ids=permission_ids,
             )
             event["status"] = "succeeded"
@@ -242,11 +273,12 @@ def _chat_with_tool_loop(
 def chat_completions(payload: ChatCompletionsRequest, request: Request):
     if not payload.messages:
         raise ValidationError("messages must not be empty")
+    _validate_chat_request_limits(payload=payload, request=request)
 
     services = request.app.state.services
     normalized_messages = _normalize_messages(payload.messages)
     tool_names = _tool_names_from_request(payload=payload, request=request)
-    request_id = str(getattr(request.state, "request_id", ""))
+    request_id = _request_id(request)
 
     route_payload = payload.routing.model_dump(exclude_none=True) if payload.routing is not None else None
     resolved_route: dict[str, Any] | None = None
@@ -391,6 +423,7 @@ def chat_completions(payload: ChatCompletionsRequest, request: Request):
             model=resolved_model,
             routing=route_payload if resolved_route is None else None,
             fallback_targets=resolved_fallback_targets,
+            max_tool_rounds=services.config.task_max_tool_rounds,
         )
     except Exception as exc:
         raise ProviderError(str(exc)) from exc

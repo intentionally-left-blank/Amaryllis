@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from memory.episodic_memory import EpisodicMemory
@@ -347,6 +348,94 @@ class MemoryManager:
     def list_conflicts(self, user_id: str, limit: int = 50) -> list[dict[str, Any]]:
         return self._database.list_conflict_records(user_id=user_id, limit=limit)
 
+    def consolidate_user_memory(
+        self,
+        *,
+        user_id: str,
+        session_id: str | None = None,
+        semantic_limit: int = 1000,
+    ) -> dict[str, Any]:
+        limit = max(10, min(int(semantic_limit), 5000))
+        semantic_items = self._database.list_semantic_entries(
+            user_id=user_id,
+            kind="fact",
+            active_only=True,
+            limit=limit,
+        )
+
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for item in semantic_items:
+            key = self._semantic_group_key(item)
+            grouped.setdefault(key, []).append(item)
+
+        semantic_deactivated = 0
+        groups_with_duplicates = 0
+        conflicts_recorded = 0
+
+        for group_key, items in grouped.items():
+            if len(items) <= 1:
+                continue
+            groups_with_duplicates += 1
+            ranked = sorted(items, key=self._semantic_rank_key, reverse=True)
+            winner = ranked[0]
+            winner_id = int(winner.get("id", 0))
+            winner_value = self._fact_value_from_entry(winner)
+            winner_confidence = float(winner.get("confidence", 0.0))
+
+            for loser in ranked[1:]:
+                loser_id = int(loser.get("id", 0))
+                if loser_id <= 0:
+                    continue
+                loser_value = self._fact_value_from_entry(loser)
+                loser_confidence = float(loser.get("confidence", 0.0))
+                self._database.deactivate_semantic_entry(
+                    semantic_id=loser_id,
+                    superseded_by=winner_id if winner_id > 0 else None,
+                )
+                semantic_deactivated += 1
+                conflicts_recorded += 1
+                self._record_conflict(
+                    user_id=user_id,
+                    layer="semantic",
+                    key=group_key,
+                    previous_value=loser_value,
+                    incoming_value=winner_value,
+                    resolution="consolidated_duplicate",
+                    confidence_prev=loser_confidence,
+                    confidence_new=winner_confidence,
+                )
+
+        working_items: list[dict[str, Any]] = []
+        if self.working_memory is not None and session_id:
+            working_items = self.working_memory.list(
+                user_id=user_id,
+                session_id=session_id,
+                limit=128,
+            )
+
+        summary = {
+            "user_id": user_id,
+            "session_id": session_id,
+            "consolidated_at": datetime.now(timezone.utc).isoformat(),
+            "semantic_scanned": len(semantic_items),
+            "semantic_groups": len(grouped),
+            "semantic_groups_with_duplicates": groups_with_duplicates,
+            "semantic_deactivated": semantic_deactivated,
+            "working_items_scanned": len(working_items),
+            "conflicts_recorded": conflicts_recorded,
+        }
+        self._emit(
+            "memory_consolidate",
+            {
+                "user_id": user_id,
+                "session_id": session_id,
+                "semantic_scanned": len(semantic_items),
+                "semantic_deactivated": semantic_deactivated,
+                "conflicts_recorded": conflicts_recorded,
+            },
+        )
+        return summary
+
     def debug_retrieval(self, user_id: str, query: str, top_k: int = 8) -> list[dict[str, Any]]:
         matches = self.semantic.search(user_id=user_id, query=query, top_k=top_k)
         result: list[dict[str, Any]] = []
@@ -562,6 +651,28 @@ class MemoryManager:
         if "=" in text:
             return text.split("=", 1)[1].strip()
         return text if text else None
+
+    def _semantic_group_key(self, entry: dict[str, Any]) -> str:
+        metadata = entry.get("metadata", {})
+        if isinstance(metadata, dict):
+            fact_key = str(metadata.get("fact_key", "")).strip().lower()
+            if fact_key:
+                return f"fact:{fact_key}"
+            fingerprint = str(metadata.get("fingerprint", "")).strip().lower()
+            if fingerprint:
+                return f"fp:{fingerprint}"
+        text = str(entry.get("text", "")).strip().lower()
+        if text:
+            return f"text:{text[:120]}"
+        return f"id:{entry.get('id')}"
+
+    @staticmethod
+    def _semantic_rank_key(entry: dict[str, Any]) -> tuple[float, float, str, int]:
+        confidence = float(entry.get("confidence", 0.0))
+        importance = float(entry.get("importance", 0.0))
+        created_at = str(entry.get("created_at", ""))
+        entry_id = int(entry.get("id", 0))
+        return confidence, importance, created_at, entry_id
 
     def _record_conflict(
         self,

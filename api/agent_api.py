@@ -11,6 +11,37 @@ router = APIRouter(tags=["agents"])
 RUN_STATUSES: set[str] = {"queued", "running", "succeeded", "failed", "canceled"}
 
 
+def _request_id(request: Request) -> str:
+    return str(getattr(request.state, "request_id", ""))
+
+
+def _sign_action(
+    request: Request,
+    *,
+    action: str,
+    payload: dict[str, Any],
+    actor: str | None = None,
+    target_type: str | None = None,
+    target_id: str | None = None,
+    status: str = "succeeded",
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    services = request.app.state.services
+    try:
+        return services.security_manager.signed_action(
+            action=action,
+            payload=payload,
+            request_id=_request_id(request),
+            actor=actor,
+            target_type=target_type,
+            target_id=target_id,
+            status=status,
+            details=details,
+        )
+    except Exception:
+        return {}
+
+
 class CreateAgentRequest(BaseModel):
     name: str = Field(min_length=1)
     system_prompt: str = Field(min_length=1)
@@ -43,10 +74,39 @@ def create_agent(payload: CreateAgentRequest, request: Request) -> dict[str, Any
             tools=payload.tools,
             user_id=payload.user_id,
         )
-        return agent.to_record()
+        receipt = _sign_action(
+            request,
+            action="agent_create",
+            payload=payload.model_dump(),
+            actor=payload.user_id,
+            target_type="agent",
+            target_id=agent.id,
+        )
+        payload_out = agent.to_record()
+        payload_out["action_receipt"] = receipt
+        payload_out["request_id"] = _request_id(request)
+        return payload_out
     except ValueError as exc:
+        _sign_action(
+            request,
+            action="agent_create",
+            payload=payload.model_dump(),
+            actor=payload.user_id,
+            target_type="agent",
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise ValidationError(str(exc)) from exc
     except Exception as exc:
+        _sign_action(
+            request,
+            action="agent_create",
+            payload=payload.model_dump(),
+            actor=payload.user_id,
+            target_type="agent",
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise ProviderError(str(exc)) from exc
 
 
@@ -57,6 +117,7 @@ def list_agents(request: Request, user_id: str | None = Query(default=None)) -> 
     return {
         "items": [agent.to_record() for agent in agents],
         "count": len(agents),
+        "request_id": _request_id(request),
     }
 
 
@@ -75,13 +136,41 @@ def create_agent_run(
             session_id=payload.session_id,
             max_attempts=payload.max_attempts,
         )
+        receipt = _sign_action(
+            request,
+            action="agent_run_create",
+            payload=payload.model_dump(),
+            actor=payload.user_id,
+            target_type="agent_run",
+            target_id=str(run.get("id")),
+            details={"agent_id": agent_id},
+        )
         return {
             "run": run,
-            "request_id": str(getattr(request.state, "request_id", "")),
+            "action_receipt": receipt,
+            "request_id": _request_id(request),
         }
     except ValueError as exc:
+        _sign_action(
+            request,
+            action="agent_run_create",
+            payload=payload.model_dump(),
+            actor=payload.user_id,
+            target_type="agent_run",
+            details={"agent_id": agent_id, "error": str(exc)},
+            status="failed",
+        )
         raise ValidationError(str(exc)) from exc
     except Exception as exc:
+        _sign_action(
+            request,
+            action="agent_run_create",
+            payload=payload.model_dump(),
+            actor=payload.user_id,
+            target_type="agent_run",
+            details={"agent_id": agent_id, "error": str(exc)},
+            status="failed",
+        )
         raise ProviderError(str(exc)) from exc
 
 
@@ -110,7 +199,7 @@ def list_agent_runs(
         return {
             "items": runs,
             "count": len(runs),
-            "request_id": str(getattr(request.state, "request_id", "")),
+            "request_id": _request_id(request),
         }
     except ValueError as exc:
         raise ValidationError(str(exc)) from exc
@@ -128,7 +217,7 @@ def get_agent_run(
         run = services.agent_manager.get_run(run_id=run_id)
         return {
             "run": run,
-            "request_id": str(getattr(request.state, "request_id", "")),
+            "request_id": _request_id(request),
         }
     except ValueError as exc:
         raise NotFoundError(str(exc)) from exc
@@ -144,15 +233,42 @@ def cancel_agent_run(
     services = request.app.state.services
     try:
         run = services.agent_manager.cancel_run(run_id=run_id)
+        receipt = _sign_action(
+            request,
+            action="agent_run_cancel",
+            payload={"run_id": run_id},
+            actor=str(run.get("user_id") or ""),
+            target_type="agent_run",
+            target_id=run_id,
+        )
         return {
             "run": run,
-            "request_id": str(getattr(request.state, "request_id", "")),
+            "action_receipt": receipt,
+            "request_id": _request_id(request),
         }
     except ValueError as exc:
+        _sign_action(
+            request,
+            action="agent_run_cancel",
+            payload={"run_id": run_id},
+            target_type="agent_run",
+            target_id=run_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         if "not found" in str(exc).lower():
             raise NotFoundError(str(exc)) from exc
         raise ValidationError(str(exc)) from exc
     except Exception as exc:
+        _sign_action(
+            request,
+            action="agent_run_cancel",
+            payload={"run_id": run_id},
+            target_type="agent_run",
+            target_id=run_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise ProviderError(str(exc)) from exc
 
 
@@ -164,15 +280,42 @@ def resume_agent_run(
     services = request.app.state.services
     try:
         run = services.agent_manager.resume_run(run_id=run_id)
+        receipt = _sign_action(
+            request,
+            action="agent_run_resume",
+            payload={"run_id": run_id},
+            actor=str(run.get("user_id") or ""),
+            target_type="agent_run",
+            target_id=run_id,
+        )
         return {
             "run": run,
-            "request_id": str(getattr(request.state, "request_id", "")),
+            "action_receipt": receipt,
+            "request_id": _request_id(request),
         }
     except ValueError as exc:
+        _sign_action(
+            request,
+            action="agent_run_resume",
+            payload={"run_id": run_id},
+            target_type="agent_run",
+            target_id=run_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         if "not found" in str(exc).lower():
             raise NotFoundError(str(exc)) from exc
         raise ValidationError(str(exc)) from exc
     except Exception as exc:
+        _sign_action(
+            request,
+            action="agent_run_resume",
+            payload={"run_id": run_id},
+            target_type="agent_run",
+            target_id=run_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise ProviderError(str(exc)) from exc
 
 
@@ -184,13 +327,51 @@ def chat_agent(
 ) -> dict[str, Any]:
     services = request.app.state.services
     try:
-        return services.agent_manager.chat(
+        result = services.agent_manager.chat(
             agent_id=agent_id,
             user_message=payload.message,
             user_id=payload.user_id,
             session_id=payload.session_id,
         )
+        receipt = _sign_action(
+            request,
+            action="agent_chat_sync",
+            payload=payload.model_dump(),
+            actor=payload.user_id,
+            target_type="agent",
+            target_id=agent_id,
+        )
+        if isinstance(result, dict):
+            payload_out = dict(result)
+            payload_out["action_receipt"] = receipt
+            payload_out["request_id"] = _request_id(request)
+            return payload_out
+        return {
+            "result": result,
+            "action_receipt": receipt,
+            "request_id": _request_id(request),
+        }
     except ValueError as exc:
+        _sign_action(
+            request,
+            action="agent_chat_sync",
+            payload=payload.model_dump(),
+            actor=payload.user_id,
+            target_type="agent",
+            target_id=agent_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise NotFoundError(str(exc)) from exc
     except Exception as exc:
+        _sign_action(
+            request,
+            action="agent_chat_sync",
+            payload=payload.model_dump(),
+            actor=payload.user_id,
+            target_type="agent",
+            target_id=agent_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise ProviderError(str(exc)) from exc

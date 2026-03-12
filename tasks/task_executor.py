@@ -15,6 +15,14 @@ from tools.tool_registry import ToolRegistry
 CheckpointWriter = Callable[[dict[str, Any]], None]
 
 
+class TaskGuardrailError(RuntimeError):
+    pass
+
+
+class TaskTimeoutError(RuntimeError):
+    pass
+
+
 class TaskExecutor:
     def __init__(
         self,
@@ -24,6 +32,10 @@ class TaskExecutor:
         tool_executor: ToolExecutor,
         meta_controller: MetaController,
         planner: Planner,
+        max_duration_sec: float = 120.0,
+        max_model_calls: int = 6,
+        max_prompt_chars: int = 40000,
+        max_tool_rounds: int = 3,
     ) -> None:
         self.model_manager = model_manager
         self.memory_manager = memory_manager
@@ -31,6 +43,10 @@ class TaskExecutor:
         self.tool_executor = tool_executor
         self.meta_controller = meta_controller
         self.planner = planner
+        self.max_duration_sec = max(10.0, float(max_duration_sec))
+        self.max_model_calls = max(1, int(max_model_calls))
+        self.max_prompt_chars = max(2000, int(max_prompt_chars))
+        self.max_tool_rounds = max(1, int(max_tool_rounds))
 
     def execute(
         self,
@@ -39,7 +55,15 @@ class TaskExecutor:
         session_id: str | None,
         user_message: str,
         checkpoint: CheckpointWriter | None = None,
+        run_deadline_monotonic: float | None = None,
     ) -> dict[str, Any]:
+        started = time.monotonic()
+        model_calls = 0
+        tool_rounds = 0
+
+        self._check_runtime(started=started, run_deadline_monotonic=run_deadline_monotonic)
+        self._check_message_size(user_message)
+
         tools_available = bool(agent.tools)
         strategy = self.meta_controller.choose_strategy(
             user_message=user_message,
@@ -52,6 +76,7 @@ class TaskExecutor:
             strategy=strategy,
             tools_available=tools_available,
         )
+
         plan = self.planner.create_plan(task=user_message, strategy=strategy)
         self._emit_checkpoint(
             checkpoint,
@@ -68,6 +93,7 @@ class TaskExecutor:
             session_id=session_id,
         )
 
+        self._check_runtime(started=started, run_deadline_monotonic=run_deadline_monotonic)
         memory_context = self.memory_manager.get_context(
             user_id=user_id,
             agent_id=agent.id,
@@ -90,6 +116,7 @@ class TaskExecutor:
             memory_context=memory_context,
             session_id=session_id,
         )
+        self._check_prompt_size(messages)
 
         tool_events: list[dict[str, Any]] = []
         self._emit_checkpoint(
@@ -98,14 +125,20 @@ class TaskExecutor:
             message="LLM reasoning started.",
             tools_allowed=agent.tools,
         )
-        response_text, provider_used, model_used = self._reason_with_optional_tools(
+
+        response_text, provider_used, model_used, model_calls, tool_rounds = self._reason_with_optional_tools(
             messages=messages,
             agent=agent,
             tool_events=tool_events,
             user_id=user_id,
             session_id=session_id,
             checkpoint=checkpoint,
+            model_calls=model_calls,
+            tool_rounds=tool_rounds,
+            started=started,
+            run_deadline_monotonic=run_deadline_monotonic,
         )
+
         self._emit_checkpoint(
             checkpoint,
             stage="reasoning_completed",
@@ -113,8 +146,11 @@ class TaskExecutor:
             provider=provider_used,
             model=model_used,
             tool_events_count=len(tool_events),
+            model_calls=model_calls,
+            tool_rounds=tool_rounds,
         )
 
+        self._check_runtime(started=started, run_deadline_monotonic=run_deadline_monotonic)
         self.memory_manager.add_interaction(
             user_id=user_id,
             agent_id=agent.id,
@@ -130,10 +166,13 @@ class TaskExecutor:
                 "kind": "response",
             },
         )
+
+        duration_ms = round((time.monotonic() - started) * 1000.0, 2)
         self._emit_checkpoint(
             checkpoint,
             stage="memory_updated",
             message="Assistant response stored in memory layers.",
+            duration_ms=duration_ms,
         )
 
         return {
@@ -145,6 +184,11 @@ class TaskExecutor:
             "model": model_used,
             "tools": tool_events,
             "response": response_text,
+            "metrics": {
+                "model_calls": model_calls,
+                "tool_rounds": tool_rounds,
+                "duration_ms": duration_ms,
+            },
         }
 
     def _build_messages(
@@ -181,7 +225,11 @@ class TaskExecutor:
         user_id: str,
         session_id: str | None,
         checkpoint: CheckpointWriter | None = None,
-    ) -> tuple[str, str, str]:
+        model_calls: int = 0,
+        tool_rounds: int = 0,
+        started: float | None = None,
+        run_deadline_monotonic: float | None = None,
+    ) -> tuple[str, str, str, int, int]:
         allowed_tools = [name for name in agent.tools if self.tool_registry.get(name) is not None]
 
         reasoning_messages = list(messages)
@@ -192,11 +240,17 @@ class TaskExecutor:
                     "content": self.tool_executor.render_tool_instruction(allowed_tools),
                 }
             )
+        self._check_prompt_size(reasoning_messages)
+        self._check_runtime(started=started, run_deadline_monotonic=run_deadline_monotonic)
 
-        first = self.model_manager.chat(
+        first, model_calls = self._chat_with_limits(
             messages=reasoning_messages,
             model=agent.model,
+            model_calls=model_calls,
+            started=started,
+            run_deadline_monotonic=run_deadline_monotonic,
         )
+
         response_text = str(first.get("content", "")).strip()
         provider_used = str(first.get("provider", "unknown"))
         model_used = str(first.get("model", agent.model or "unknown"))
@@ -207,12 +261,14 @@ class TaskExecutor:
             provider=provider_used,
             model=model_used,
             preview=response_text[:240],
+            model_calls=model_calls,
         )
 
         if not allowed_tools:
-            return response_text, provider_used, model_used
+            return response_text, provider_used, model_used, model_calls, tool_rounds
 
-        for attempt in range(1, 3):
+        for attempt in range(1, self.max_tool_rounds + 1):
+            self._check_runtime(started=started, run_deadline_monotonic=run_deadline_monotonic)
             parsed = self.tool_executor.parse_tool_call(response_text)
             if not parsed:
                 self._emit_checkpoint(
@@ -223,6 +279,7 @@ class TaskExecutor:
                 )
                 break
 
+            tool_rounds += 1
             tool_name = str(parsed["name"])
             arguments = parsed["arguments"]
             self._emit_checkpoint(
@@ -231,9 +288,11 @@ class TaskExecutor:
                 message=f"Tool call started: {tool_name}",
                 tool=tool_name,
                 attempt=attempt,
+                tool_round=tool_rounds,
             )
             event: dict[str, Any] = {
                 "attempt": attempt,
+                "tool_round": tool_rounds,
                 "tool": tool_name,
                 "arguments": arguments,
                 "status": "started",
@@ -329,10 +388,14 @@ class TaskExecutor:
                     "content": "Tool output is provided. Produce a final user-facing answer.",
                 }
             )
+            self._check_prompt_size(reasoning_messages)
 
-            followup = self.model_manager.chat(
+            followup, model_calls = self._chat_with_limits(
                 messages=reasoning_messages,
                 model=agent.model,
+                model_calls=model_calls,
+                started=started,
+                run_deadline_monotonic=run_deadline_monotonic,
             )
             response_text = str(followup.get("content", "")).strip()
             provider_used = str(followup.get("provider", provider_used))
@@ -345,9 +408,85 @@ class TaskExecutor:
                 model=model_used,
                 attempt=attempt,
                 preview=response_text[:240],
+                model_calls=model_calls,
             )
 
-        return response_text, provider_used, model_used
+        if self.tool_executor.parse_tool_call(response_text):
+            raise TaskGuardrailError(
+                f"Tool round limit exceeded (max={self.max_tool_rounds})."
+            )
+
+        return response_text, provider_used, model_used, model_calls, tool_rounds
+
+    def _chat_with_limits(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        model: str | None,
+        model_calls: int,
+        started: float | None,
+        run_deadline_monotonic: float | None,
+    ) -> tuple[dict[str, Any], int]:
+        if model_calls >= self.max_model_calls:
+            raise TaskGuardrailError(
+                f"Model call limit exceeded (max={self.max_model_calls})."
+            )
+
+        self._check_runtime(started=started, run_deadline_monotonic=run_deadline_monotonic)
+        self._check_prompt_size(messages)
+
+        call_started = time.monotonic()
+        response = self.model_manager.chat(
+            messages=messages,
+            model=model,
+        )
+        model_calls += 1
+
+        if (time.monotonic() - call_started) > self.max_duration_sec:
+            raise TaskTimeoutError(
+                "Single model call exceeded task max duration guardrail."
+            )
+
+        self._check_runtime(started=started, run_deadline_monotonic=run_deadline_monotonic)
+        return response, model_calls
+
+    def _check_runtime(
+        self,
+        *,
+        started: float | None,
+        run_deadline_monotonic: float | None,
+    ) -> None:
+        now = time.monotonic()
+        if started is not None and (now - started) > self.max_duration_sec:
+            raise TaskTimeoutError(
+                f"Task duration exceeded limit ({self.max_duration_sec:.2f}s)."
+            )
+        if run_deadline_monotonic is not None and now > run_deadline_monotonic:
+            raise TaskTimeoutError("Run attempt timeout exceeded.")
+
+    def _check_message_size(self, text: str) -> None:
+        if len(text or "") > self.max_prompt_chars:
+            raise TaskGuardrailError(
+                f"Input message is too large ({len(text)} chars, max {self.max_prompt_chars})."
+            )
+
+    def _check_prompt_size(self, messages: list[dict[str, Any]]) -> None:
+        total_chars = self._estimate_prompt_chars(messages)
+        if total_chars > self.max_prompt_chars:
+            raise TaskGuardrailError(
+                f"Prompt size exceeds limit ({total_chars} chars, max {self.max_prompt_chars})."
+            )
+
+    @staticmethod
+    def _estimate_prompt_chars(messages: list[dict[str, Any]]) -> int:
+        total = 0
+        for item in messages:
+            content = item.get("content")
+            if isinstance(content, str):
+                total += len(content)
+            elif content is not None:
+                total += len(str(content))
+        return total
 
     @staticmethod
     def _render_memory_note(memory_context: dict[str, Any], session_id: str | None) -> str:

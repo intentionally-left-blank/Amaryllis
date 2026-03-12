@@ -76,6 +76,17 @@ class MemoryConflictsResponse(BaseModel):
     items: list[MemoryConflictRecord]
 
 
+class MemoryConsolidateRequest(BaseModel):
+    user_id: str = Field(min_length=1)
+    session_id: str | None = None
+    semantic_limit: int = Field(default=1000, ge=10, le=5000)
+
+
+class MemoryConsolidateResponse(BaseModel):
+    request_id: str
+    summary: dict[str, Any]
+
+
 @router.get("/debug/memory/context", response_model=MemoryContextResponse)
 def debug_memory_context(
     request: Request,
@@ -165,4 +176,22 @@ def debug_memory_conflicts(
         user_id=user_id,
         count=len(typed_items),
         items=typed_items,
+    )
+
+
+@router.post("/debug/memory/consolidate", response_model=MemoryConsolidateResponse)
+def debug_memory_consolidate(
+    payload: MemoryConsolidateRequest,
+    request: Request,
+) -> MemoryConsolidateResponse:
+    services = request.app.state.services
+    request_id = str(getattr(request.state, "request_id", ""))
+    summary = services.memory_manager.consolidate_user_memory(
+        user_id=payload.user_id,
+        session_id=payload.session_id,
+        semantic_limit=payload.semantic_limit,
+    )
+    return MemoryConsolidateResponse(
+        request_id=request_id,
+        summary=summary,
     )

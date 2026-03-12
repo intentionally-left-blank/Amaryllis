@@ -146,6 +146,52 @@ class MemoryManagerTests(unittest.TestCase):
 
         self.assertTrue(any(name == "memory_retrieval_debug" for name, _ in self.telemetry.events))
 
+    def test_consolidation_deactivates_duplicate_fact_entries(self) -> None:
+        self.manager.semantic.add(
+            user_id="user-1",
+            text="timezone=UTC",
+            metadata={"fact_key": "timezone", "fact_value": "UTC"},
+            kind="fact",
+            confidence=0.95,
+            importance=0.8,
+            fingerprint=self.manager._fingerprint("timezone=UTC"),  # noqa: SLF001
+        )
+        self.manager.semantic.add(
+            user_id="user-1",
+            text="timezone=GMT+1",
+            metadata={"fact_key": "timezone", "fact_value": "GMT+1"},
+            kind="fact",
+            confidence=0.55,
+            importance=0.5,
+            fingerprint=self.manager._fingerprint("timezone=GMT+1"),  # noqa: SLF001
+        )
+
+        summary = self.manager.consolidate_user_memory(user_id="user-1")
+        self.assertGreaterEqual(int(summary["semantic_deactivated"]), 1)
+
+        active = self.database.list_semantic_entries(
+            user_id="user-1",
+            kind="fact",
+            active_only=True,
+            limit=20,
+        )
+        timezone_active = [
+            item for item in active
+            if str((item.get("metadata") or {}).get("fact_key", "")) == "timezone"
+        ]
+        self.assertEqual(len(timezone_active), 1)
+        metadata = timezone_active[0].get("metadata", {})
+        self.assertEqual(str(metadata.get("fact_value")), "UTC")
+
+        conflicts = self.manager.list_conflicts("user-1")
+        self.assertTrue(
+            any(
+                item["layer"] == "semantic"
+                and item["resolution"] == "consolidated_duplicate"
+                for item in conflicts
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

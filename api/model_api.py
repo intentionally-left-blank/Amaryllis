@@ -10,6 +10,35 @@ from runtime.errors import ProviderError, ValidationError
 router = APIRouter(tags=["models"])
 
 
+def _request_id(request: Request) -> str:
+    return str(getattr(request.state, "request_id", ""))
+
+
+def _sign_action(
+    request: Request,
+    *,
+    action: str,
+    payload: dict[str, Any],
+    status: str = "succeeded",
+    details: dict[str, Any] | None = None,
+    target_id: str | None = None,
+) -> dict[str, Any]:
+    services = request.app.state.services
+    try:
+        return services.security_manager.signed_action(
+            action=action,
+            payload=payload,
+            request_id=_request_id(request),
+            actor=None,
+            target_type="model",
+            target_id=target_id,
+            status=status,
+            details=details,
+        )
+    except Exception:
+        return {}
+
+
 class DownloadModelRequest(BaseModel):
     model_id: str = Field(min_length=1)
     provider: str | None = None
@@ -36,7 +65,9 @@ class ModelRouteRequest(BaseModel):
 @router.get("/models")
 def list_models(request: Request) -> dict[str, Any]:
     services = request.app.state.services
-    return services.model_manager.list_models()
+    payload = services.model_manager.list_models()
+    payload["request_id"] = _request_id(request)
+    return payload
 
 
 @router.get("/models/capabilities")
@@ -48,6 +79,7 @@ def model_capabilities(request: Request) -> dict[str, Any]:
             "model": services.model_manager.active_model,
         },
         "providers": services.model_manager.provider_capabilities(),
+        "request_id": _request_id(request),
     }
 
 
@@ -58,17 +90,19 @@ def capability_matrix(
     limit_per_provider: int = 120,
 ) -> dict[str, Any]:
     services = request.app.state.services
-    return services.model_manager.model_capability_matrix(
+    payload = services.model_manager.model_capability_matrix(
         include_suggested=include_suggested,
         limit_per_provider=max(1, min(limit_per_provider, 500)),
     )
+    payload["request_id"] = _request_id(request)
+    return payload
 
 
 @router.post("/models/route")
 def model_route(payload: ModelRouteRequest, request: Request) -> dict[str, Any]:
     services = request.app.state.services
     try:
-        return services.model_manager.choose_route(
+        route = services.model_manager.choose_route(
             mode=payload.mode,
             provider=payload.provider,
             model=payload.model,
@@ -80,6 +114,8 @@ def model_route(payload: ModelRouteRequest, request: Request) -> dict[str, Any]:
             include_suggested=payload.include_suggested,
             limit_per_provider=payload.limit_per_provider,
         )
+        route["request_id"] = _request_id(request)
+        return route
     except ValueError as exc:
         raise ValidationError(str(exc)) from exc
     except Exception as exc:
@@ -90,13 +126,37 @@ def model_route(payload: ModelRouteRequest, request: Request) -> dict[str, Any]:
 def download_model(payload: DownloadModelRequest, request: Request) -> dict[str, Any]:
     services = request.app.state.services
     try:
-        return services.model_manager.download_model(
+        result = services.model_manager.download_model(
             model_id=payload.model_id,
             provider=payload.provider,
         )
+        result["action_receipt"] = _sign_action(
+            request,
+            action="model_download",
+            payload=payload.model_dump(),
+            target_id=payload.model_id,
+        )
+        result["request_id"] = _request_id(request)
+        return result
     except ValueError as exc:
+        _sign_action(
+            request,
+            action="model_download",
+            payload=payload.model_dump(),
+            target_id=payload.model_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise ValidationError(str(exc)) from exc
     except Exception as exc:
+        _sign_action(
+            request,
+            action="model_download",
+            payload=payload.model_dump(),
+            target_id=payload.model_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise ProviderError(str(exc)) from exc
 
 
@@ -104,11 +164,35 @@ def download_model(payload: DownloadModelRequest, request: Request) -> dict[str,
 def load_model(payload: LoadModelRequest, request: Request) -> dict[str, Any]:
     services = request.app.state.services
     try:
-        return services.model_manager.load_model(
+        result = services.model_manager.load_model(
             model_id=payload.model_id,
             provider=payload.provider,
         )
+        result["action_receipt"] = _sign_action(
+            request,
+            action="model_load",
+            payload=payload.model_dump(),
+            target_id=payload.model_id,
+        )
+        result["request_id"] = _request_id(request)
+        return result
     except ValueError as exc:
+        _sign_action(
+            request,
+            action="model_load",
+            payload=payload.model_dump(),
+            target_id=payload.model_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise ValidationError(str(exc)) from exc
     except Exception as exc:
+        _sign_action(
+            request,
+            action="model_load",
+            payload=payload.model_dump(),
+            target_id=payload.model_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
         raise ProviderError(str(exc)) from exc
