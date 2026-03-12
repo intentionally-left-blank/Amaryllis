@@ -13,10 +13,17 @@ from storage.vector_store import VectorStore
 
 
 class _FakeTaskExecutor:
-    def __init__(self, fail_first: bool = False, always_fail: bool = False) -> None:
+    def __init__(
+        self,
+        fail_first: bool = False,
+        always_fail: bool = False,
+        fail_once_after_prepare: bool = False,
+    ) -> None:
         self.fail_first = fail_first
         self.always_fail = always_fail
+        self.fail_once_after_prepare = fail_once_after_prepare
         self.call_count = 0
+        self.last_resume_state: dict[str, Any] | None = None
 
     def execute(
         self,
@@ -25,12 +32,59 @@ class _FakeTaskExecutor:
         session_id: str | None,
         user_message: str,
         checkpoint: Any = None,
+        run_deadline_monotonic: float | None = None,  # noqa: ARG002
+        resume_state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self.call_count += 1
+        self.last_resume_state = resume_state
+
+        completed_steps = set()
+        if isinstance(resume_state, dict):
+            raw = resume_state.get("completed_steps")
+            if isinstance(raw, list):
+                completed_steps = {str(item) for item in raw}
+
+        if "prepare_context" not in completed_steps and callable(checkpoint):
+            checkpoint(
+                {
+                    "stage": "step_completed",
+                    "step": "prepare_context",
+                    "resume_state": {
+                        "completed_steps": ["prepare_context"],
+                        "strategy": "simple",
+                        "plan": [{"id": 1, "description": "prepare"}],
+                    },
+                }
+            )
+            completed_steps.add("prepare_context")
+
+        if self.fail_once_after_prepare and self.call_count == 1:
+            raise RuntimeError("fail after prepare")
+
         if self.always_fail:
             raise RuntimeError("forced failure")
         if self.fail_first and self.call_count == 1:
             raise RuntimeError("fail first attempt")
+
+        if "reasoning" not in completed_steps and callable(checkpoint):
+            checkpoint(
+                {
+                    "stage": "step_completed",
+                    "step": "reasoning",
+                    "resume_state": {
+                        "completed_steps": ["prepare_context", "reasoning"],
+                        "strategy": "simple",
+                        "plan": [{"id": 1, "description": "prepare"}],
+                        "response_text": f"ok:{user_message}",
+                        "provider": "fake",
+                        "model": "fake-model",
+                        "tool_events": [],
+                        "model_calls": 1,
+                        "tool_rounds": 0,
+                    },
+                }
+            )
+
         if callable(checkpoint):
             checkpoint(
                 {
@@ -88,7 +142,6 @@ class AgentRunManagerTests(unittest.TestCase):
         self.assertIsNotNone(final)
         assert final is not None
         self.assertEqual(final["status"], "succeeded")
-        self.assertEqual(final["attempts"], 1)
         self.assertEqual(final["attempts"], 1)
         self.assertIsInstance(final["result"], dict)
         stages = {item.get("stage") for item in final["checkpoints"]}
@@ -153,6 +206,35 @@ class AgentRunManagerTests(unittest.TestCase):
         self.assertIsNotNone(final)
         assert final is not None
         self.assertEqual(final["status"], "succeeded")
+
+    def test_resume_uses_checkpoint_resume_state(self) -> None:
+        self.executor.fail_once_after_prepare = True
+        self.manager.start()
+        run = self.manager.create_run(
+            agent=self.agent,
+            user_id="user-1",
+            session_id="session-1",
+            user_message="resume from step",
+            max_attempts=1,
+        )
+
+        failed = self._wait_for_status(run["id"], {"failed"})
+        self.assertIsNotNone(failed)
+        assert failed is not None
+        self.assertEqual(failed["status"], "failed")
+
+        resumed = self.manager.resume_run(run["id"])
+        self.assertEqual(resumed["status"], "queued")
+
+        final = self._wait_for_status(run["id"], {"succeeded"})
+        self.assertIsNotNone(final)
+        assert final is not None
+        self.assertEqual(final["status"], "succeeded")
+        self.assertGreaterEqual(self.executor.call_count, 2)
+        self.assertIsNotNone(self.executor.last_resume_state)
+        assert isinstance(self.executor.last_resume_state, dict)
+        completed = self.executor.last_resume_state.get("completed_steps", [])
+        self.assertIn("prepare_context", completed)
 
     def _wait_for_status(
         self,

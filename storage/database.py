@@ -659,6 +659,29 @@ class Database:
         result.reverse()
         return result
 
+    def list_memory_users(self, limit: int = 200) -> list[str]:
+        if limit <= 0:
+            return []
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT user_id FROM (
+                    SELECT user_id FROM episodic_memory
+                    UNION
+                    SELECT user_id FROM semantic_memory
+                    UNION
+                    SELECT user_id FROM user_memory
+                    UNION
+                    SELECT user_id FROM working_memory
+                )
+                WHERE user_id IS NOT NULL AND TRIM(user_id) != ''
+                ORDER BY user_id ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [str(row["user_id"]) for row in rows]
+
     def add_security_audit_event(
         self,
         *,

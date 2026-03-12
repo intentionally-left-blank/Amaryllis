@@ -14,6 +14,10 @@ from tools.tool_registry import ToolRegistry
 
 CheckpointWriter = Callable[[dict[str, Any]], None]
 
+STEP_PREPARE_CONTEXT = "prepare_context"
+STEP_REASONING = "reasoning"
+STEP_PERSIST = "persist"
+
 
 class TaskGuardrailError(RuntimeError):
     pass
@@ -56,116 +60,260 @@ class TaskExecutor:
         user_message: str,
         checkpoint: CheckpointWriter | None = None,
         run_deadline_monotonic: float | None = None,
+        resume_state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         started = time.monotonic()
-        model_calls = 0
-        tool_rounds = 0
-
         self._check_runtime(started=started, run_deadline_monotonic=run_deadline_monotonic)
         self._check_message_size(user_message)
 
-        tools_available = bool(agent.tools)
-        strategy = self.meta_controller.choose_strategy(
-            user_message=user_message,
-            tools_available=tools_available,
-        )
-        self._emit_checkpoint(
-            checkpoint,
-            stage="strategy_selected",
-            message=f"Strategy selected: {strategy}",
-            strategy=strategy,
-            tools_available=tools_available,
-        )
+        state = self._normalize_resume_state(resume_state)
+        completed_steps = set(state.get("completed_steps", []))
 
-        plan = self.planner.create_plan(task=user_message, strategy=strategy)
-        self._emit_checkpoint(
-            checkpoint,
-            stage="plan_created",
-            message=f"Plan created with {len(plan)} steps.",
-            plan_steps=[step.__dict__ for step in plan],
-        )
+        strategy = str(state.get("strategy", "")).strip() or None
+        plan: list[dict[str, Any]] = []
+        if isinstance(state.get("plan"), list):
+            plan = [item for item in state["plan"] if isinstance(item, dict)]
 
-        self.memory_manager.add_interaction(
-            user_id=user_id,
-            agent_id=agent.id,
-            role="user",
-            content=user_message,
-            session_id=session_id,
-        )
-
-        self._check_runtime(started=started, run_deadline_monotonic=run_deadline_monotonic)
-        memory_context = self.memory_manager.get_context(
-            user_id=user_id,
-            agent_id=agent.id,
-            query=user_message,
-            session_id=session_id,
-        )
-        self._emit_checkpoint(
-            checkpoint,
-            stage="memory_loaded",
-            message="Memory context loaded.",
-            working_count=len(memory_context.get("working", [])),
-            episodic_count=len(memory_context.get("episodic", [])),
-            semantic_count=len(memory_context.get("semantic", [])),
-            profile_count=len(memory_context.get("profile", [])),
-        )
-
-        messages = self._build_messages(
-            agent=agent,
-            user_message=user_message,
-            memory_context=memory_context,
-            session_id=session_id,
-        )
-        self._check_prompt_size(messages)
+        model_calls = int(state.get("model_calls", 0))
+        tool_rounds = int(state.get("tool_rounds", 0))
+        response_text = str(state.get("response_text", "")).strip() if state.get("response_text") is not None else ""
+        provider_used = str(state.get("provider", "")).strip() if state.get("provider") is not None else ""
+        model_used = str(state.get("model", "")).strip() if state.get("model") is not None else ""
 
         tool_events: list[dict[str, Any]] = []
-        self._emit_checkpoint(
-            checkpoint,
-            stage="reasoning_started",
-            message="LLM reasoning started.",
-            tools_allowed=agent.tools,
-        )
+        raw_events = state.get("tool_events")
+        if isinstance(raw_events, list):
+            tool_events = [item for item in raw_events if isinstance(item, dict)]
 
-        response_text, provider_used, model_used, model_calls, tool_rounds = self._reason_with_optional_tools(
-            messages=messages,
-            agent=agent,
-            tool_events=tool_events,
-            user_id=user_id,
-            session_id=session_id,
-            checkpoint=checkpoint,
-            model_calls=model_calls,
-            tool_rounds=tool_rounds,
-            started=started,
-            run_deadline_monotonic=run_deadline_monotonic,
-        )
+        tools_available = bool(agent.tools)
 
-        self._emit_checkpoint(
-            checkpoint,
-            stage="reasoning_completed",
-            message="LLM reasoning completed.",
-            provider=provider_used,
-            model=model_used,
-            tool_events_count=len(tool_events),
-            model_calls=model_calls,
-            tool_rounds=tool_rounds,
-        )
+        if STEP_PREPARE_CONTEXT not in completed_steps:
+            strategy = self.meta_controller.choose_strategy(
+                user_message=user_message,
+                tools_available=tools_available,
+            )
+            self._emit_checkpoint(
+                checkpoint,
+                stage="strategy_selected",
+                message=f"Strategy selected: {strategy}",
+                strategy=strategy,
+                tools_available=tools_available,
+            )
 
-        self._check_runtime(started=started, run_deadline_monotonic=run_deadline_monotonic)
-        self.memory_manager.add_interaction(
-            user_id=user_id,
-            agent_id=agent.id,
-            role="assistant",
-            content=response_text,
-            session_id=session_id,
-        )
-        self.memory_manager.remember_fact(
-            user_id=user_id,
-            text=f"Agent {agent.name} response: {response_text[:1000]}",
-            metadata={
-                "agent_id": agent.id,
-                "kind": "response",
-            },
-        )
+            created_plan = self.planner.create_plan(task=user_message, strategy=strategy)
+            plan = [step.__dict__ for step in created_plan]
+            self._emit_checkpoint(
+                checkpoint,
+                stage="plan_created",
+                message=f"Plan created with {len(plan)} steps.",
+                plan_steps=plan,
+            )
+
+            self.memory_manager.add_interaction(
+                user_id=user_id,
+                agent_id=agent.id,
+                role="user",
+                content=user_message,
+                session_id=session_id,
+            )
+
+            self._check_runtime(started=started, run_deadline_monotonic=run_deadline_monotonic)
+            memory_context = self.memory_manager.get_context(
+                user_id=user_id,
+                agent_id=agent.id,
+                query=user_message,
+                session_id=session_id,
+            )
+            self._emit_checkpoint(
+                checkpoint,
+                stage="memory_loaded",
+                message="Memory context loaded.",
+                working_count=len(memory_context.get("working", [])),
+                episodic_count=len(memory_context.get("episodic", [])),
+                semantic_count=len(memory_context.get("semantic", [])),
+                profile_count=len(memory_context.get("profile", [])),
+            )
+
+            messages = self._build_messages(
+                agent=agent,
+                user_message=user_message,
+                memory_context=memory_context,
+                session_id=session_id,
+            )
+            self._check_prompt_size(messages)
+
+            completed_steps.add(STEP_PREPARE_CONTEXT)
+            snapshot = self._build_resume_snapshot(
+                completed_steps=completed_steps,
+                strategy=strategy,
+                plan=plan,
+                model_calls=model_calls,
+                tool_rounds=tool_rounds,
+                response_text=response_text,
+                provider_used=provider_used,
+                model_used=model_used,
+                tool_events=tool_events,
+            )
+            self._emit_checkpoint(
+                checkpoint,
+                stage="step_completed",
+                step=STEP_PREPARE_CONTEXT,
+                message="Preparation step completed.",
+                resume_state=snapshot,
+            )
+        else:
+            if not strategy:
+                strategy = self.meta_controller.choose_strategy(
+                    user_message=user_message,
+                    tools_available=tools_available,
+                )
+            if not plan:
+                created_plan = self.planner.create_plan(task=user_message, strategy=strategy)
+                plan = [step.__dict__ for step in created_plan]
+
+            self._check_runtime(started=started, run_deadline_monotonic=run_deadline_monotonic)
+            memory_context = self.memory_manager.get_context(
+                user_id=user_id,
+                agent_id=agent.id,
+                query=user_message,
+                session_id=session_id,
+            )
+            messages = self._build_messages(
+                agent=agent,
+                user_message=user_message,
+                memory_context=memory_context,
+                session_id=session_id,
+            )
+            self._check_prompt_size(messages)
+            self._emit_checkpoint(
+                checkpoint,
+                stage="step_resumed",
+                step=STEP_PREPARE_CONTEXT,
+                message="Preparation step resumed from checkpoint.",
+                completed_steps=sorted(completed_steps),
+            )
+
+        if STEP_REASONING not in completed_steps:
+            self._emit_checkpoint(
+                checkpoint,
+                stage="reasoning_started",
+                message="LLM reasoning started.",
+                tools_allowed=agent.tools,
+            )
+            response_text, provider_used, model_used, model_calls, tool_rounds = self._reason_with_optional_tools(
+                messages=messages,
+                agent=agent,
+                tool_events=tool_events,
+                user_id=user_id,
+                session_id=session_id,
+                checkpoint=checkpoint,
+                model_calls=model_calls,
+                tool_rounds=tool_rounds,
+                started=started,
+                run_deadline_monotonic=run_deadline_monotonic,
+            )
+            self._emit_checkpoint(
+                checkpoint,
+                stage="reasoning_completed",
+                message="LLM reasoning completed.",
+                provider=provider_used,
+                model=model_used,
+                tool_events_count=len(tool_events),
+                model_calls=model_calls,
+                tool_rounds=tool_rounds,
+            )
+
+            completed_steps.add(STEP_REASONING)
+            snapshot = self._build_resume_snapshot(
+                completed_steps=completed_steps,
+                strategy=strategy,
+                plan=plan,
+                model_calls=model_calls,
+                tool_rounds=tool_rounds,
+                response_text=response_text,
+                provider_used=provider_used,
+                model_used=model_used,
+                tool_events=tool_events,
+            )
+            self._emit_checkpoint(
+                checkpoint,
+                stage="step_completed",
+                step=STEP_REASONING,
+                message="Reasoning step completed.",
+                resume_state=snapshot,
+            )
+        else:
+            if not response_text:
+                self._emit_checkpoint(
+                    checkpoint,
+                    stage="step_resume_fallback",
+                    step=STEP_REASONING,
+                    message="Checkpoint missing reasoning payload, recomputing reasoning.",
+                )
+                response_text, provider_used, model_used, model_calls, tool_rounds = self._reason_with_optional_tools(
+                    messages=messages,
+                    agent=agent,
+                    tool_events=tool_events,
+                    user_id=user_id,
+                    session_id=session_id,
+                    checkpoint=checkpoint,
+                    model_calls=model_calls,
+                    tool_rounds=tool_rounds,
+                    started=started,
+                    run_deadline_monotonic=run_deadline_monotonic,
+                )
+            self._emit_checkpoint(
+                checkpoint,
+                stage="step_resumed",
+                step=STEP_REASONING,
+                message="Reasoning step resumed from checkpoint.",
+                model_calls=model_calls,
+                tool_rounds=tool_rounds,
+            )
+
+        if STEP_PERSIST not in completed_steps:
+            self._check_runtime(started=started, run_deadline_monotonic=run_deadline_monotonic)
+            self.memory_manager.add_interaction(
+                user_id=user_id,
+                agent_id=agent.id,
+                role="assistant",
+                content=response_text,
+                session_id=session_id,
+            )
+            self.memory_manager.remember_fact(
+                user_id=user_id,
+                text=f"Agent {agent.name} response: {response_text[:1000]}",
+                metadata={
+                    "agent_id": agent.id,
+                    "kind": "response",
+                },
+            )
+            completed_steps.add(STEP_PERSIST)
+            snapshot = self._build_resume_snapshot(
+                completed_steps=completed_steps,
+                strategy=strategy,
+                plan=plan,
+                model_calls=model_calls,
+                tool_rounds=tool_rounds,
+                response_text=response_text,
+                provider_used=provider_used,
+                model_used=model_used,
+                tool_events=tool_events,
+            )
+            self._emit_checkpoint(
+                checkpoint,
+                stage="step_completed",
+                step=STEP_PERSIST,
+                message="Persist step completed.",
+                resume_state=snapshot,
+            )
+        else:
+            self._emit_checkpoint(
+                checkpoint,
+                stage="step_resumed",
+                step=STEP_PERSIST,
+                message="Persist step already completed in previous attempt.",
+            )
 
         duration_ms = round((time.monotonic() - started) * 1000.0, 2)
         self._emit_checkpoint(
@@ -179,7 +327,7 @@ class TaskExecutor:
             "agent_id": agent.id,
             "session_id": session_id,
             "strategy": strategy,
-            "plan": [step.__dict__ for step in plan],
+            "plan": plan,
             "provider": provider_used,
             "model": model_used,
             "tools": tool_events,
@@ -503,6 +651,60 @@ class TaskExecutor:
             "semantic_memory": semantic,
         }
         return "Memory context: " + json.dumps(payload, ensure_ascii=False)
+
+    def _normalize_resume_state(self, resume_state: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(resume_state, dict):
+            return {}
+        raw_steps = resume_state.get("completed_steps")
+        completed_steps: list[str] = []
+        if isinstance(raw_steps, list):
+            for item in raw_steps:
+                step = str(item).strip()
+                if step in {STEP_PREPARE_CONTEXT, STEP_REASONING, STEP_PERSIST} and step not in completed_steps:
+                    completed_steps.append(step)
+
+        normalized: dict[str, Any] = {
+            "completed_steps": completed_steps,
+        }
+        for key in (
+            "strategy",
+            "plan",
+            "model_calls",
+            "tool_rounds",
+            "response_text",
+            "provider",
+            "model",
+            "tool_events",
+        ):
+            if key in resume_state:
+                normalized[key] = resume_state[key]
+        return normalized
+
+    @staticmethod
+    def _build_resume_snapshot(
+        *,
+        completed_steps: set[str],
+        strategy: str | None,
+        plan: list[dict[str, Any]],
+        model_calls: int,
+        tool_rounds: int,
+        response_text: str,
+        provider_used: str,
+        model_used: str,
+        tool_events: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "completed_steps": sorted(completed_steps),
+            "strategy": strategy,
+            "plan": plan,
+            "model_calls": max(0, int(model_calls)),
+            "tool_rounds": max(0, int(tool_rounds)),
+            "response_text": response_text,
+            "provider": provider_used,
+            "model": model_used,
+            "tool_events": tool_events,
+        }
 
     @staticmethod
     def _emit_checkpoint(

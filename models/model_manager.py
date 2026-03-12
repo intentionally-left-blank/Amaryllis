@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections import deque
 from datetime import datetime, timezone
 import logging
 import random
+from threading import Lock
 import time
 from typing import Any, Iterator
 
@@ -66,6 +68,9 @@ class ModelManager:
         self._suggested_cache_ttl_seconds = 6 * 60 * 60
         self._provider_failure_counts: dict[str, int] = {}
         self._provider_circuit_until: dict[str, float] = {}
+        self._cloud_rate_records: dict[str, deque[float]] = {}
+        self._cloud_budget_records: dict[str, deque[tuple[float, int]]] = {}
+        self._guardrail_lock = Lock()
 
     def list_models(self) -> dict[str, Any]:
         provider_payload: dict[str, Any] = {}
@@ -94,6 +99,7 @@ class ModelManager:
                     ),
                     "failure_count": self._provider_failure_counts.get(name, 0),
                     "circuit_open": False,
+                    "guardrails": self._provider_guardrail_status(name),
                 }
             except Exception as exc:
                 provider_payload[name] = {
@@ -102,6 +108,7 @@ class ModelManager:
                     "items": [],
                     "failure_count": self._provider_failure_counts.get(name, 0),
                     "circuit_open": self._is_provider_circuit_open(name),
+                    "guardrails": self._provider_guardrail_status(name),
                 }
 
         return {
@@ -161,6 +168,7 @@ class ModelManager:
                         ),
                         "failure_count": self._provider_failure_counts.get(name, 0),
                         "circuit_open": True,
+                        "guardrails": self._provider_guardrail_status(name),
                     }
                     continue
                 checker = getattr(provider, "health_check", None)
@@ -187,6 +195,7 @@ class ModelManager:
                     "detail": payload.get("detail"),
                     "failure_count": self._provider_failure_counts.get(name, 0),
                     "circuit_open": self._is_provider_circuit_open(name),
+                    "guardrails": self._provider_guardrail_status(name),
                 }
             except Exception as exc:
                 latency_ms = round((time.perf_counter() - start) * 1000.0, 2)
@@ -197,6 +206,7 @@ class ModelManager:
                     "detail": str(exc),
                     "failure_count": self._provider_failure_counts.get(name, 0),
                     "circuit_open": self._is_provider_circuit_open(name),
+                    "guardrails": self._provider_guardrail_status(name),
                 }
         return checks
 
@@ -860,6 +870,11 @@ class ModelManager:
                 temperature=temperature,
                 max_tokens=max_tokens,
             ),
+            before_call=lambda: self._enforce_cloud_guardrails(
+                provider_name=provider_name,
+                messages=messages,
+                max_tokens=max_tokens,
+            ),
         )
 
     def _provider_stream_chat(
@@ -880,6 +895,11 @@ class ModelManager:
                 temperature=temperature,
                 max_tokens=max_tokens,
             ),
+            before_call=lambda: self._enforce_cloud_guardrails(
+                provider_name=provider_name,
+                messages=messages,
+                max_tokens=max_tokens,
+            ),
         )
 
     def _call_provider_resilient(
@@ -888,6 +908,7 @@ class ModelManager:
         provider_name: str,
         operation: str,
         call: Any,
+        before_call: Any | None = None,
     ) -> Any:
         if self._is_provider_circuit_open(provider_name):
             remaining = self._provider_cooldown_remaining(provider_name)
@@ -900,6 +921,8 @@ class ModelManager:
         last_exc: Exception | None = None
         for attempt in range(1, attempts + 1):
             try:
+                if callable(before_call):
+                    before_call()
                 result = call()
                 self._record_provider_success(provider_name)
                 return result
@@ -983,3 +1006,102 @@ class ModelManager:
             "try again",
         )
         return any(keyword in message for keyword in retry_keywords)
+
+    @staticmethod
+    def _is_cloud_provider(provider_name: str) -> bool:
+        return provider_name in {"openai", "openrouter", "anthropic"}
+
+    def _estimate_budget_units(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        max_tokens: int,
+    ) -> int:
+        input_chars = 0
+        for item in messages:
+            content = item.get("content")
+            if isinstance(content, str):
+                input_chars += len(content)
+            elif content is not None:
+                input_chars += len(str(content))
+        # rough budget approximation: prompt chars + expected generation pressure
+        return max(1, input_chars + (max(1, int(max_tokens)) * 4))
+
+    def _provider_guardrail_status(self, provider_name: str) -> dict[str, Any]:
+        if not self._is_cloud_provider(provider_name):
+            return {
+                "enabled": False,
+            }
+        now = time.monotonic()
+        with self._guardrail_lock:
+            rate_records = self._cloud_rate_records.setdefault(provider_name, deque())
+            budget_records = self._cloud_budget_records.setdefault(provider_name, deque())
+            self._prune_guardrail_deques(now=now, rate_records=rate_records, budget_records=budget_records)
+            used_units = sum(units for _, units in budget_records)
+            return {
+                "enabled": True,
+                "rate_window_sec": self.config.cloud_rate_window_sec,
+                "rate_max_requests": self.config.cloud_rate_max_requests,
+                "rate_used_requests": len(rate_records),
+                "budget_window_sec": self.config.cloud_budget_window_sec,
+                "budget_max_units": self.config.cloud_budget_max_units,
+                "budget_used_units": used_units,
+                "budget_remaining_units": max(0, self.config.cloud_budget_max_units - used_units),
+            }
+
+    def _enforce_cloud_guardrails(
+        self,
+        *,
+        provider_name: str,
+        messages: list[dict[str, Any]],
+        max_tokens: int,
+    ) -> None:
+        if not self._is_cloud_provider(provider_name):
+            return
+
+        now = time.monotonic()
+        request_units = self._estimate_budget_units(messages=messages, max_tokens=max_tokens)
+        with self._guardrail_lock:
+            rate_records = self._cloud_rate_records.setdefault(provider_name, deque())
+            budget_records = self._cloud_budget_records.setdefault(provider_name, deque())
+            self._prune_guardrail_deques(now=now, rate_records=rate_records, budget_records=budget_records)
+
+            rate_used = len(rate_records)
+            rate_limit = max(1, int(self.config.cloud_rate_max_requests))
+            if rate_used >= rate_limit:
+                raise RuntimeError(
+                    (
+                        f"Cloud provider rate limit reached for '{provider_name}': "
+                        f"{rate_used}/{rate_limit} requests in "
+                        f"{self.config.cloud_rate_window_sec:.0f}s window."
+                    )
+                )
+
+            budget_used = sum(units for _, units in budget_records)
+            budget_limit = max(1, int(self.config.cloud_budget_max_units))
+            if budget_used + request_units > budget_limit:
+                raise RuntimeError(
+                    (
+                        f"Cloud provider budget limit reached for '{provider_name}': "
+                        f"{budget_used + request_units}/{budget_limit} units in "
+                        f"{self.config.cloud_budget_window_sec:.0f}s window."
+                    )
+                )
+
+            rate_records.append(now)
+            budget_records.append((now, request_units))
+
+    def _prune_guardrail_deques(
+        self,
+        *,
+        now: float,
+        rate_records: deque[float],
+        budget_records: deque[tuple[float, int]],
+    ) -> None:
+        rate_cutoff = now - max(1.0, float(self.config.cloud_rate_window_sec))
+        while rate_records and rate_records[0] < rate_cutoff:
+            rate_records.popleft()
+
+        budget_cutoff = now - max(1.0, float(self.config.cloud_budget_window_sec))
+        while budget_records and budget_records[0][0] < budget_cutoff:
+            budget_records.popleft()

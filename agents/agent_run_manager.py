@@ -180,6 +180,7 @@ class AgentRunManager:
         status = str(run.get("status", ""))
         if status not in {"failed", "canceled"}:
             raise ValueError(f"Run {run_id} is not resumable (status={status})")
+        resume_state = self._extract_resume_state(run)
 
         self.database.update_agent_run_fields(
             run_id,
@@ -195,6 +196,8 @@ class AgentRunManager:
             checkpoint={
                 "stage": "resumed",
                 "message": "Run resumed and queued again.",
+                "resume_steps": sorted(resume_state.get("completed_steps", [])) if resume_state else [],
+                "resume_state": resume_state or {},
             },
         )
         self._queue.put(run_id)
@@ -295,11 +298,13 @@ class AgentRunManager:
                 data = dict(payload)
                 data.setdefault("attempt", attempt)
                 self.database.append_agent_run_checkpoint(run_id=run_id, checkpoint=data)
+            resume_state = self._extract_resume_state(run)
             result = self._run_task_executor(
                 run=run,
                 agent=agent,
                 attempt=attempt,
                 checkpoint=push_checkpoint,
+                resume_state=resume_state,
             )
         except Exception as exc:
             error_message = str(exc)
@@ -408,6 +413,7 @@ class AgentRunManager:
         agent: Agent,
         attempt: int,
         checkpoint: Any,
+        resume_state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         attempt_started = time.monotonic()
         attempt_deadline = attempt_started + self.attempt_timeout_sec
@@ -420,18 +426,61 @@ class AgentRunManager:
                 user_message=str(run["input_message"]),
                 checkpoint=checkpoint,
                 run_deadline_monotonic=attempt_deadline,
+                resume_state=resume_state,
             )
         except TypeError as exc:
             # Backward compatibility for custom executors used in tests/tools.
-            if "run_deadline_monotonic" not in str(exc):
+            message = str(exc)
+            if "resume_state" in message and "run_deadline_monotonic" in message:
+                result = self.task_executor.execute(
+                    agent=agent,
+                    user_id=str(run["user_id"]),
+                    session_id=run.get("session_id"),
+                    user_message=str(run["input_message"]),
+                    checkpoint=checkpoint,
+                )
+            elif "resume_state" in message:
+                try:
+                    result = self.task_executor.execute(
+                        agent=agent,
+                        user_id=str(run["user_id"]),
+                        session_id=run.get("session_id"),
+                        user_message=str(run["input_message"]),
+                        checkpoint=checkpoint,
+                        run_deadline_monotonic=attempt_deadline,
+                    )
+                except TypeError as nested_exc:
+                    if "run_deadline_monotonic" not in str(nested_exc):
+                        raise
+                    result = self.task_executor.execute(
+                        agent=agent,
+                        user_id=str(run["user_id"]),
+                        session_id=run.get("session_id"),
+                        user_message=str(run["input_message"]),
+                        checkpoint=checkpoint,
+                    )
+            elif "run_deadline_monotonic" in message:
+                try:
+                    result = self.task_executor.execute(
+                        agent=agent,
+                        user_id=str(run["user_id"]),
+                        session_id=run.get("session_id"),
+                        user_message=str(run["input_message"]),
+                        checkpoint=checkpoint,
+                        resume_state=resume_state,
+                    )
+                except TypeError as nested_exc:
+                    if "resume_state" not in str(nested_exc):
+                        raise
+                    result = self.task_executor.execute(
+                        agent=agent,
+                        user_id=str(run["user_id"]),
+                        session_id=run.get("session_id"),
+                        user_message=str(run["input_message"]),
+                        checkpoint=checkpoint,
+                    )
+            else:
                 raise
-            result = self.task_executor.execute(
-                agent=agent,
-                user_id=str(run["user_id"]),
-                session_id=run.get("session_id"),
-                user_message=str(run["input_message"]),
-                checkpoint=checkpoint,
-            )
         elapsed = time.monotonic() - attempt_started
         if elapsed > self.attempt_timeout_sec:
             self.database.append_agent_run_checkpoint(
@@ -483,6 +532,19 @@ class AgentRunManager:
         bounded = min(exponential, self.retry_max_backoff_sec) if self.retry_max_backoff_sec > 0 else exponential
         jitter = random.uniform(0.0, self.retry_jitter_sec) if self.retry_jitter_sec > 0 else 0.0
         return round(max(0.0, bounded + jitter), 3)
+
+    @staticmethod
+    def _extract_resume_state(run: dict[str, Any]) -> dict[str, Any] | None:
+        checkpoints = run.get("checkpoints")
+        if not isinstance(checkpoints, list):
+            return None
+        for item in reversed(checkpoints):
+            if not isinstance(item, dict):
+                continue
+            payload = item.get("resume_state")
+            if isinstance(payload, dict):
+                return payload
+        return None
 
     @staticmethod
     def _utc_now() -> str:

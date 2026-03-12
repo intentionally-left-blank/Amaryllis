@@ -42,11 +42,19 @@ class AppConfig:
     task_max_model_calls: int
     task_max_prompt_chars: int
     task_max_tool_rounds: int
+    memory_consolidation_enabled: bool
+    memory_consolidation_interval_sec: float
+    memory_consolidation_semantic_limit: int
+    memory_consolidation_max_users_per_tick: int
     provider_retry_attempts: int
     provider_retry_backoff_sec: float
     provider_retry_jitter_sec: float
     provider_circuit_failure_threshold: int
     provider_circuit_cooldown_sec: float
+    cloud_rate_window_sec: float
+    cloud_rate_max_requests: int
+    cloud_budget_window_sec: float
+    cloud_budget_max_units: int
     chat_max_messages: int
     chat_max_input_chars: int
     chat_max_tokens: int
@@ -116,6 +124,9 @@ class AppConfig:
 
         fallback_raw = os.getenv("AMARYLLIS_OLLAMA_FALLBACK", "true").strip().lower()
         enable_ollama_fallback = fallback_raw in {"1", "true", "yes", "on"}
+        memory_consolidation_enabled = _parse_bool(
+            os.getenv("AMARYLLIS_MEMORY_CONSOLIDATION_ENABLED", "true")
+        )
         blocked_tools = tuple(_csv_items(os.getenv("AMARYLLIS_BLOCKED_TOOLS", "")))
         mcp_endpoints = tuple(_csv_items(os.getenv("AMARYLLIS_MCP_ENDPOINTS", "")))
         tool_approval_enforcement = os.getenv(
@@ -168,6 +179,16 @@ class AppConfig:
             task_max_model_calls=max(1, int(os.getenv("AMARYLLIS_TASK_MAX_MODEL_CALLS", "6"))),
             task_max_prompt_chars=max(2000, int(os.getenv("AMARYLLIS_TASK_MAX_PROMPT_CHARS", "40000"))),
             task_max_tool_rounds=max(1, int(os.getenv("AMARYLLIS_TASK_MAX_TOOL_ROUNDS", "3"))),
+            memory_consolidation_enabled=memory_consolidation_enabled,
+            memory_consolidation_interval_sec=max(
+                30.0, float(os.getenv("AMARYLLIS_MEMORY_CONSOLIDATION_INTERVAL_SEC", "600"))
+            ),
+            memory_consolidation_semantic_limit=max(
+                100, int(os.getenv("AMARYLLIS_MEMORY_CONSOLIDATION_SEMANTIC_LIMIT", "1000"))
+            ),
+            memory_consolidation_max_users_per_tick=max(
+                1, int(os.getenv("AMARYLLIS_MEMORY_CONSOLIDATION_MAX_USERS_PER_TICK", "20"))
+            ),
             provider_retry_attempts=max(1, int(os.getenv("AMARYLLIS_PROVIDER_RETRY_ATTEMPTS", "2"))),
             provider_retry_backoff_sec=max(0.0, float(os.getenv("AMARYLLIS_PROVIDER_RETRY_BACKOFF_SEC", "0.5"))),
             provider_retry_jitter_sec=max(0.0, float(os.getenv("AMARYLLIS_PROVIDER_RETRY_JITTER_SEC", "0.2"))),
@@ -176,6 +197,18 @@ class AppConfig:
             ),
             provider_circuit_cooldown_sec=max(
                 1.0, float(os.getenv("AMARYLLIS_PROVIDER_CIRCUIT_COOLDOWN_SEC", "20"))
+            ),
+            cloud_rate_window_sec=max(
+                1.0, float(os.getenv("AMARYLLIS_CLOUD_RATE_WINDOW_SEC", "60"))
+            ),
+            cloud_rate_max_requests=max(
+                1, int(os.getenv("AMARYLLIS_CLOUD_RATE_MAX_REQUESTS", "30"))
+            ),
+            cloud_budget_window_sec=max(
+                60.0, float(os.getenv("AMARYLLIS_CLOUD_BUDGET_WINDOW_SEC", "3600"))
+            ),
+            cloud_budget_max_units=max(
+                100, int(os.getenv("AMARYLLIS_CLOUD_BUDGET_MAX_UNITS", "400000"))
             ),
             chat_max_messages=max(1, int(os.getenv("AMARYLLIS_CHAT_MAX_MESSAGES", "80"))),
             chat_max_input_chars=max(2000, int(os.getenv("AMARYLLIS_CHAT_MAX_INPUT_CHARS", "50000"))),
@@ -198,3 +231,8 @@ class AppConfig:
 
 def _csv_items(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _parse_bool(value: str) -> bool:
+    normalized = str(value).strip().lower()
+    return normalized in {"1", "true", "yes", "on"}

@@ -23,6 +23,7 @@ from api.tool_api import router as tool_router
 from automation.automation_scheduler import AutomationScheduler
 from controller.meta_controller import MetaController
 from memory.episodic_memory import EpisodicMemory
+from memory.consolidation_worker import MemoryConsolidationWorker
 from memory.memory_manager import MemoryManager
 from memory.semantic_memory import SemanticMemory
 from memory.user_memory import UserMemory
@@ -58,6 +59,7 @@ class ServiceContainer:
     agent_run_manager: AgentRunManager
     agent_manager: AgentManager
     automation_scheduler: AutomationScheduler
+    memory_consolidation_worker: MemoryConsolidationWorker | None
     telemetry: LocalTelemetry
     identity_manager: LocalIdentityManager
     security_manager: SecurityManager
@@ -162,6 +164,18 @@ def create_services() -> ServiceContainer:
     )
     automation_scheduler.start()
 
+    memory_consolidation_worker: MemoryConsolidationWorker | None = None
+    if config.memory_consolidation_enabled:
+        memory_consolidation_worker = MemoryConsolidationWorker(
+            database=database,
+            memory_manager=memory_manager,
+            interval_sec=config.memory_consolidation_interval_sec,
+            semantic_limit=config.memory_consolidation_semantic_limit,
+            max_users_per_tick=config.memory_consolidation_max_users_per_tick,
+            telemetry=telemetry,
+        )
+        memory_consolidation_worker.start()
+
     return ServiceContainer(
         config=config,
         database=database,
@@ -176,6 +190,7 @@ def create_services() -> ServiceContainer:
         agent_run_manager=agent_run_manager,
         agent_manager=agent_manager,
         automation_scheduler=automation_scheduler,
+        memory_consolidation_worker=memory_consolidation_worker,
         telemetry=telemetry,
         identity_manager=identity_manager,
         security_manager=security_manager,
@@ -381,6 +396,8 @@ def create_app() -> FastAPI:
             },
         )
         services.automation_scheduler.stop()
+        if services.memory_consolidation_worker is not None:
+            services.memory_consolidation_worker.stop()
         services.agent_run_manager.stop()
         services.database.close()
         services.vector_store.persist()
