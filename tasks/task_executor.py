@@ -40,6 +40,9 @@ class TaskExecutor:
         max_model_calls: int = 6,
         max_prompt_chars: int = 40000,
         max_tool_rounds: int = 3,
+        verifier_enabled: bool = True,
+        verifier_max_repair_attempts: int = 1,
+        verifier_min_response_chars: int = 8,
     ) -> None:
         self.model_manager = model_manager
         self.memory_manager = memory_manager
@@ -51,6 +54,9 @@ class TaskExecutor:
         self.max_model_calls = max(1, int(max_model_calls))
         self.max_prompt_chars = max(2000, int(max_prompt_chars))
         self.max_tool_rounds = max(1, int(max_tool_rounds))
+        self.verifier_enabled = bool(verifier_enabled)
+        self.verifier_max_repair_attempts = max(0, int(verifier_max_repair_attempts))
+        self.verifier_min_response_chars = max(1, int(verifier_min_response_chars))
 
     def execute(
         self,
@@ -271,6 +277,20 @@ class TaskExecutor:
                 tool_rounds=tool_rounds,
             )
 
+        response_text, provider_used, model_used, model_calls = self._verify_and_repair_response(
+            messages=messages,
+            agent=agent,
+            session_id=session_id,
+            response_text=response_text,
+            provider_used=provider_used,
+            model_used=model_used,
+            tool_events=tool_events,
+            checkpoint=checkpoint,
+            model_calls=model_calls,
+            started=started,
+            run_deadline_monotonic=run_deadline_monotonic,
+        )
+
         if STEP_PERSIST not in completed_steps:
             self._check_runtime(started=started, run_deadline_monotonic=run_deadline_monotonic)
             self.memory_manager.add_interaction(
@@ -459,6 +479,65 @@ class TaskExecutor:
                 )
                 break
 
+            validation_error = self._validate_tool_arguments(tool_name=tool_name, arguments=arguments)
+            if validation_error is not None:
+                tool_result = {
+                    "tool": tool_name,
+                    "error": validation_error,
+                    "contract_error": True,
+                }
+                event["status"] = "invalid_arguments"
+                event["error"] = validation_error
+                event["duration_ms"] = 0.0
+                tool_events.append(event)
+                self._emit_checkpoint(
+                    checkpoint,
+                    stage="tool_call_invalid",
+                    message=f"Tool call arguments rejected: {tool_name}",
+                    tool=tool_name,
+                    attempt=attempt,
+                    error=validation_error,
+                )
+
+                reasoning_messages.append({"role": "assistant", "content": response_text})
+                reasoning_messages.append(
+                    {
+                        "role": "tool",
+                        "name": tool_name,
+                        "content": json.dumps(tool_result, ensure_ascii=False),
+                    }
+                )
+                reasoning_messages.append(
+                    {
+                        "role": "system",
+                        "content": "Tool call was rejected by deterministic contract validation. Correct arguments or continue without tool.",
+                    }
+                )
+                self._check_prompt_size(reasoning_messages)
+
+                followup, model_calls = self._chat_with_limits(
+                    messages=reasoning_messages,
+                    model=agent.model,
+                    session_id=session_id,
+                    model_calls=model_calls,
+                    started=started,
+                    run_deadline_monotonic=run_deadline_monotonic,
+                )
+                response_text = str(followup.get("content", "")).strip()
+                provider_used = str(followup.get("provider", provider_used))
+                model_used = str(followup.get("model", model_used))
+                self._emit_checkpoint(
+                    checkpoint,
+                    stage="llm_followup_response",
+                    message="Received follow-up response after invalid tool arguments.",
+                    provider=provider_used,
+                    model=model_used,
+                    attempt=attempt,
+                    preview=response_text[:240],
+                    model_calls=model_calls,
+                )
+                continue
+
             started_at = time.perf_counter()
             try:
                 tool_result = self.tool_executor.execute(
@@ -567,6 +646,204 @@ class TaskExecutor:
             )
 
         return response_text, provider_used, model_used, model_calls, tool_rounds
+
+    def _verify_and_repair_response(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        agent: Agent,
+        session_id: str | None,
+        response_text: str,
+        provider_used: str,
+        model_used: str,
+        tool_events: list[dict[str, Any]],
+        checkpoint: CheckpointWriter | None,
+        model_calls: int,
+        started: float | None,
+        run_deadline_monotonic: float | None,
+    ) -> tuple[str, str, str, int]:
+        if not self.verifier_enabled:
+            return response_text, provider_used, model_used, model_calls
+
+        issues = self._collect_verification_issues(response_text=response_text, tool_events=tool_events)
+        self._emit_checkpoint(
+            checkpoint,
+            stage="verification_started",
+            message="Response verification started.",
+            issues=issues,
+            issues_count=len(issues),
+        )
+        if not issues:
+            self._emit_checkpoint(
+                checkpoint,
+                stage="verification_passed",
+                message="Response verification passed.",
+            )
+            return response_text, provider_used, model_used, model_calls
+
+        repaired_text = response_text
+        repaired_provider = provider_used
+        repaired_model = model_used
+        remaining_issues = list(issues)
+
+        for attempt in range(1, self.verifier_max_repair_attempts + 1):
+            if model_calls >= self.max_model_calls:
+                break
+
+            self._check_runtime(started=started, run_deadline_monotonic=run_deadline_monotonic)
+            verification_prompt = (
+                "Your previous answer did not pass runtime verification.\n"
+                f"Issues: {', '.join(remaining_issues)}.\n"
+                "Provide a corrected final answer for the user.\n"
+                "Do not emit <tool_call> and do not request extra steps.\n"
+                "Return only final user-facing answer."
+            )
+            verify_messages = list(messages)
+            verify_messages.append({"role": "assistant", "content": repaired_text})
+            verify_messages.append({"role": "system", "content": verification_prompt})
+            self._check_prompt_size(verify_messages)
+
+            followup, model_calls = self._chat_with_limits(
+                messages=verify_messages,
+                model=agent.model,
+                session_id=session_id,
+                model_calls=model_calls,
+                started=started,
+                run_deadline_monotonic=run_deadline_monotonic,
+            )
+            repaired_text = str(followup.get("content", "")).strip()
+            repaired_provider = str(followup.get("provider", repaired_provider))
+            repaired_model = str(followup.get("model", repaired_model))
+            remaining_issues = self._collect_verification_issues(
+                response_text=repaired_text,
+                tool_events=tool_events,
+            )
+            self._emit_checkpoint(
+                checkpoint,
+                stage="verification_repair_attempt",
+                message="Verification repair attempt completed.",
+                attempt=attempt,
+                issues_after=remaining_issues,
+                model_calls=model_calls,
+                preview=repaired_text[:240],
+            )
+            if not remaining_issues:
+                self._emit_checkpoint(
+                    checkpoint,
+                    stage="verification_repair_succeeded",
+                    message="Verification repair succeeded.",
+                    attempt=attempt,
+                )
+                return repaired_text, repaired_provider, repaired_model, model_calls
+
+        critical = {"response_empty", "unfinished_tool_call"}
+        critical_issues = [item for item in remaining_issues if item in critical]
+        if critical_issues:
+            raise TaskGuardrailError(
+                "Verification failed for critical response issues: " + ", ".join(critical_issues)
+            )
+
+        self._emit_checkpoint(
+            checkpoint,
+            stage="verification_warning",
+            message="Response has non-critical verification issues; returning best effort response.",
+            issues=remaining_issues,
+            issues_count=len(remaining_issues),
+        )
+        return repaired_text, repaired_provider, repaired_model, model_calls
+
+    def _collect_verification_issues(
+        self,
+        *,
+        response_text: str,
+        tool_events: list[dict[str, Any]],
+    ) -> list[str]:
+        issues: list[str] = []
+        trimmed = (response_text or "").strip()
+        if not trimmed:
+            issues.append("response_empty")
+        elif len(trimmed) < self.verifier_min_response_chars:
+            issues.append("response_too_short")
+
+        if self.tool_executor.parse_tool_call(trimmed) is not None:
+            issues.append("unfinished_tool_call")
+
+        failed_tools = 0
+        for item in tool_events:
+            status = str(item.get("status", "")).strip().lower()
+            if status in {"failed", "invalid_arguments", "blocked"}:
+                failed_tools += 1
+        if failed_tools > 0:
+            lower = trimmed.lower()
+            acknowledges_failure = any(
+                marker in lower
+                for marker in ("cannot", "can't", "failed", "error", "unable", "not possible")
+            )
+            if not acknowledges_failure:
+                issues.append("tool_failure_not_acknowledged")
+
+        return issues
+
+    def _validate_tool_arguments(self, *, tool_name: str, arguments: dict[str, Any]) -> str | None:
+        tool = self.tool_registry.get(tool_name)
+        if tool is None:
+            return f"Unknown tool: {tool_name}"
+
+        try:
+            encoded = json.dumps(arguments, ensure_ascii=False)
+        except Exception:
+            return "Arguments must be JSON-serializable."
+        if len(encoded) > 20000:
+            return f"Arguments payload is too large ({len(encoded)} > 20000 chars)."
+
+        schema = tool.input_schema if isinstance(tool.input_schema, dict) else {}
+        required = schema.get("required", [])
+        if isinstance(required, list):
+            for field in required:
+                key = str(field)
+                if key not in arguments:
+                    return f"Missing required argument '{key}' for tool '{tool_name}'."
+
+        properties = schema.get("properties", {})
+        if isinstance(properties, dict):
+            for key, value in arguments.items():
+                spec = properties.get(key)
+                if not isinstance(spec, dict):
+                    continue
+                enum_values = spec.get("enum")
+                if isinstance(enum_values, list) and enum_values and value not in enum_values:
+                    return f"Argument '{key}' has invalid value '{value}'. Allowed: {enum_values}."
+                expected_type = spec.get("type")
+                if isinstance(expected_type, str) and not self._matches_json_type(expected_type, value):
+                    return (
+                        f"Argument '{key}' must be type '{expected_type}', "
+                        f"got '{type(value).__name__}'."
+                    )
+
+        if schema.get("additionalProperties") is False and isinstance(properties, dict):
+            unknown = sorted(key for key in arguments.keys() if key not in properties)
+            if unknown:
+                return "Unknown arguments are not allowed: " + ", ".join(unknown)
+        return None
+
+    @staticmethod
+    def _matches_json_type(expected: str, value: Any) -> bool:
+        normalized = expected.strip().lower()
+        if normalized == "string":
+            return isinstance(value, str)
+        if normalized == "integer":
+            return isinstance(value, int) and not isinstance(value, bool)
+        if normalized == "number":
+            return (isinstance(value, int) and not isinstance(value, bool)) or isinstance(value, float)
+        if normalized == "boolean":
+            return isinstance(value, bool)
+        if normalized == "object":
+            return isinstance(value, dict)
+        if normalized == "array":
+            return isinstance(value, list)
+        if normalized == "null":
+            return value is None
+        return True
 
     def _chat_with_limits(
         self,

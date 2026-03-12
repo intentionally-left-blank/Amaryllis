@@ -42,6 +42,9 @@ class AppConfig:
     task_max_model_calls: int
     task_max_prompt_chars: int
     task_max_tool_rounds: int
+    task_verifier_enabled: bool
+    task_verifier_max_repair_attempts: int
+    task_verifier_min_response_chars: int
     memory_consolidation_enabled: bool
     memory_consolidation_interval_sec: float
     memory_consolidation_semantic_limit: int
@@ -195,6 +198,13 @@ class AppConfig:
             task_max_model_calls=max(1, int(os.getenv("AMARYLLIS_TASK_MAX_MODEL_CALLS", "6"))),
             task_max_prompt_chars=max(2000, int(os.getenv("AMARYLLIS_TASK_MAX_PROMPT_CHARS", "40000"))),
             task_max_tool_rounds=max(1, int(os.getenv("AMARYLLIS_TASK_MAX_TOOL_ROUNDS", "3"))),
+            task_verifier_enabled=_parse_bool(os.getenv("AMARYLLIS_TASK_VERIFIER_ENABLED", "true")),
+            task_verifier_max_repair_attempts=max(
+                0, int(os.getenv("AMARYLLIS_TASK_VERIFIER_MAX_REPAIR_ATTEMPTS", "1"))
+            ),
+            task_verifier_min_response_chars=max(
+                1, int(os.getenv("AMARYLLIS_TASK_VERIFIER_MIN_RESPONSE_CHARS", "8"))
+            ),
             memory_consolidation_enabled=memory_consolidation_enabled,
             memory_consolidation_interval_sec=max(
                 30.0, float(os.getenv("AMARYLLIS_MEMORY_CONSOLIDATION_INTERVAL_SEC", "600"))

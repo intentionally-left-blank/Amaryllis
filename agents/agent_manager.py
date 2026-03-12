@@ -120,3 +120,8 @@ class AgentManager:
         if self.run_manager is None:
             raise ValueError("Run manager is not configured")
         return self.run_manager.resume_run(run_id)
+
+    def replay_run(self, run_id: str) -> dict[str, Any]:
+        if self.run_manager is None:
+            raise ValueError("Run manager is not configured")
+        return self.run_manager.replay_run(run_id)

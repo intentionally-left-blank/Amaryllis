@@ -213,6 +213,105 @@ class AgentRunManager:
         )
         return updated
 
+    def replay_run(self, run_id: str) -> dict[str, Any]:
+        run = self.database.get_agent_run(run_id)
+        if run is None:
+            raise ValueError(f"Run not found: {run_id}")
+
+        raw_checkpoints = run.get("checkpoints")
+        checkpoints = raw_checkpoints if isinstance(raw_checkpoints, list) else []
+
+        timeline: list[dict[str, Any]] = []
+        attempt_index: dict[int, int] = {}
+        attempt_summary: list[dict[str, Any]] = []
+        resume_snapshots: list[dict[str, Any]] = []
+
+        for index, item in enumerate(checkpoints):
+            if not isinstance(item, dict):
+                continue
+
+            timestamp = str(item.get("timestamp", ""))
+            stage = str(item.get("stage", "")).strip() or "unknown"
+            attempt = self._normalize_attempt(item.get("attempt"))
+            message = str(item.get("message", "")).strip()
+
+            event: dict[str, Any] = {
+                "index": index + 1,
+                "timestamp": timestamp,
+                "stage": stage,
+                "attempt": attempt,
+                "message": message,
+            }
+            if "retryable" in item:
+                event["retryable"] = bool(item.get("retryable"))
+            timeline.append(event)
+
+            resume_state = item.get("resume_state")
+            if isinstance(resume_state, dict):
+                completed_steps = resume_state.get("completed_steps")
+                resume_snapshots.append(
+                    {
+                        "timestamp": timestamp,
+                        "attempt": attempt,
+                        "completed_steps": list(completed_steps) if isinstance(completed_steps, list) else [],
+                    }
+                )
+
+            if attempt is None:
+                continue
+
+            summary_idx = attempt_index.get(attempt)
+            if summary_idx is None:
+                summary_idx = len(attempt_summary)
+                attempt_index[attempt] = summary_idx
+                attempt_summary.append(
+                    {
+                        "attempt": attempt,
+                        "stage_counts": {},
+                        "started_at": None,
+                        "finished_at": None,
+                        "tool_rounds": 0,
+                        "verification_repairs": 0,
+                        "errors": [],
+                    }
+                )
+
+            summary = attempt_summary[summary_idx]
+            stage_counts = summary["stage_counts"]
+            assert isinstance(stage_counts, dict)
+            stage_counts[stage] = int(stage_counts.get(stage, 0)) + 1
+
+            if stage == "running" and summary.get("started_at") is None:
+                summary["started_at"] = timestamp
+            if stage in {"succeeded", "failed", "canceled"}:
+                summary["finished_at"] = timestamp
+            if stage == "tool_call_finished":
+                summary["tool_rounds"] = int(summary.get("tool_rounds", 0)) + 1
+            if stage == "verification_repair_attempt":
+                summary["verification_repairs"] = int(summary.get("verification_repairs", 0)) + 1
+            if stage in {"error", "failed"} and message:
+                errors = summary["errors"]
+                assert isinstance(errors, list)
+                errors.append(message)
+
+        latest_resume_state = self._extract_resume_state(run)
+        return {
+            "run_id": str(run.get("id", run_id)),
+            "agent_id": run.get("agent_id"),
+            "user_id": run.get("user_id"),
+            "session_id": run.get("session_id"),
+            "status": run.get("status"),
+            "attempts": int(run.get("attempts", 0)),
+            "max_attempts": int(run.get("max_attempts", 0)),
+            "checkpoint_count": len(timeline),
+            "timeline": timeline,
+            "attempt_summary": attempt_summary,
+            "resume_snapshots": resume_snapshots,
+            "latest_resume_state": latest_resume_state or None,
+            "has_result": run.get("result") is not None,
+            "error_message": run.get("error_message"),
+        }
+
     def _worker_loop(self) -> None:
         while not self._stop.is_set():
             try:
@@ -545,6 +644,14 @@ class AgentRunManager:
             if isinstance(payload, dict):
                 return payload
         return None
+
+    @staticmethod
+    def _normalize_attempt(value: Any) -> int | None:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
 
     @staticmethod
     def _utc_now() -> str:

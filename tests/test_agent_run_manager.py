@@ -236,6 +236,52 @@ class AgentRunManagerTests(unittest.TestCase):
         completed = self.executor.last_resume_state.get("completed_steps", [])
         self.assertIn("prepare_context", completed)
 
+    def test_replay_returns_timeline_and_attempt_summary(self) -> None:
+        self.manager.start()
+        run = self.manager.create_run(
+            agent=self.agent,
+            user_id="user-1",
+            session_id="session-1",
+            user_message="replay me",
+            max_attempts=2,
+        )
+        final = self._wait_for_status(run["id"], {"succeeded"})
+        self.assertIsNotNone(final)
+
+        replay = self.manager.replay_run(run["id"])
+        self.assertEqual(replay["run_id"], run["id"])
+        self.assertEqual(replay["status"], "succeeded")
+        self.assertGreaterEqual(int(replay["checkpoint_count"]), 4)
+
+        timeline = replay["timeline"]
+        self.assertIsInstance(timeline, list)
+        stages = [str(item.get("stage")) for item in timeline]
+        self.assertIn("queued", stages)
+        self.assertIn("running", stages)
+        self.assertIn("succeeded", stages)
+
+        summary = replay["attempt_summary"]
+        self.assertIsInstance(summary, list)
+        self.assertGreaterEqual(len(summary), 1)
+        first = summary[0]
+        self.assertEqual(first.get("attempt"), 1)
+        stage_counts = first.get("stage_counts")
+        self.assertIsInstance(stage_counts, dict)
+        assert isinstance(stage_counts, dict)
+        self.assertGreaterEqual(int(stage_counts.get("running", 0)), 1)
+        self.assertGreaterEqual(int(stage_counts.get("succeeded", 0)), 1)
+
+        latest_resume_state = replay.get("latest_resume_state")
+        self.assertIsInstance(latest_resume_state, dict)
+        assert isinstance(latest_resume_state, dict)
+        completed_steps = latest_resume_state.get("completed_steps", [])
+        self.assertIn("prepare_context", completed_steps)
+        self.assertIn("reasoning", completed_steps)
+
+    def test_replay_missing_run_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            self.manager.replay_run("missing-run-id")
+
     def _wait_for_status(
         self,
         run_id: str,

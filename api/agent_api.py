@@ -225,6 +225,24 @@ def get_agent_run(
         raise ProviderError(str(exc)) from exc
 
 
+@router.get("/agents/runs/{run_id}/replay")
+def replay_agent_run(
+    request: Request,
+    run_id: str = Path(..., min_length=1),
+) -> dict[str, Any]:
+    services = request.app.state.services
+    try:
+        replay = services.agent_manager.replay_run(run_id=run_id)
+        return {
+            "replay": replay,
+            "request_id": _request_id(request),
+        }
+    except ValueError as exc:
+        raise NotFoundError(str(exc)) from exc
+    except Exception as exc:
+        raise ProviderError(str(exc)) from exc
+
+
 @router.post("/agents/runs/{run_id}/cancel")
 def cancel_agent_run(
     request: Request,

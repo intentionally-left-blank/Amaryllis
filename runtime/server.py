@@ -149,6 +149,9 @@ def create_services() -> ServiceContainer:
         max_model_calls=config.task_max_model_calls,
         max_prompt_chars=config.task_max_prompt_chars,
         max_tool_rounds=config.task_max_tool_rounds,
+        verifier_enabled=config.task_verifier_enabled,
+        verifier_max_repair_attempts=config.task_verifier_max_repair_attempts,
+        verifier_min_response_chars=config.task_verifier_min_response_chars,
     )
 
     agent_run_manager = AgentRunManager(
