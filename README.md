@@ -573,7 +573,7 @@ Implemented now:
   - cancel/resume actions
   - checkpoint timeline and result preview
   - replay loader with attempt summary and event timeline
-  - replay timeline filters (stage/attempt/search) and JSON export
+  - replay timeline filters with presets (`errors`, `tools`, `verify`), pagination, side-by-side attempt diff, and diagnostic package export
 
 Run status values:
 - `queued`

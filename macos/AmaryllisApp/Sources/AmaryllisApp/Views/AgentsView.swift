@@ -29,6 +29,12 @@ struct AgentsView: View {
     @State private var replaySearchQuery: String = ""
     @State private var replayStageFilter: String = "all"
     @State private var replayAttemptFilter: String = "all"
+    @State private var replayPreset: String = "all"
+    @State private var replayCompareLeftAttempt: String = "auto"
+    @State private var replayCompareRightAttempt: String = "auto"
+    @State private var replayTimelineLimit: Int = 120
+
+    private let replayTimelinePageSize: Int = 120
 
     @State private var newAutomationMessage: String = "Check recent updates and summarize key points."
     @State private var newAutomationScheduleType: String = "interval"
@@ -93,6 +99,18 @@ struct AgentsView: View {
         .onChange(of: userID) { _ in
             Task { await refreshInbox() }
         }
+        .onChange(of: replaySearchQuery) { _ in
+            replayTimelineLimit = replayTimelinePageSize
+        }
+        .onChange(of: replayStageFilter) { _ in
+            replayTimelineLimit = replayTimelinePageSize
+        }
+        .onChange(of: replayAttemptFilter) { _ in
+            replayTimelineLimit = replayTimelinePageSize
+        }
+        .onChange(of: replayPreset) { _ in
+            replayTimelineLimit = replayTimelinePageSize
+        }
     }
 
     private var leftPanel: some View {
@@ -156,6 +174,10 @@ struct AgentsView: View {
                             replaySearchQuery = ""
                             replayStageFilter = "all"
                             replayAttemptFilter = "all"
+                            replayPreset = "all"
+                            replayCompareLeftAttempt = "auto"
+                            replayCompareRightAttempt = "auto"
+                            replayTimelineLimit = replayTimelinePageSize
                             runStatusMessage = "Agent switched. Refreshing runs..."
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
@@ -402,11 +424,11 @@ struct AgentsView: View {
                             }
                             .buttonStyle(AmaryllisSecondaryButtonStyle())
                             .disabled(isLoadingReplay || isRunActionLoading)
-                            Button("Export Replay") {
-                                Task { await exportReplay(runID: run.id) }
+                            Button("Export Package") {
+                                Task { await exportDiagnosticPackage(run: run) }
                             }
                             .buttonStyle(AmaryllisSecondaryButtonStyle())
-                            .disabled(isLoadingReplay || selectedRunReplay?.runId != run.id)
+                            .disabled(isLoadingReplay)
                         }
                         Text("id: \(run.id)")
                             .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
@@ -427,6 +449,9 @@ struct AgentsView: View {
                             .foregroundStyle(AmaryllisTheme.textSecondary)
 
                         if let replay = selectedRunReplay, replay.runId == run.id {
+                            let filteredTimeline = filteredReplayTimeline(replay)
+                            let visibleTimeline = visibleReplayTimeline(filteredTimeline)
+                            let attemptPair = selectedReplayAttemptPair(replay)
                             Text("Replay Summary (\(replay.checkpointCount) events)")
                                 .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
                                 .foregroundStyle(AmaryllisTheme.textSecondary)
@@ -467,6 +492,54 @@ struct AgentsView: View {
                                 .frame(maxHeight: 86)
                             }
 
+                            Text("Attempt Diff")
+                                .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                                .foregroundStyle(AmaryllisTheme.textSecondary)
+                            HStack(spacing: 8) {
+                                Picker("Left", selection: $replayCompareLeftAttempt) {
+                                    Text("auto").tag("auto")
+                                    ForEach(replay.attemptSummary.map(\.attempt).sorted(), id: \.self) { attempt in
+                                        Text("a\(attempt)").tag(String(attempt))
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .frame(width: 110)
+                                Picker("Right", selection: $replayCompareRightAttempt) {
+                                    Text("auto").tag("auto")
+                                    ForEach(replay.attemptSummary.map(\.attempt).sorted(), id: \.self) { attempt in
+                                        Text("a\(attempt)").tag(String(attempt))
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .frame(width: 110)
+                                Button("Auto Pair") {
+                                    replayCompareLeftAttempt = "auto"
+                                    replayCompareRightAttempt = "auto"
+                                }
+                                .buttonStyle(AmaryllisSecondaryButtonStyle())
+                                Spacer()
+                            }
+                            if let pair = attemptPair {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("a\(pair.left.attempt) vs a\(pair.right.attempt)")
+                                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                        .foregroundStyle(AmaryllisTheme.textPrimary)
+                                    ForEach(renderAttemptComparisonLines(left: pair.left, right: pair.right), id: \.self) { line in
+                                        Text(line)
+                                            .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                                            .lineLimit(2)
+                                    }
+                                }
+                                .padding(6)
+                                .background(AmaryllisTheme.surfaceAlt)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                            } else {
+                                Text("Need at least two distinct attempts for comparison.")
+                                    .font(AmaryllisTheme.bodyFont(size: 10, weight: .medium))
+                                    .foregroundStyle(AmaryllisTheme.textSecondary)
+                            }
+
                             Text("Replay Timeline (\(replay.timeline.count))")
                                 .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
                                 .foregroundStyle(AmaryllisTheme.textSecondary)
@@ -490,10 +563,42 @@ struct AgentsView: View {
                                 }
                                 .pickerStyle(.menu)
                                 .frame(width: 110)
+                                Picker("Preset", selection: $replayPreset) {
+                                    Text("all").tag("all")
+                                    Text("errors").tag("errors_only")
+                                    Text("tools").tag("tool_calls")
+                                    Text("verify").tag("verification_only")
+                                }
+                                .pickerStyle(.menu)
+                                .frame(width: 110)
+                            }
+                            HStack(spacing: 8) {
+                                Text("Showing \(visibleTimeline.count)/\(filteredTimeline.count) events")
+                                    .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                    .foregroundStyle(AmaryllisTheme.textSecondary)
+                                Spacer()
+                                if filteredTimeline.count > visibleTimeline.count {
+                                    Button("Older +\(replayTimelinePageSize)") {
+                                        replayTimelineLimit += replayTimelinePageSize
+                                    }
+                                    .buttonStyle(AmaryllisSecondaryButtonStyle())
+                                }
+                                if replayTimelineLimit != replayTimelinePageSize {
+                                    Button("Latest") {
+                                        replayTimelineLimit = replayTimelinePageSize
+                                    }
+                                    .buttonStyle(AmaryllisSecondaryButtonStyle())
+                                }
+                                if !filteredTimeline.isEmpty, replayTimelineLimit < filteredTimeline.count {
+                                    Button("All") {
+                                        replayTimelineLimit = filteredTimeline.count
+                                    }
+                                    .buttonStyle(AmaryllisSecondaryButtonStyle())
+                                }
                             }
                             ScrollView {
                                 LazyVStack(alignment: .leading, spacing: 4) {
-                                    ForEach(Array(filteredReplayTimeline(replay).suffix(80))) { event in
+                                    ForEach(visibleTimeline) { event in
                                         HStack(spacing: 6) {
                                             Circle()
                                                 .fill(replayStageColor(event.stage))
@@ -995,6 +1100,10 @@ struct AgentsView: View {
             replaySearchQuery = ""
             replayStageFilter = "all"
             replayAttemptFilter = "all"
+            replayPreset = "all"
+            replayCompareLeftAttempt = "auto"
+            replayCompareRightAttempt = "auto"
+            replayTimelineLimit = replayTimelinePageSize
             return
         }
 
@@ -1053,6 +1162,10 @@ struct AgentsView: View {
             replaySearchQuery = ""
             replayStageFilter = "all"
             replayAttemptFilter = "all"
+            replayPreset = "all"
+            replayCompareLeftAttempt = "auto"
+            replayCompareRightAttempt = "auto"
+            replayTimelineLimit = replayTimelinePageSize
             replayStatusMessage =
                 "Replay loaded: \(replay.checkpointCount) events, \(replay.attemptSummary.count) attempts."
             appState.clearError()
@@ -1218,9 +1331,43 @@ struct AgentsView: View {
         Array(Set(replay.timeline.compactMap { $0.attempt })).sorted()
     }
 
+    private func selectedReplayAttemptPair(
+        _ replay: APIAgentRunReplayPayload
+    ) -> (left: APIAgentRunReplayAttemptSummary, right: APIAgentRunReplayAttemptSummary)? {
+        let sorted = replay.attemptSummary.sorted { $0.attempt < $1.attempt }
+        guard sorted.count >= 2 else { return nil }
+
+        let autoLeft = sorted[sorted.count - 2].attempt
+        let autoRight = sorted[sorted.count - 1].attempt
+        let leftAttempt = replayCompareLeftAttempt == "auto" ? autoLeft : Int(replayCompareLeftAttempt)
+        let rightAttempt = replayCompareRightAttempt == "auto" ? autoRight : Int(replayCompareRightAttempt)
+        guard let leftAttempt, let rightAttempt, leftAttempt != rightAttempt else {
+            return nil
+        }
+
+        guard
+            let left = sorted.first(where: { $0.attempt == leftAttempt }),
+            let right = sorted.first(where: { $0.attempt == rightAttempt })
+        else {
+            return nil
+        }
+        return (left: left, right: right)
+    }
+
+    private func visibleReplayTimeline(_ timeline: [APIAgentRunReplayTimelineItem]) -> [APIAgentRunReplayTimelineItem] {
+        let safeLimit = max(replayTimelinePageSize, replayTimelineLimit)
+        if timeline.count <= safeLimit {
+            return timeline
+        }
+        return Array(timeline.suffix(safeLimit))
+    }
+
     private func filteredReplayTimeline(_ replay: APIAgentRunReplayPayload) -> [APIAgentRunReplayTimelineItem] {
         let query = replaySearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return replay.timeline.filter { event in
+            if !replayPresetAllowsStage(event.stage) {
+                return false
+            }
             if replayStageFilter != "all", event.stage != replayStageFilter {
                 return false
             }
@@ -1238,42 +1385,169 @@ struct AgentsView: View {
         }
     }
 
+    private func replayPresetAllowsStage(_ stage: String) -> Bool {
+        switch replayPreset {
+        case "errors_only":
+            return [
+                "error",
+                "failed",
+                "tool_call_failed",
+                "tool_call_invalid",
+                "tool_call_blocked",
+                "verification_warning",
+            ].contains(stage)
+        case "tool_calls":
+            return stage.hasPrefix("tool_call_")
+        case "verification_only":
+            return stage.hasPrefix("verification_")
+        default:
+            return true
+        }
+    }
+
+    private func renderAttemptComparisonLines(
+        left: APIAgentRunReplayAttemptSummary,
+        right: APIAgentRunReplayAttemptSummary
+    ) -> [String] {
+        var lines: [String] = []
+        lines.append("tools: \(left.toolRounds) -> \(right.toolRounds) (delta \(signedDelta(right.toolRounds - left.toolRounds)))")
+        lines.append(
+            "repairs: \(left.verificationRepairs) -> \(right.verificationRepairs) (delta \(signedDelta(right.verificationRepairs - left.verificationRepairs)))"
+        )
+        lines.append("errors: \(left.errors.count) -> \(right.errors.count)")
+
+        let stageKeys = Set(left.stageCounts.keys).union(Set(right.stageCounts.keys))
+        let stageDeltas = stageKeys
+            .sorted()
+            .compactMap { key -> String? in
+                let oldValue = left.stageCounts[key, default: 0]
+                let newValue = right.stageCounts[key, default: 0]
+                let delta = newValue - oldValue
+                if delta == 0 {
+                    return nil
+                }
+                return "\(key): \(oldValue)->\(newValue) (\(signedDelta(delta)))"
+            }
+        if stageDeltas.isEmpty {
+            lines.append("stage delta: no changes")
+        } else {
+            lines.append("stage delta: " + stageDeltas.prefix(3).joined(separator: " | "))
+        }
+        return lines
+    }
+
+    private func signedDelta(_ value: Int) -> String {
+        if value > 0 {
+            return "+\(value)"
+        }
+        return "\(value)"
+    }
+
     private func renderReplayAttempt(_ attempt: Int?) -> String {
         guard let attempt else { return "-" }
         return String(attempt)
     }
 
     @MainActor
-    private func exportReplay(runID: String) async {
-        guard let replay = selectedRunReplay, replay.runId == runID else {
-            replayStatusMessage = "Load replay before export."
-            return
-        }
+    private func exportDiagnosticPackage(run: APIAgentRunRecord) async {
+        isLoadingReplay = true
+        defer { isLoadingReplay = false }
 
         do {
+            let replay: APIAgentRunReplayPayload
+            if let cached = selectedRunReplay, cached.runId == run.id {
+                replay = cached
+            } else {
+                replay = try await appState.apiClient.getAgentRunReplay(runId: run.id)
+                selectedRunReplay = replay
+            }
+
+            let filtered = filteredReplayTimeline(replay)
+            let visible = visibleReplayTimeline(filtered)
+            let payload = RunDiagnosticExport(
+                schemaVersion: "agent_run_diagnostic_v1",
+                exportedAt: ISO8601DateFormatter().string(from: Date()),
+                app: "Amaryllis",
+                run: run,
+                replay: replay,
+                replayFilters: ReplayFilterSnapshot(
+                    search: replaySearchQuery,
+                    stage: replayStageFilter,
+                    attempt: replayAttemptFilter,
+                    preset: replayPreset,
+                    compareLeftAttempt: replayCompareLeftAttempt,
+                    compareRightAttempt: replayCompareRightAttempt,
+                    timelineLimit: replayTimelineLimit,
+                    filteredCount: filtered.count,
+                    visibleCount: visible.count
+                )
+            )
+
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(replay)
+            let data = try encoder.encode(payload)
 
             let panel = NSSavePanel()
-            panel.title = "Export Run Replay"
-            panel.nameFieldStringValue = "amaryllis-run-\(runID)-replay.json"
+            panel.title = "Export Run Diagnostics"
+            panel.nameFieldStringValue = "amaryllis-run-\(run.id)-diagnostics.json"
             panel.allowedContentTypes = [UTType.json]
             panel.canCreateDirectories = true
             panel.isExtensionHidden = false
 
             let result = panel.runModal()
             guard result == .OK, let destination = panel.url else {
-                replayStatusMessage = "Replay export canceled."
+                replayStatusMessage = "Diagnostics export canceled."
                 return
             }
 
             try data.write(to: destination, options: .atomic)
-            replayStatusMessage = "Replay exported: \(destination.lastPathComponent)"
+            replayStatusMessage = "Diagnostics exported: \(destination.lastPathComponent)"
             appState.clearError()
         } catch {
-            replayStatusMessage = "Replay export failed."
+            replayStatusMessage = "Diagnostics export failed."
             appState.lastError = error.localizedDescription
+        }
+    }
+
+    private struct ReplayFilterSnapshot: Encodable {
+        let search: String
+        let stage: String
+        let attempt: String
+        let preset: String
+        let compareLeftAttempt: String
+        let compareRightAttempt: String
+        let timelineLimit: Int
+        let filteredCount: Int
+        let visibleCount: Int
+
+        enum CodingKeys: String, CodingKey {
+            case search
+            case stage
+            case attempt
+            case preset
+            case compareLeftAttempt = "compare_left_attempt"
+            case compareRightAttempt = "compare_right_attempt"
+            case timelineLimit = "timeline_limit"
+            case filteredCount = "filtered_count"
+            case visibleCount = "visible_count"
+        }
+    }
+
+    private struct RunDiagnosticExport: Encodable {
+        let schemaVersion: String
+        let exportedAt: String
+        let app: String
+        let run: APIAgentRunRecord
+        let replay: APIAgentRunReplayPayload
+        let replayFilters: ReplayFilterSnapshot
+
+        enum CodingKeys: String, CodingKey {
+            case schemaVersion = "schema_version"
+            case exportedAt = "exported_at"
+            case app
+            case run
+            case replay
+            case replayFilters = "replay_filters"
         }
     }
 
