@@ -21,6 +21,9 @@ struct AgentsView: View {
     @State private var selectedRunID: String?
     @State private var consumedRunResponses: Set<String> = []
     @State private var runStatusMessage: String = "No run activity yet."
+    @State private var selectedRunReplay: APIAgentRunReplayPayload?
+    @State private var replayStatusMessage: String = "Replay not loaded."
+    @State private var isLoadingReplay: Bool = false
 
     @State private var newAutomationMessage: String = "Check recent updates and summarize key points."
     @State private var newAutomationScheduleType: String = "interval"
@@ -75,6 +78,9 @@ struct AgentsView: View {
                 await refreshAutomations()
                 await refreshInbox()
             }
+        }
+        .onChange(of: selectedRunID ?? "") { _ in
+            Task { await loadReplayForSelectedRun(silent: true) }
         }
         .onChange(of: inboxUnreadOnly) { _ in
             Task { await refreshInbox() }
@@ -140,6 +146,8 @@ struct AgentsView: View {
                             chatHistory.removeAll()
                             runs = []
                             selectedRunID = nil
+                            selectedRunReplay = nil
+                            replayStatusMessage = "Replay not loaded."
                             runStatusMessage = "Agent switched. Refreshing runs..."
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
@@ -334,6 +342,13 @@ struct AgentsView: View {
                                         .buttonStyle(AmaryllisSecondaryButtonStyle())
                                         .disabled(isRunActionLoading)
 
+                                        Button("Replay") {
+                                            selectedRunID = run.id
+                                            Task { await loadReplay(runID: run.id) }
+                                        }
+                                        .buttonStyle(AmaryllisSecondaryButtonStyle())
+                                        .disabled(isRunActionLoading || isLoadingReplay)
+
                                         Button("Cancel") {
                                             Task { await cancelRun(id: run.id) }
                                         }
@@ -362,9 +377,24 @@ struct AgentsView: View {
 
                 if let run = selectedRun {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Selected Run")
-                            .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
-                            .foregroundStyle(AmaryllisTheme.textPrimary)
+                        HStack(spacing: 8) {
+                            Text("Selected Run")
+                                .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
+                                .foregroundStyle(AmaryllisTheme.textPrimary)
+                            Spacer()
+                            Button {
+                                Task { await loadReplay(runID: run.id) }
+                            } label: {
+                                if isLoadingReplay {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Text("Load Replay")
+                                }
+                            }
+                            .buttonStyle(AmaryllisSecondaryButtonStyle())
+                            .disabled(isLoadingReplay || isRunActionLoading)
+                        }
                         Text("id: \(run.id)")
                             .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
                             .foregroundStyle(AmaryllisTheme.textSecondary)
@@ -379,8 +409,74 @@ struct AgentsView: View {
                                 .foregroundStyle(AmaryllisTheme.textPrimary)
                                 .lineLimit(3)
                         }
+                        Text(replayStatusMessage)
+                            .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                            .foregroundStyle(AmaryllisTheme.textSecondary)
 
-                        Text("Checkpoints (\(run.checkpoints.count))")
+                        if let replay = selectedRunReplay, replay.runId == run.id {
+                            Text("Replay Summary (\(replay.checkpointCount) events)")
+                                .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                                .foregroundStyle(AmaryllisTheme.textSecondary)
+
+                            if replay.attemptSummary.isEmpty {
+                                Text("No attempt summary yet.")
+                                    .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                                    .foregroundStyle(AmaryllisTheme.textSecondary)
+                            } else {
+                                ScrollView(.horizontal) {
+                                    HStack(spacing: 8) {
+                                        ForEach(replay.attemptSummary) { item in
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text("attempt \(item.attempt)")
+                                                    .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                                    .foregroundStyle(AmaryllisTheme.textPrimary)
+                                                Text(renderStageCounts(item.stageCounts))
+                                                    .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                                    .foregroundStyle(AmaryllisTheme.textSecondary)
+                                                    .lineLimit(2)
+                                                Text("tools \(item.toolRounds) | repairs \(item.verificationRepairs)")
+                                                    .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                                    .foregroundStyle(AmaryllisTheme.textSecondary)
+                                                    .lineLimit(1)
+                                                if let firstError = item.errors.first, !firstError.isEmpty {
+                                                    Text("error: \(firstError)")
+                                                        .font(AmaryllisTheme.bodyFont(size: 10, weight: .medium))
+                                                        .foregroundStyle(AmaryllisTheme.accent)
+                                                        .lineLimit(2)
+                                                }
+                                            }
+                                            .padding(6)
+                                            .background(AmaryllisTheme.surfaceAlt)
+                                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                                        }
+                                    }
+                                }
+                                .frame(maxHeight: 86)
+                            }
+
+                            Text("Replay Timeline (\(replay.timeline.count))")
+                                .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                                .foregroundStyle(AmaryllisTheme.textSecondary)
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: 4) {
+                                    ForEach(Array(replay.timeline.suffix(40))) { event in
+                                        HStack(spacing: 6) {
+                                            Circle()
+                                                .fill(replayStageColor(event.stage))
+                                                .frame(width: 6, height: 6)
+                                            Text("[\(event.timestamp)] \(event.stage) \(event.message)")
+                                                .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                                .foregroundStyle(AmaryllisTheme.textSecondary)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .lineLimit(2)
+                                        }
+                                    }
+                                }
+                            }
+                            .frame(maxHeight: 120)
+                        }
+
+                        Text("Raw Checkpoints (\(run.checkpoints.count))")
                             .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
                             .foregroundStyle(AmaryllisTheme.textSecondary)
                         ScrollView {
@@ -857,7 +953,9 @@ struct AgentsView: View {
         guard let agent = selectedAgent else {
             runs = []
             selectedRunID = nil
+            selectedRunReplay = nil
             runStatusMessage = "No agent selected."
+            replayStatusMessage = "Replay not loaded."
             return
         }
 
@@ -888,6 +986,43 @@ struct AgentsView: View {
         }
     }
 
+    private func loadReplayForSelectedRun(silent: Bool) async {
+        guard let run = selectedRun else {
+            if !silent {
+                replayStatusMessage = "Select a run to load replay."
+            }
+            selectedRunReplay = nil
+            return
+        }
+        await loadReplay(runID: run.id, silent: silent)
+    }
+
+    private func loadReplay(runID: String, silent: Bool = false) async {
+        if silent,
+           let existing = selectedRunReplay,
+           existing.runId == runID,
+           !existing.timeline.isEmpty {
+            return
+        }
+
+        isLoadingReplay = true
+        defer { isLoadingReplay = false }
+
+        do {
+            let replay = try await appState.apiClient.getAgentRunReplay(runId: runID)
+            selectedRunReplay = replay
+            replayStatusMessage =
+                "Replay loaded: \(replay.checkpointCount) events, \(replay.attemptSummary.count) attempts."
+            appState.clearError()
+        } catch {
+            selectedRunReplay = nil
+            replayStatusMessage = "Replay load failed."
+            if !silent {
+                appState.lastError = error.localizedDescription
+            }
+        }
+    }
+
     private func pollRunUntilTerminal(runID: String, timeoutSec: Double) async {
         let terminalStates: Set<String> = ["succeeded", "failed", "canceled"]
         let maxTicks = max(1, Int(timeoutSec / 1.2))
@@ -911,6 +1046,7 @@ struct AgentsView: View {
                     } else if run.status == "canceled" {
                         chatHistory.append("RUN CANCELED")
                     }
+                    await loadReplay(runID: run.id, silent: true)
                     return
                 }
             } catch {
@@ -997,6 +1133,39 @@ struct AgentsView: View {
         default:
             return AmaryllisTheme.textSecondary
         }
+    }
+
+    private func replayStageColor(_ stage: String) -> Color {
+        switch stage {
+        case "succeeded", "verification_passed", "verification_repair_succeeded":
+            return .green
+        case "failed", "error", "tool_call_failed", "verification_warning":
+            return AmaryllisTheme.accent
+        case "running", "reasoning_started", "llm_response":
+            return .yellow
+        case "queued", "resumed", "retry_scheduled":
+            return .blue
+        case "canceled", "cancel_requested":
+            return .gray
+        default:
+            return AmaryllisTheme.textSecondary
+        }
+    }
+
+    private func renderStageCounts(_ stageCounts: [String: Int]) -> String {
+        if stageCounts.isEmpty {
+            return "no stages"
+        }
+        let parts = stageCounts
+            .sorted { lhs, rhs in
+                if lhs.value == rhs.value {
+                    return lhs.key < rhs.key
+                }
+                return lhs.value > rhs.value
+            }
+            .prefix(3)
+            .map { "\($0.key)=\($0.value)" }
+        return parts.joined(separator: " | ")
     }
 
     private func createAutomation() async {

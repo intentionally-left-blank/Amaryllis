@@ -280,6 +280,15 @@ final class AmaryllisAPIClient {
         return response.run
     }
 
+    func getAgentRunReplay(runId: String) async throws -> APIAgentRunReplayPayload {
+        let response: APIAgentRunReplayResponse = try await request(
+            path: "/agents/runs/\(runId)/replay",
+            method: "GET",
+            body: Optional<Data>.none
+        )
+        return response.replay
+    }
+
     func cancelAgentRun(runId: String) async throws -> APIAgentRunRecord {
         let response: APIAgentRunSingleResponse = try await request(
             path: "/agents/runs/\(runId)/cancel",

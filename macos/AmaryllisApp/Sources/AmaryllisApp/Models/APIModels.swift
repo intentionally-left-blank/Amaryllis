@@ -572,6 +572,97 @@ struct APIAgentRunListResponse: Codable {
     }
 }
 
+struct APIAgentRunReplayTimelineItem: Decodable, Identifiable {
+    let index: Int
+    let timestamp: String
+    let stage: String
+    let attempt: Int?
+    let message: String
+    let retryable: Bool?
+
+    var id: String { "\(index):\(stage)" }
+}
+
+struct APIAgentRunReplayAttemptSummary: Decodable, Identifiable {
+    let attempt: Int
+    let stageCounts: [String: Int]
+    let startedAt: String?
+    let finishedAt: String?
+    let toolRounds: Int
+    let verificationRepairs: Int
+    let errors: [String]
+
+    var id: Int { attempt }
+
+    private enum CodingKeys: String, CodingKey {
+        case attempt
+        case stageCounts = "stage_counts"
+        case startedAt = "started_at"
+        case finishedAt = "finished_at"
+        case toolRounds = "tool_rounds"
+        case verificationRepairs = "verification_repairs"
+        case errors
+    }
+}
+
+struct APIAgentRunReplaySnapshot: Decodable, Identifiable {
+    let timestamp: String
+    let attempt: Int?
+    let completedSteps: [String]
+
+    var id: String { "\(timestamp):\(attempt ?? -1)" }
+
+    private enum CodingKeys: String, CodingKey {
+        case timestamp
+        case attempt
+        case completedSteps = "completed_steps"
+    }
+}
+
+struct APIAgentRunReplayPayload: Decodable {
+    let runId: String
+    let agentId: String?
+    let userId: String?
+    let sessionId: String?
+    let status: String?
+    let attempts: Int
+    let maxAttempts: Int
+    let checkpointCount: Int
+    let timeline: [APIAgentRunReplayTimelineItem]
+    let attemptSummary: [APIAgentRunReplayAttemptSummary]
+    let resumeSnapshots: [APIAgentRunReplaySnapshot]
+    let latestResumeState: [String: JSONValue]?
+    let hasResult: Bool
+    let errorMessage: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case runId = "run_id"
+        case agentId = "agent_id"
+        case userId = "user_id"
+        case sessionId = "session_id"
+        case status
+        case attempts
+        case maxAttempts = "max_attempts"
+        case checkpointCount = "checkpoint_count"
+        case timeline
+        case attemptSummary = "attempt_summary"
+        case resumeSnapshots = "resume_snapshots"
+        case latestResumeState = "latest_resume_state"
+        case hasResult = "has_result"
+        case errorMessage = "error_message"
+    }
+}
+
+struct APIAgentRunReplayResponse: Decodable {
+    let replay: APIAgentRunReplayPayload
+    let requestId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case replay
+        case requestId = "request_id"
+    }
+}
+
 struct APICreateAutomationRequest: Encodable {
     let agentId: String
     let userId: String

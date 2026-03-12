@@ -502,6 +502,12 @@ curl "http://localhost:8000/agents/<agent_id>/runs?user_id=user-001&status=runni
 curl "http://localhost:8000/agents/runs/<run_id>"
 ```
 
+### Work Mode: replay run timeline/attempts
+
+```bash
+curl "http://localhost:8000/agents/runs/<run_id>/replay"
+```
+
 ### Work Mode: cancel run
 
 ```bash
@@ -554,15 +560,19 @@ Implemented now:
 - run checkpoints (stage history) including task-level phases:
   - `strategy_selected`, `plan_created`, `memory_loaded`
   - `reasoning_started`, `llm_response`, `tool_call_*`, `llm_followup_response`
+  - `verification_*` (response verifier + repair loop)
   - `reasoning_completed`, `memory_updated`
+- deterministic tool-call argument contract validation before tool execution
 - automatic retry until `max_attempts`
 - manual cancel and resume APIs
+- checkpoint replay API (`GET /agents/runs/{run_id}/replay`) with timeline + attempt summary
 - status validation for run filters in API (`queued|running|succeeded|failed|canceled`)
 - desktop Agents tab run monitor:
   - queue run from message input
   - live polling until terminal state
   - cancel/resume actions
   - checkpoint timeline and result preview
+  - replay loader with attempt summary and event timeline
 
 Run status values:
 - `queued`
