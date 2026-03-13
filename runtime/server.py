@@ -160,6 +160,8 @@ def create_services() -> ServiceContainer:
         max_model_calls=config.task_max_model_calls,
         max_prompt_chars=config.task_max_prompt_chars,
         max_tool_rounds=config.task_max_tool_rounds,
+        issue_parallel_workers=config.task_issue_parallel_workers,
+        issue_timeout_sec=config.task_issue_timeout_sec,
         verifier_enabled=config.task_verifier_enabled,
         verifier_max_repair_attempts=config.task_verifier_max_repair_attempts,
         verifier_min_response_chars=config.task_verifier_min_response_chars,

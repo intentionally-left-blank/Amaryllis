@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import time
 import unittest
 from typing import Any
 
 from agents.agent import Agent
 from controller.meta_controller import MetaController
-from planner.planner import Planner
-from tasks.task_executor import TaskExecutor
+from planner.planner import PlanStep, Planner
+from tasks.task_executor import TaskExecutor, TaskTimeoutError
 from tools.tool_executor import ToolExecutor
 from tools.tool_registry import ToolRegistry
 
@@ -91,6 +92,34 @@ class _FakeMemoryManager:
             "semantic": [],
             "profile": [],
         }
+
+
+class _ParallelPlanner:
+    @staticmethod
+    def create_plan(task: str, strategy: str) -> list[PlanStep]:  # noqa: ARG004
+        return [
+            PlanStep(id=1, description="Resolve subtask A", depends_on=[]),
+            PlanStep(id=2, description="Resolve subtask B", depends_on=[]),
+            PlanStep(id=3, description="Merge subtasks", depends_on=[1, 2]),
+        ]
+
+
+class _SlowIssueTaskExecutor(TaskExecutor):
+    def _evaluate_plan_issue(  # type: ignore[override]
+        self,
+        *,
+        issue_id: str,
+        step_payload: dict[str, Any],
+        tools_available: bool,
+        issue_deadline_monotonic: float,
+    ) -> dict[str, Any]:
+        time.sleep(0.03)
+        return super()._evaluate_plan_issue(
+            issue_id=issue_id,
+            step_payload=step_payload,
+            tools_available=tools_available,
+            issue_deadline_monotonic=issue_deadline_monotonic,
+        )
 
 
 class TaskExecutorTests(unittest.TestCase):
@@ -230,6 +259,109 @@ class TaskExecutorTests(unittest.TestCase):
         self.assertEqual(len(tools), 1)
         self.assertEqual(tools[0]["status"], "invalid_arguments")
         self.assertIn("count", str(tools[0].get("error", "")))
+
+    def test_plan_issues_execute_in_parallel_when_independent(self) -> None:
+        model_manager = _FakeModelManager(
+            responses=[
+                {
+                    "content": "Final answer.",
+                    "provider": "fake",
+                    "model": "fake-model",
+                }
+            ]
+        )
+        memory_manager = _FakeMemoryManager()
+        registry = ToolRegistry()
+        executor = TaskExecutor(
+            model_manager=model_manager,  # type: ignore[arg-type]
+            memory_manager=memory_manager,  # type: ignore[arg-type]
+            tool_registry=registry,
+            tool_executor=ToolExecutor(registry),
+            meta_controller=MetaController(),
+            planner=_ParallelPlanner(),  # type: ignore[arg-type]
+            max_model_calls=4,
+            verifier_enabled=False,
+            issue_parallel_workers=2,
+            issue_timeout_sec=5.0,
+        )
+        agent = Agent.create(
+            name="Parallel Agent",
+            system_prompt="Solve tasks.",
+            model="fake-model",
+            tools=[],
+            user_id="user-1",
+        )
+        checkpoints: list[dict[str, Any]] = []
+
+        def _checkpoint(payload: dict[str, Any]) -> None:
+            checkpoints.append(dict(payload))
+
+        result = executor.execute(
+            agent=agent,
+            user_id="user-1",
+            session_id="s1",
+            user_message="Do A and B",
+            checkpoint=_checkpoint,
+        )
+        self.assertEqual(result["response"], "Final answer.")
+
+        tracked = []
+        for idx, item in enumerate(checkpoints):
+            if item.get("stage") != "issue_state":
+                continue
+            issue = item.get("issue")
+            if not isinstance(issue, dict):
+                continue
+            issue_id = str(issue.get("id"))
+            status = str(issue.get("status"))
+            if issue_id in {"plan_step:1", "plan_step:2"} and status in {"running", "done"}:
+                tracked.append((idx, issue_id, status))
+
+        running_indices = [idx for idx, _, status in tracked if status == "running"]
+        done_indices = [idx for idx, _, status in tracked if status == "done"]
+        self.assertGreaterEqual(len(running_indices), 2)
+        self.assertGreaterEqual(len(done_indices), 2)
+        self.assertLess(max(running_indices[:2]), min(done_indices))
+
+    def test_plan_issue_deadline_timeout(self) -> None:
+        model_manager = _FakeModelManager(
+            responses=[
+                {
+                    "content": "Final answer.",
+                    "provider": "fake",
+                    "model": "fake-model",
+                }
+            ]
+        )
+        memory_manager = _FakeMemoryManager()
+        registry = ToolRegistry()
+        executor = _SlowIssueTaskExecutor(
+            model_manager=model_manager,  # type: ignore[arg-type]
+            memory_manager=memory_manager,  # type: ignore[arg-type]
+            tool_registry=registry,
+            tool_executor=ToolExecutor(registry),
+            meta_controller=MetaController(),
+            planner=_ParallelPlanner(),  # type: ignore[arg-type]
+            max_model_calls=4,
+            verifier_enabled=False,
+            issue_parallel_workers=1,
+            issue_timeout_sec=0.01,
+        )
+        agent = Agent.create(
+            name="Timeout Agent",
+            system_prompt="Solve tasks.",
+            model="fake-model",
+            tools=[],
+            user_id="user-1",
+        )
+
+        with self.assertRaises(TaskTimeoutError):
+            executor.execute(
+                agent=agent,
+                user_id="user-1",
+                session_id="s2",
+                user_message="Do A and B",
+            )
 
     def test_verifier_repairs_empty_response(self) -> None:
         model_manager = _FakeModelManager(

@@ -613,6 +613,8 @@ Implemented now:
   - statuses: `planned|running|blocked|done|failed`
   - core issues: `prepare_context`, `reasoning`, `persist`
   - planner issues: `plan_step:<n>` with dependency chain
+- bounded parallel execution for independent planner issues (dependency-aware worker pool)
+- issue-level deadline guardrail with timeout failure propagation to run state
 - run resume restores issue/checkpoint state and continues from unfinished issues
 - deterministic tool-call argument contract validation before tool execution
 - automatic retry until `max_attempts`
@@ -896,6 +898,8 @@ Run unit tests (memory + work mode + tools/MCP + automation):
   - `AMARYLLIS_RUN_BUDGET_MAX_DURATION_SEC=300`
   - `AMARYLLIS_RUN_BUDGET_MAX_TOOL_CALLS=8`
   - `AMARYLLIS_RUN_BUDGET_MAX_TOOL_ERRORS=3`
+  - `AMARYLLIS_TASK_ISSUE_PARALLEL_WORKERS=2`
+  - `AMARYLLIS_TASK_ISSUE_TIMEOUT_SEC=15`
   - `AMARYLLIS_AUTOMATION_POLL_SEC=2`
   - `AMARYLLIS_AUTOMATION_BATCH_SIZE=10`
   - `AMARYLLIS_MEMORY_PROFILE_DECAY_ENABLED=true`
@@ -933,6 +937,8 @@ export AMARYLLIS_RUN_BUDGET_MAX_TOKENS=24000
 export AMARYLLIS_RUN_BUDGET_MAX_DURATION_SEC=300
 export AMARYLLIS_RUN_BUDGET_MAX_TOOL_CALLS=8
 export AMARYLLIS_RUN_BUDGET_MAX_TOOL_ERRORS=3
+export AMARYLLIS_TASK_ISSUE_PARALLEL_WORKERS=2
+export AMARYLLIS_TASK_ISSUE_TIMEOUT_SEC=15
 export AMARYLLIS_AUTOMATION_POLL_SEC=2
 export AMARYLLIS_AUTOMATION_BATCH_SIZE=10
 export AMARYLLIS_MEMORY_PROFILE_DECAY_ENABLED=true

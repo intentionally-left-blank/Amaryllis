@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from typing import Any, Callable
 
 from agents.agent import Agent
@@ -54,6 +55,8 @@ class TaskExecutor:
         verifier_enabled: bool = True,
         verifier_max_repair_attempts: int = 1,
         verifier_min_response_chars: int = 8,
+        issue_parallel_workers: int = 2,
+        issue_timeout_sec: float = 15.0,
     ) -> None:
         self.model_manager = model_manager
         self.memory_manager = memory_manager
@@ -68,6 +71,8 @@ class TaskExecutor:
         self.verifier_enabled = bool(verifier_enabled)
         self.verifier_max_repair_attempts = max(0, int(verifier_max_repair_attempts))
         self.verifier_min_response_chars = max(1, int(verifier_min_response_chars))
+        self.issue_parallel_workers = max(1, int(issue_parallel_workers))
+        self.issue_timeout_sec = max(0.01, float(issue_timeout_sec))
 
     def execute(
         self,
@@ -300,6 +305,7 @@ class TaskExecutor:
                 completed_steps=completed_steps,
                 tools_available=tools_available,
                 checkpoint=checkpoint,
+                run_deadline_monotonic=run_deadline_monotonic,
             )
 
         if STEP_REASONING not in completed_steps:
@@ -1365,11 +1371,18 @@ class TaskExecutor:
         checkpoint: CheckpointWriter | None,
     ) -> list[str]:
         result: list[str] = []
-        previous_issue = STEP_PREPARE_CONTEXT
+        index_to_issue_id: dict[int, str] = {}
         for index, item in enumerate(plan, start=1):
             issue_id = self._plan_issue_id(index=index)
             description = str(item.get("description") or f"Plan step {index}").strip() or f"Plan step {index}"
-            depends_on = [previous_issue]
+            index_to_issue_id[index] = issue_id
+            raw_depends = item.get("depends_on")
+            depends_on = self._normalize_plan_dependencies(
+                raw=raw_depends,
+                index_to_issue_id=index_to_issue_id,
+            )
+            if STEP_PREPARE_CONTEXT not in depends_on:
+                depends_on.insert(0, STEP_PREPARE_CONTEXT)
             created = self._ensure_issue(
                 issue_states=issue_states,
                 issue_id=issue_id,
@@ -1391,14 +1404,13 @@ class TaskExecutor:
                         "depends_on": depends_on,
                         "payload": {"plan_step": item},
                     },
-                )
+            )
             result.append(issue_id)
-            previous_issue = issue_id
 
         if result:
             reasoning = issue_states.get(STEP_REASONING)
             if isinstance(reasoning, dict):
-                reasoning["depends_on"] = [result[-1]]
+                reasoning["depends_on"] = list(result)
             persist = issue_states.get(STEP_PERSIST)
             if isinstance(persist, dict):
                 persist["depends_on"] = [STEP_REASONING]
@@ -1413,8 +1425,9 @@ class TaskExecutor:
         completed_steps: set[str],
         tools_available: bool,
         checkpoint: CheckpointWriter | None,
+        run_deadline_monotonic: float | None,
     ) -> None:
-        for index, issue_id in enumerate(plan_issue_ids, start=1):
+        for issue_id in plan_issue_ids:
             if issue_id in completed_steps:
                 self._set_issue_status(
                     issue_states=issue_states,
@@ -1424,53 +1437,196 @@ class TaskExecutor:
                     attempt=1,
                     payload={"message": "Plan issue resumed from checkpoint."},
                 )
-                continue
 
-            step_payload = plan[index - 1] if index - 1 < len(plan) else {}
-            description = str(step_payload.get("description") or issue_id)
-            self._set_issue_status(
-                issue_states=issue_states,
-                issue_id=issue_id,
-                status=ISSUE_RUNNING,
-                checkpoint=checkpoint,
-                attempt=1,
-                payload={
-                    "message": "Plan issue started.",
-                    "plan_step": step_payload,
-                },
-            )
-            if ("tool" in description.lower() or "tool" in issue_id.lower()) and not tools_available:
-                error_message = "Plan step requires tools but agent has no tools configured."
-                self._set_issue_status(
-                    issue_states=issue_states,
-                    issue_id=issue_id,
-                    status=ISSUE_BLOCKED,
-                    checkpoint=checkpoint,
-                    attempt=1,
-                    last_error=error_message,
-                    payload={"error": error_message, "plan_step": step_payload},
-                )
-                raise TaskGuardrailError(error_message)
+        pending = [issue_id for issue_id in plan_issue_ids if issue_id not in completed_steps]
+        if not pending:
+            return
 
-            self._emit_checkpoint(
-                checkpoint,
-                stage="plan_step_executed",
-                message=f"Plan issue executed: {issue_id}",
-                issue_id=issue_id,
-                plan_step=step_payload,
-            )
-            completed_steps.add(issue_id)
-            self._set_issue_status(
-                issue_states=issue_states,
-                issue_id=issue_id,
-                status=ISSUE_DONE,
-                checkpoint=checkpoint,
-                attempt=1,
-                payload={
-                    "message": "Plan issue completed.",
-                    "plan_step": step_payload,
-                },
-            )
+        step_by_issue: dict[str, dict[str, Any]] = {}
+        for index, issue_id in enumerate(plan_issue_ids, start=1):
+            step_by_issue[issue_id] = plan[index - 1] if index - 1 < len(plan) else {}
+
+        active: dict[Future[dict[str, Any]], str] = {}
+        with ThreadPoolExecutor(max_workers=self.issue_parallel_workers) as pool:
+            while pending or active:
+                scheduled_any = False
+
+                while len(active) < self.issue_parallel_workers:
+                    ready_issue = self._next_ready_plan_issue(
+                        pending=pending,
+                        issue_states=issue_states,
+                    )
+                    if ready_issue is None:
+                        break
+
+                    issue = issue_states.get(ready_issue) or {}
+                    dependencies = [str(item) for item in issue.get("depends_on", []) if str(item).strip()]
+                    blocked_dep = self._first_blocking_dependency(issue_states=issue_states, dependencies=dependencies)
+                    if blocked_dep is not None:
+                        error_message = f"Dependency {blocked_dep} is not complete."
+                        self._set_issue_status(
+                            issue_states=issue_states,
+                            issue_id=ready_issue,
+                            status=ISSUE_BLOCKED,
+                            checkpoint=checkpoint,
+                            attempt=1,
+                            last_error=error_message,
+                            payload={
+                                "error": error_message,
+                                "dependency": blocked_dep,
+                            },
+                        )
+                        pending.remove(ready_issue)
+                        continue
+
+                    pending.remove(ready_issue)
+                    step_payload = step_by_issue.get(ready_issue, {})
+                    issue_deadline = self._compute_issue_deadline(run_deadline_monotonic=run_deadline_monotonic)
+                    self._set_issue_status(
+                        issue_states=issue_states,
+                        issue_id=ready_issue,
+                        status=ISSUE_RUNNING,
+                        checkpoint=checkpoint,
+                        attempt=1,
+                        payload={
+                            "message": "Plan issue started.",
+                            "plan_step": step_payload,
+                            "deadline_monotonic": issue_deadline,
+                        },
+                    )
+                    future = pool.submit(
+                        self._evaluate_plan_issue,
+                        issue_id=ready_issue,
+                        step_payload=step_payload,
+                        tools_available=tools_available,
+                        issue_deadline_monotonic=issue_deadline,
+                    )
+                    active[future] = ready_issue
+                    scheduled_any = True
+
+                if not active:
+                    if pending and not scheduled_any:
+                        for issue_id in list(pending):
+                            error_message = "No schedulable issue (dependency cycle or blocked dependencies)."
+                            self._set_issue_status(
+                                issue_states=issue_states,
+                                issue_id=issue_id,
+                                status=ISSUE_BLOCKED,
+                                checkpoint=checkpoint,
+                                attempt=1,
+                                last_error=error_message,
+                                payload={"error": error_message},
+                            )
+                            pending.remove(issue_id)
+                        raise TaskGuardrailError("Plan issues cannot be scheduled due to unresolved dependencies.")
+                    continue
+
+                done, _ = wait(active.keys(), timeout=0.05, return_when=FIRST_COMPLETED)
+                if not done:
+                    self._enforce_active_issue_deadlines(
+                        active=active,
+                        issue_states=issue_states,
+                        checkpoint=checkpoint,
+                    )
+                    continue
+
+                for future in done:
+                    issue_id = active.pop(future)
+                    issue = issue_states.get(issue_id) or {}
+                    issue_payload = issue.get("payload")
+                    deadline_monotonic: float | None = None
+                    if isinstance(issue_payload, dict):
+                        try:
+                            deadline_monotonic = float(issue_payload.get("deadline_monotonic"))
+                        except Exception:
+                            deadline_monotonic = None
+                    if deadline_monotonic is not None and time.monotonic() > deadline_monotonic:
+                        error_message = f"Issue exceeded deadline ({self.issue_timeout_sec:.2f}s)."
+                        self._set_issue_status(
+                            issue_states=issue_states,
+                            issue_id=issue_id,
+                            status=ISSUE_FAILED,
+                            checkpoint=checkpoint,
+                            attempt=1,
+                            last_error=error_message,
+                            payload={"error": error_message},
+                        )
+                        raise TaskTimeoutError(error_message)
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        self._set_issue_status(
+                            issue_states=issue_states,
+                            issue_id=issue_id,
+                            status=ISSUE_FAILED,
+                            checkpoint=checkpoint,
+                            attempt=1,
+                            last_error=str(exc),
+                            payload={"error": str(exc)},
+                        )
+                        raise
+
+                    status = str(result.get("status") or ISSUE_DONE).strip().lower() or ISSUE_DONE
+                    payload = dict(result.get("payload") or {}) if isinstance(result.get("payload"), dict) else {}
+                    if status not in ISSUE_STATUSES:
+                        status = ISSUE_DONE
+
+                    if status == ISSUE_DONE:
+                        completed_steps.add(issue_id)
+                        self._emit_checkpoint(
+                            checkpoint,
+                            stage="plan_step_executed",
+                            message=f"Plan issue executed: {issue_id}",
+                            issue_id=issue_id,
+                            plan_step=step_by_issue.get(issue_id, {}),
+                        )
+                        self._set_issue_status(
+                            issue_states=issue_states,
+                            issue_id=issue_id,
+                            status=ISSUE_DONE,
+                            checkpoint=checkpoint,
+                            attempt=1,
+                            payload={
+                                "message": "Plan issue completed.",
+                                **payload,
+                            },
+                        )
+                        continue
+
+                    if status == ISSUE_BLOCKED:
+                        reason = str(result.get("reason") or "Plan issue is blocked.")
+                        self._set_issue_status(
+                            issue_states=issue_states,
+                            issue_id=issue_id,
+                            status=ISSUE_BLOCKED,
+                            checkpoint=checkpoint,
+                            attempt=1,
+                            last_error=reason,
+                            payload={"error": reason, **payload},
+                        )
+                        raise TaskGuardrailError(reason)
+
+                    if status == ISSUE_FAILED:
+                        reason = str(result.get("reason") or "Plan issue failed.")
+                        self._set_issue_status(
+                            issue_states=issue_states,
+                            issue_id=issue_id,
+                            status=ISSUE_FAILED,
+                            checkpoint=checkpoint,
+                            attempt=1,
+                            last_error=reason,
+                            payload={"error": reason, **payload},
+                        )
+                        raise TaskGuardrailError(reason)
+
+                    self._set_issue_status(
+                        issue_states=issue_states,
+                        issue_id=issue_id,
+                        status=ISSUE_DONE,
+                        checkpoint=checkpoint,
+                        attempt=1,
+                        payload={"message": "Plan issue completed."},
+                    )
 
     def _normalize_issue_states(self, raw: Any) -> dict[str, dict[str, Any]]:
         if not isinstance(raw, dict):
@@ -1500,6 +1656,183 @@ class TaskExecutor:
                 "payload": dict(value.get("payload") or {}) if isinstance(value.get("payload"), dict) else {},
             }
         return result
+
+    def _next_ready_plan_issue(
+        self,
+        *,
+        pending: list[str],
+        issue_states: dict[str, dict[str, Any]],
+    ) -> str | None:
+        sorted_pending = sorted(
+            pending,
+            key=lambda issue_id: max(0, int((issue_states.get(issue_id) or {}).get("order", 0))),
+        )
+        for issue_id in sorted_pending:
+            issue = issue_states.get(issue_id) or {}
+            dependencies = [str(item) for item in issue.get("depends_on", []) if str(item).strip()]
+            if not dependencies:
+                return issue_id
+            if all(self._dependency_satisfied(issue_states=issue_states, dependency=dep) for dep in dependencies):
+                return issue_id
+        return None
+
+    @classmethod
+    def _normalize_plan_dependencies(
+        cls,
+        *,
+        raw: Any,
+        index_to_issue_id: dict[int, str],
+    ) -> list[str]:
+        if not isinstance(raw, list):
+            return []
+        result: list[str] = []
+        for item in raw:
+            dep: str | None = None
+            if isinstance(item, int):
+                dep = index_to_issue_id.get(max(1, int(item))) or cls._plan_issue_id(index=max(1, int(item)))
+            elif isinstance(item, str):
+                text = item.strip()
+                if not text:
+                    continue
+                if text.startswith("plan_step:"):
+                    dep = text
+                else:
+                    try:
+                        parsed = int(text)
+                    except Exception:
+                        dep = text
+                    else:
+                        dep = index_to_issue_id.get(max(1, parsed)) or cls._plan_issue_id(index=max(1, parsed))
+            if dep and dep not in result:
+                result.append(dep)
+        return result
+
+    @staticmethod
+    def _dependency_satisfied(*, issue_states: dict[str, dict[str, Any]], dependency: str) -> bool:
+        if dependency == STEP_PREPARE_CONTEXT:
+            status = str((issue_states.get(dependency) or {}).get("status") or ISSUE_PLANNED).strip().lower()
+            return status == ISSUE_DONE
+        state = issue_states.get(dependency)
+        if not isinstance(state, dict):
+            return True
+        status = str(state.get("status") or ISSUE_PLANNED).strip().lower()
+        return status == ISSUE_DONE
+
+    @staticmethod
+    def _first_blocking_dependency(*, issue_states: dict[str, dict[str, Any]], dependencies: list[str]) -> str | None:
+        for dependency in dependencies:
+            state = issue_states.get(dependency)
+            if not isinstance(state, dict):
+                continue
+            status = str(state.get("status") or ISSUE_PLANNED).strip().lower()
+            if status in {ISSUE_FAILED, ISSUE_BLOCKED}:
+                return dependency
+        return None
+
+    def _compute_issue_deadline(self, *, run_deadline_monotonic: float | None) -> float:
+        issue_deadline = time.monotonic() + self.issue_timeout_sec
+        if run_deadline_monotonic is None:
+            return issue_deadline
+        return min(issue_deadline, run_deadline_monotonic)
+
+    def _enforce_active_issue_deadlines(
+        self,
+        *,
+        active: dict[Future[dict[str, Any]], str],
+        issue_states: dict[str, dict[str, Any]],
+        checkpoint: CheckpointWriter | None,
+    ) -> None:
+        now = time.monotonic()
+        timed_out: list[Future[dict[str, Any]]] = []
+        for future, issue_id in active.items():
+            issue = issue_states.get(issue_id) or {}
+            payload = issue.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            raw_deadline = payload.get("deadline_monotonic")
+            try:
+                deadline = float(raw_deadline)
+            except Exception:
+                continue
+            if now > deadline:
+                timed_out.append(future)
+
+        for future in timed_out:
+            issue_id = active.pop(future, None)
+            if issue_id is None:
+                continue
+            future.cancel()
+            error_message = f"Issue exceeded deadline ({self.issue_timeout_sec:.2f}s)."
+            self._set_issue_status(
+                issue_states=issue_states,
+                issue_id=issue_id,
+                status=ISSUE_FAILED,
+                checkpoint=checkpoint,
+                attempt=1,
+                last_error=error_message,
+                payload={"error": error_message},
+            )
+            raise TaskTimeoutError(error_message)
+
+    def _evaluate_plan_issue(
+        self,
+        *,
+        issue_id: str,
+        step_payload: dict[str, Any],
+        tools_available: bool,
+        issue_deadline_monotonic: float,
+    ) -> dict[str, Any]:
+        started = time.monotonic()
+        if started > issue_deadline_monotonic:
+            return {
+                "status": ISSUE_FAILED,
+                "reason": "Issue deadline already exceeded.",
+                "payload": {},
+            }
+
+        description = str(step_payload.get("description") or issue_id).strip() or issue_id
+        lower = description.lower()
+        requires_tools = any(
+            token in lower
+            for token in (
+                "tool",
+                "search",
+                "fetch",
+                "read",
+                "write",
+                "file",
+                "website",
+                "url",
+                "python",
+            )
+        )
+        if requires_tools and not tools_available:
+            return {
+                "status": ISSUE_BLOCKED,
+                "reason": "Plan step requires tools but agent has no tools configured.",
+                "payload": {
+                    "requires_tools": True,
+                    "description": description,
+                },
+            }
+
+        if time.monotonic() > issue_deadline_monotonic:
+            return {
+                "status": ISSUE_FAILED,
+                "reason": "Issue deadline exceeded during execution.",
+                "payload": {
+                    "description": description,
+                },
+            }
+
+        return {
+            "status": ISSUE_DONE,
+            "payload": {
+                "description": description,
+                "requires_tools": requires_tools,
+                "duration_ms": round((time.monotonic() - started) * 1000.0, 3),
+            },
+        }
 
     def _ensure_issue(
         self,
@@ -1566,8 +1899,13 @@ class TaskExecutor:
             issue["last_error"] = str(last_error)
         elif normalized_status == ISSUE_DONE:
             issue["last_error"] = None
+        merged_payload: dict[str, Any] = {}
+        current_payload = issue.get("payload")
+        if isinstance(current_payload, dict):
+            merged_payload.update(current_payload)
         if payload is not None:
-            issue["payload"] = dict(payload)
+            merged_payload.update(dict(payload))
+        issue["payload"] = merged_payload
 
         self._emit_checkpoint(
             checkpoint,
@@ -1581,7 +1919,7 @@ class TaskExecutor:
                 "depends_on": list(issue.get("depends_on", [])),
                 "attempt": int(issue.get("attempt", 0)),
                 "last_error": issue.get("last_error"),
-                "payload": dict(issue.get("payload") or {}),
+                "payload": dict(merged_payload),
             },
         )
 

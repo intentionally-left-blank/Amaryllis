@@ -51,6 +51,8 @@ class AppConfig:
     task_max_model_calls: int
     task_max_prompt_chars: int
     task_max_tool_rounds: int
+    task_issue_parallel_workers: int
+    task_issue_timeout_sec: float
     task_verifier_enabled: bool
     task_verifier_max_repair_attempts: int
     task_verifier_min_response_chars: int
@@ -239,6 +241,12 @@ class AppConfig:
             task_max_model_calls=max(1, int(os.getenv("AMARYLLIS_TASK_MAX_MODEL_CALLS", "6"))),
             task_max_prompt_chars=max(2000, int(os.getenv("AMARYLLIS_TASK_MAX_PROMPT_CHARS", "40000"))),
             task_max_tool_rounds=max(1, int(os.getenv("AMARYLLIS_TASK_MAX_TOOL_ROUNDS", "3"))),
+            task_issue_parallel_workers=max(
+                1, int(os.getenv("AMARYLLIS_TASK_ISSUE_PARALLEL_WORKERS", "2"))
+            ),
+            task_issue_timeout_sec=max(
+                0.01, float(os.getenv("AMARYLLIS_TASK_ISSUE_TIMEOUT_SEC", "15"))
+            ),
             task_verifier_enabled=_parse_bool(os.getenv("AMARYLLIS_TASK_VERIFIER_ENABLED", "true")),
             task_verifier_max_repair_attempts=max(
                 0, int(os.getenv("AMARYLLIS_TASK_VERIFIER_MAX_REPAIR_ATTEMPTS", "1"))
