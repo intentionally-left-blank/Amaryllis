@@ -63,6 +63,17 @@ class _FakeTaskExecutor:
                     },
                 }
             )
+            checkpoint(
+                {
+                    "stage": "issue_artifact",
+                    "issue_id": "prepare_context",
+                    "artifact_key": "result",
+                    "artifact": {
+                        "prepared": True,
+                        "user_message": user_message,
+                    },
+                }
+            )
             completed_steps.add("prepare_context")
 
         if self.call_count <= len(self.error_sequence):
@@ -344,6 +355,60 @@ class AgentRunManagerTests(unittest.TestCase):
         self.assertIn("reasoning", ids)
         self.assertIn("persist", ids)
         self.assertTrue(all(str(item.get("status")) == "done" for item in items))
+
+    def test_list_run_artifacts_returns_persisted_issue_outputs(self) -> None:
+        self.manager.start()
+        run = self.manager.create_run(
+            agent=self.agent,
+            user_id="user-1",
+            session_id="session-artifacts",
+            user_message="track artifacts",
+            max_attempts=1,
+        )
+        final = self._wait_for_status(run["id"], {"succeeded"})
+        self.assertIsNotNone(final)
+
+        items = self.manager.list_run_artifacts(run["id"], limit=100)
+        self.assertGreaterEqual(len(items), 1)
+        first = items[0]
+        self.assertEqual(str(first.get("issue_id")), "prepare_context")
+        self.assertEqual(str(first.get("artifact_key")), "result")
+        artifact = first.get("artifact", {})
+        self.assertIsInstance(artifact, dict)
+        assert isinstance(artifact, dict)
+        self.assertEqual(bool(artifact.get("prepared")), True)
+
+    def test_resume_uses_persisted_issue_artifacts_when_checkpoints_missing(self) -> None:
+        self.executor.fail_once_after_prepare = True
+        self.manager.start()
+        run = self.manager.create_run(
+            agent=self.agent,
+            user_id="user-1",
+            session_id="session-resume-artifacts",
+            user_message="resume artifact state",
+            max_attempts=1,
+        )
+        failed = self._wait_for_status(run["id"], {"failed"})
+        self.assertIsNotNone(failed)
+
+        artifacts = self.manager.list_run_artifacts(run["id"], limit=100)
+        self.assertGreaterEqual(len(artifacts), 1)
+        self.database.update_agent_run_fields(run["id"], checkpoints_json=[])
+
+        self.executor.fail_once_after_prepare = False
+        resumed = self.manager.resume_run(run["id"])
+        self.assertEqual(resumed["status"], "queued")
+        final = self._wait_for_status(run["id"], {"succeeded"})
+        self.assertIsNotNone(final)
+        self.assertIsNotNone(self.executor.last_resume_state)
+        assert isinstance(self.executor.last_resume_state, dict)
+        issue_artifacts = self.executor.last_resume_state.get("issue_artifacts")
+        self.assertIsInstance(issue_artifacts, dict)
+        assert isinstance(issue_artifacts, dict)
+        prepare_artifacts = issue_artifacts.get("prepare_context", {})
+        self.assertIsInstance(prepare_artifacts, dict)
+        assert isinstance(prepare_artifacts, dict)
+        self.assertIn("result", prepare_artifacts)
 
     def test_replay_missing_run_raises(self) -> None:
         with self.assertRaises(ValueError):

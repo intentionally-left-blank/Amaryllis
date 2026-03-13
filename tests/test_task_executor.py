@@ -175,6 +175,11 @@ class TaskExecutorTests(unittest.TestCase):
         self.assertIn("persist", issue_ids)
         self.assertIn("plan_step:1", issue_ids)
 
+        artifact_events = [item for item in checkpoints if item.get("stage") == "issue_artifact"]
+        self.assertGreaterEqual(len(artifact_events), 1)
+        self.assertEqual(str(artifact_events[0].get("issue_id")), "plan_step:1")
+        self.assertEqual(str(artifact_events[0].get("artifact_key")), "result")
+
         step_completed = [item for item in checkpoints if item.get("stage") == "step_completed"]
         self.assertGreaterEqual(len(step_completed), 3)
         latest_resume = step_completed[-1].get("resume_state")
@@ -186,6 +191,19 @@ class TaskExecutorTests(unittest.TestCase):
         self.assertEqual(str(issues.get("prepare_context", {}).get("status")), "done")
         self.assertEqual(str(issues.get("reasoning", {}).get("status")), "done")
         self.assertEqual(str(issues.get("persist", {}).get("status")), "done")
+        issue_artifacts = latest_resume.get("issue_artifacts")
+        self.assertIsInstance(issue_artifacts, dict)
+        assert isinstance(issue_artifacts, dict)
+        self.assertIn("plan_step:1", issue_artifacts)
+
+        first_call_messages = model_manager.calls[0]["messages"]
+        artifact_context_present = any(
+            isinstance(item, dict)
+            and str(item.get("role")) == "system"
+            and "Issue artifacts context:" in str(item.get("content", ""))
+            for item in first_call_messages
+        )
+        self.assertTrue(artifact_context_present)
 
     def test_invalid_tool_arguments_are_rejected_before_execution(self) -> None:
         call_counter = {"count": 0}

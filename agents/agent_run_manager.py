@@ -175,10 +175,23 @@ class AgentRunManager:
         )
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
-        return self.database.get_agent_run(run_id, include_issues=True)
+        return self.database.get_agent_run(run_id, include_issues=True, include_artifacts=True)
 
     def list_run_issues(self, run_id: str, limit: int = 200) -> list[dict[str, Any]]:
         return self.database.list_agent_run_issues(run_id=run_id, limit=max(1, min(int(limit), 1000)))
+
+    def list_run_artifacts(
+        self,
+        run_id: str,
+        *,
+        issue_id: str | None = None,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        return self.database.list_agent_run_issue_artifacts(
+            run_id=run_id,
+            issue_id=issue_id,
+            limit=max(1, min(int(limit), 5000)),
+        )
 
     def cancel_run(self, run_id: str) -> dict[str, Any]:
         run = self.database.get_agent_run(run_id)
@@ -367,6 +380,11 @@ class AgentRunManager:
                 errors.append(message)
 
         latest_resume_state = self._extract_resume_state(run)
+        issue_artifacts = self.database.list_agent_run_issue_artifacts(run_id=run_id, limit=2000)
+        artifact_counts: dict[str, int] = {}
+        for item in issue_artifacts:
+            issue_id = str(item.get("issue_id") or "unknown")
+            artifact_counts[issue_id] = int(artifact_counts.get(issue_id, 0)) + 1
         issue_items = self.database.list_agent_run_issues(run_id=run_id, limit=500)
         issue_status_breakdown: dict[str, int] = {}
         for issue in issue_items:
@@ -390,9 +408,12 @@ class AgentRunManager:
             "resume_snapshots": resume_snapshots,
             "latest_resume_state": latest_resume_state or None,
             "issues": issue_items,
+            "issue_artifacts": issue_artifacts,
             "issue_summary": {
                 "count": len(issue_items),
                 "status_breakdown": issue_status_breakdown,
+                "artifact_count": len(issue_artifacts),
+                "artifact_breakdown": artifact_counts,
             },
             "has_result": run.get("result") is not None,
             "error_message": run.get("error_message"),
@@ -692,8 +713,10 @@ class AgentRunManager:
                 self._validate_live_budget_usage(budget=budget, usage=live_usage)
                 self.database.append_agent_run_checkpoint(run_id=run_id, checkpoint=data)
                 self._sync_issue_state_from_checkpoint(run_id=run_id, checkpoint=data, attempt=attempt)
+                self._persist_issue_artifact_from_checkpoint(run_id=run_id, checkpoint=data)
 
             resume_state = self._extract_resume_state(run)
+            resume_state = self._merge_persisted_issue_artifacts(run_id=run_id, resume_state=resume_state)
             result = self._run_task_executor(
                 run=run,
                 agent=agent,
@@ -993,6 +1016,90 @@ class AgentRunManager:
             started_at=normalized_started_at,
             finished_at=normalized_finished_at,
         )
+
+    def _persist_issue_artifact_from_checkpoint(
+        self,
+        *,
+        run_id: str,
+        checkpoint: dict[str, Any],
+    ) -> None:
+        stage = str(checkpoint.get("stage") or "").strip().lower()
+        if stage == "issue_artifact":
+            issue_id = str(checkpoint.get("issue_id") or "").strip()
+            artifact_key = str(checkpoint.get("artifact_key") or "result").strip() or "result"
+            artifact = checkpoint.get("artifact")
+            if not issue_id or not isinstance(artifact, dict):
+                return
+            self.database.upsert_agent_run_issue_artifact(
+                run_id=run_id,
+                issue_id=issue_id,
+                artifact_key=artifact_key,
+                artifact=artifact,
+            )
+            return
+
+        if stage != "issue_state":
+            return
+        issue = checkpoint.get("issue")
+        if not isinstance(issue, dict):
+            return
+        issue_id = str(issue.get("id") or "").strip()
+        if not issue_id:
+            return
+        payload = issue.get("payload")
+        if not isinstance(payload, dict):
+            return
+        artifact = payload.get("artifact")
+        if isinstance(artifact, dict):
+            artifact_key = str(payload.get("artifact_key") or "result").strip() or "result"
+            self.database.upsert_agent_run_issue_artifact(
+                run_id=run_id,
+                issue_id=issue_id,
+                artifact_key=artifact_key,
+                artifact=artifact,
+            )
+
+    def _merge_persisted_issue_artifacts(
+        self,
+        *,
+        run_id: str,
+        resume_state: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        state = dict(resume_state) if isinstance(resume_state, dict) else {}
+        issue_rows = self.database.list_agent_run_issues(run_id=run_id, limit=5000)
+        if issue_rows:
+            existing_steps_raw = state.get("completed_steps")
+            completed_steps: list[str] = []
+            if isinstance(existing_steps_raw, list):
+                completed_steps = [str(item) for item in existing_steps_raw if str(item).strip()]
+            for issue in issue_rows:
+                issue_id = str(issue.get("issue_id") or "").strip()
+                if not issue_id:
+                    continue
+                status = str(issue.get("status") or "").strip().lower()
+                if status == "done" and issue_id not in completed_steps:
+                    completed_steps.append(issue_id)
+            state["completed_steps"] = completed_steps
+
+        rows = self.database.list_agent_run_issue_artifacts(run_id=run_id, limit=5000)
+        if not rows:
+            return state if state else resume_state
+        raw = state.get("issue_artifacts")
+        issue_artifacts: dict[str, dict[str, Any]] = {}
+        if isinstance(raw, dict):
+            for issue_id, artifacts in raw.items():
+                if isinstance(artifacts, dict):
+                    issue_artifacts[str(issue_id)] = dict(artifacts)
+        for row in rows:
+            issue_id = str(row.get("issue_id") or "").strip()
+            artifact_key = str(row.get("artifact_key") or "result").strip() or "result"
+            artifact = row.get("artifact")
+            if not issue_id or not isinstance(artifact, dict):
+                continue
+            issue_artifacts.setdefault(issue_id, {})
+            issue_artifacts[issue_id][artifact_key] = artifact
+        state["issue_artifacts"] = issue_artifacts
+        return state
 
     def _mark_issue_failed_from_error(
         self,

@@ -272,6 +272,31 @@ def list_agent_run_issues(
         raise ProviderError(str(exc)) from exc
 
 
+@router.get("/agents/runs/{run_id}/artifacts")
+def list_agent_run_artifacts(
+    request: Request,
+    run_id: str = Path(..., min_length=1),
+    issue_id: str | None = Query(default=None),
+    limit: int = Query(default=500, ge=1, le=5000),
+) -> dict[str, Any]:
+    services = request.app.state.services
+    try:
+        items = services.agent_manager.list_run_artifacts(
+            run_id=run_id,
+            issue_id=issue_id,
+            limit=limit,
+        )
+        return {
+            "items": items,
+            "count": len(items),
+            "request_id": _request_id(request),
+        }
+    except ValueError as exc:
+        raise NotFoundError(str(exc)) from exc
+    except Exception as exc:
+        raise ProviderError(str(exc)) from exc
+
+
 @router.post("/agents/runs/{run_id}/cancel")
 def cancel_agent_run(
     request: Request,

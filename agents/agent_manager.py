@@ -136,6 +136,24 @@ class AgentManager:
             raise ValueError(f"Run not found: {run_id}")
         return self.run_manager.list_run_issues(run_id=run_id, limit=limit)
 
+    def list_run_artifacts(
+        self,
+        run_id: str,
+        *,
+        issue_id: str | None = None,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        if self.run_manager is None:
+            raise ValueError("Run manager is not configured")
+        run = self.run_manager.get_run(run_id)
+        if run is None:
+            raise ValueError(f"Run not found: {run_id}")
+        return self.run_manager.list_run_artifacts(
+            run_id=run_id,
+            issue_id=issue_id,
+            limit=limit,
+        )
+
     def run_health(
         self,
         *,

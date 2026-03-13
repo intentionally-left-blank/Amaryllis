@@ -100,6 +100,7 @@ class TaskExecutor:
         state = self._normalize_resume_state(resume_state)
         completed_steps = set(state.get("completed_steps", []))
         issue_states = self._normalize_issue_states(state.get("issues"))
+        issue_artifacts = self._normalize_issue_artifacts(state.get("issue_artifacts"))
         self._ensure_issue(
             issue_states=issue_states,
             issue_id=STEP_PREPARE_CONTEXT,
@@ -244,6 +245,7 @@ class TaskExecutor:
                 model_used=model_used,
                 tool_events=tool_events,
                 issues=issue_states,
+                issue_artifacts=issue_artifacts,
             )
             self._emit_checkpoint(
                 checkpoint,
@@ -302,11 +304,24 @@ class TaskExecutor:
                 plan=plan,
                 plan_issue_ids=plan_issue_ids,
                 issue_states=issue_states,
+                issue_artifacts=issue_artifacts,
                 completed_steps=completed_steps,
                 tools_available=tools_available,
                 checkpoint=checkpoint,
                 run_deadline_monotonic=run_deadline_monotonic,
             )
+            artifact_note = self._render_issue_artifact_note(
+                issue_artifacts=issue_artifacts,
+                plan_issue_ids=plan_issue_ids,
+            )
+            if artifact_note:
+                messages.append({"role": "system", "content": artifact_note})
+                self._emit_checkpoint(
+                    checkpoint,
+                    stage="issue_artifacts_loaded",
+                    message="Issue artifacts injected into reasoning context.",
+                    artifact_issue_count=len(issue_artifacts),
+                )
 
         if STEP_REASONING not in completed_steps:
             self._set_issue_status(
@@ -392,6 +407,7 @@ class TaskExecutor:
                 model_used=model_used,
                 tool_events=tool_events,
                 issues=issue_states,
+                issue_artifacts=issue_artifacts,
             )
             self._emit_checkpoint(
                 checkpoint,
@@ -524,6 +540,7 @@ class TaskExecutor:
                 model_used=model_used,
                 tool_events=tool_events,
                 issues=issue_states,
+                issue_artifacts=issue_artifacts,
             )
             self._emit_checkpoint(
                 checkpoint,
@@ -1326,6 +1343,7 @@ class TaskExecutor:
             "model",
             "tool_events",
             "issues",
+            "issue_artifacts",
         ):
             if key in resume_state:
                 normalized[key] = resume_state[key]
@@ -1346,6 +1364,7 @@ class TaskExecutor:
         model_used: str,
         tool_events: list[dict[str, Any]],
         issues: dict[str, dict[str, Any]],
+        issue_artifacts: dict[str, dict[str, Any]],
     ) -> dict[str, Any]:
         return {
             "version": 2,
@@ -1361,6 +1380,7 @@ class TaskExecutor:
             "model": model_used,
             "tool_events": tool_events,
             "issues": issues,
+            "issue_artifacts": issue_artifacts,
         }
 
     def _register_plan_issues(
@@ -1422,6 +1442,7 @@ class TaskExecutor:
         plan: list[dict[str, Any]],
         plan_issue_ids: list[str],
         issue_states: dict[str, dict[str, Any]],
+        issue_artifacts: dict[str, dict[str, Any]],
         completed_steps: set[str],
         tools_available: bool,
         checkpoint: CheckpointWriter | None,
@@ -1573,6 +1594,14 @@ class TaskExecutor:
 
                     if status == ISSUE_DONE:
                         completed_steps.add(issue_id)
+                        artifact_key = str(result.get("artifact_key") or "result").strip() or "result"
+                        self._record_issue_artifact(
+                            issue_artifacts=issue_artifacts,
+                            issue_id=issue_id,
+                            artifact_key=artifact_key,
+                            artifact=payload,
+                            checkpoint=checkpoint,
+                        )
                         self._emit_checkpoint(
                             checkpoint,
                             stage="plan_step_executed",
@@ -1588,6 +1617,8 @@ class TaskExecutor:
                             attempt=1,
                             payload={
                                 "message": "Plan issue completed.",
+                                "artifact_key": artifact_key,
+                                "artifact": payload,
                                 **payload,
                             },
                         )
@@ -1656,6 +1687,75 @@ class TaskExecutor:
                 "payload": dict(value.get("payload") or {}) if isinstance(value.get("payload"), dict) else {},
             }
         return result
+
+    def _normalize_issue_artifacts(self, raw: Any) -> dict[str, dict[str, Any]]:
+        if not isinstance(raw, dict):
+            return {}
+        result: dict[str, dict[str, Any]] = {}
+        for issue_id, artifacts in raw.items():
+            normalized_issue_id = str(issue_id).strip()
+            if not normalized_issue_id or not isinstance(artifacts, dict):
+                continue
+            normalized_artifacts: dict[str, Any] = {}
+            for artifact_key, artifact_value in artifacts.items():
+                key = str(artifact_key).strip()
+                if not key or not isinstance(artifact_value, dict):
+                    continue
+                normalized_artifacts[key] = dict(artifact_value)
+            if normalized_artifacts:
+                result[normalized_issue_id] = normalized_artifacts
+        return result
+
+    def _record_issue_artifact(
+        self,
+        *,
+        issue_artifacts: dict[str, dict[str, Any]],
+        issue_id: str,
+        artifact_key: str,
+        artifact: dict[str, Any],
+        checkpoint: CheckpointWriter | None,
+    ) -> None:
+        normalized_issue_id = str(issue_id).strip()
+        normalized_key = str(artifact_key).strip() or "result"
+        if not normalized_issue_id or not isinstance(artifact, dict):
+            return
+        issue_artifacts.setdefault(normalized_issue_id, {})
+        issue_artifacts[normalized_issue_id][normalized_key] = dict(artifact)
+        self._emit_checkpoint(
+            checkpoint,
+            stage="issue_artifact",
+            message=f"Issue artifact recorded: {normalized_issue_id}/{normalized_key}",
+            issue_id=normalized_issue_id,
+            artifact_key=normalized_key,
+            artifact=dict(artifact),
+        )
+
+    @staticmethod
+    def _render_issue_artifact_note(
+        *,
+        issue_artifacts: dict[str, dict[str, Any]],
+        plan_issue_ids: list[str],
+    ) -> str:
+        if not plan_issue_ids:
+            return ""
+        selected: list[dict[str, Any]] = []
+        for issue_id in plan_issue_ids:
+            artifacts = issue_artifacts.get(issue_id)
+            if not isinstance(artifacts, dict):
+                continue
+            for artifact_key, artifact in artifacts.items():
+                if not isinstance(artifact, dict):
+                    continue
+                selected.append(
+                    {
+                        "issue_id": issue_id,
+                        "artifact_key": str(artifact_key),
+                        "artifact": artifact,
+                    }
+                )
+        if not selected:
+            return ""
+        return "Issue artifacts context: " + json.dumps(selected, ensure_ascii=False)
 
     def _next_ready_plan_issue(
         self,
@@ -1827,6 +1927,7 @@ class TaskExecutor:
 
         return {
             "status": ISSUE_DONE,
+            "artifact_key": "result",
             "payload": {
                 "description": description,
                 "requires_tools": requires_tools,

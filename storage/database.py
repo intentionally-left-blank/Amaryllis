@@ -896,7 +896,12 @@ class Database:
             )
             self._conn.commit()
 
-    def get_agent_run(self, run_id: str, include_issues: bool = False) -> dict[str, Any] | None:
+    def get_agent_run(
+        self,
+        run_id: str,
+        include_issues: bool = False,
+        include_artifacts: bool = False,
+    ) -> dict[str, Any] | None:
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM agent_runs WHERE id = ?",
@@ -907,6 +912,8 @@ class Database:
         decoded = self._decode_agent_run_row(dict(row))
         if include_issues:
             decoded["issues"] = self.list_agent_run_issues(run_id=run_id, limit=500)
+        if include_artifacts:
+            decoded["issue_artifacts"] = self.list_agent_run_issue_artifacts(run_id=run_id, limit=2000)
         return decoded
 
     def list_agent_runs(
@@ -1065,6 +1072,91 @@ class Database:
                 (run_id, limit),
             ).fetchall()
         return [self._decode_agent_run_issue_row(dict(row)) for row in rows]
+
+    def upsert_agent_run_issue_artifact(
+        self,
+        *,
+        run_id: str,
+        issue_id: str,
+        artifact_key: str,
+        artifact: dict[str, Any] | None = None,
+    ) -> None:
+        now = self._utc_now()
+        normalized_issue_id = str(issue_id or "").strip() or "unknown"
+        normalized_key = str(artifact_key or "").strip() or "result"
+        artifact_json = json.dumps(artifact or {}, ensure_ascii=False)
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO agent_run_issue_artifacts(
+                    run_id,
+                    issue_id,
+                    artifact_key,
+                    artifact_json,
+                    created_at,
+                    updated_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id, issue_id, artifact_key) DO UPDATE SET
+                    artifact_json=excluded.artifact_json,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    run_id,
+                    normalized_issue_id,
+                    normalized_key,
+                    artifact_json,
+                    now,
+                    now,
+                ),
+            )
+            self._conn.commit()
+
+    def list_agent_run_issue_artifacts(
+        self,
+        *,
+        run_id: str,
+        issue_id: str | None = None,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        with self._lock:
+            if issue_id is not None:
+                rows = self._conn.execute(
+                    """
+                    SELECT
+                        run_id,
+                        issue_id,
+                        artifact_key,
+                        artifact_json,
+                        created_at,
+                        updated_at
+                    FROM agent_run_issue_artifacts
+                    WHERE run_id = ? AND issue_id = ?
+                    ORDER BY updated_at ASC
+                    LIMIT ?
+                    """,
+                    (run_id, issue_id, limit),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    """
+                    SELECT
+                        run_id,
+                        issue_id,
+                        artifact_key,
+                        artifact_json,
+                        created_at,
+                        updated_at
+                    FROM agent_run_issue_artifacts
+                    WHERE run_id = ?
+                    ORDER BY updated_at ASC
+                    LIMIT ?
+                    """,
+                    (run_id, limit),
+                ).fetchall()
+        return [self._decode_agent_run_issue_artifact_row(dict(row)) for row in rows]
 
     def create_automation(
         self,
@@ -1681,6 +1773,18 @@ class Database:
         if status not in {"planned", "running", "blocked", "done", "failed"}:
             status = "planned"
         row["status"] = status
+        return row
+
+    @staticmethod
+    def _decode_agent_run_issue_artifact_row(row: dict[str, Any]) -> dict[str, Any]:
+        artifact_json = row.pop("artifact_json", "{}")
+        try:
+            parsed = json.loads(artifact_json or "{}")
+            row["artifact"] = parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            row["artifact"] = {}
+        row["issue_id"] = str(row.get("issue_id") or "unknown").strip() or "unknown"
+        row["artifact_key"] = str(row.get("artifact_key") or "result").strip() or "result"
         return row
 
     @staticmethod

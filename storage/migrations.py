@@ -342,6 +342,27 @@ MIGRATIONS: list[Migration] = [
             ON agent_run_issues(status, updated_at);
         """,
     ),
+    Migration(
+        version=11,
+        name="agent_run_issue_artifacts_v1",
+        sql="""
+        CREATE TABLE IF NOT EXISTS agent_run_issue_artifacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            issue_id TEXT NOT NULL,
+            artifact_key TEXT NOT NULL,
+            artifact_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(run_id, issue_id, artifact_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_run_issue_artifacts_run_updated
+            ON agent_run_issue_artifacts(run_id, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_run_issue_artifacts_issue_updated
+            ON agent_run_issue_artifacts(run_id, issue_id, updated_at);
+        """,
+    ),
 ]
 
 
