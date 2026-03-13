@@ -188,6 +188,28 @@ def list_automations(
         raise ProviderError(str(exc)) from exc
 
 
+@router.get("/debug/automations/health")
+def debug_automations_health(
+    request: Request,
+    user_id: str | None = Query(default=None),
+    limit: int = Query(default=500, ge=1, le=5000),
+) -> dict[str, Any]:
+    services = request.app.state.services
+    try:
+        snapshot = services.automation_scheduler.health_snapshot(
+            user_id=user_id,
+            limit=limit,
+        )
+        return {
+            "health": snapshot,
+            "request_id": _request_id(request),
+        }
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
+    except Exception as exc:
+        raise ProviderError(str(exc)) from exc
+
+
 @router.get("/automations/{automation_id}")
 def get_automation(
     request: Request,

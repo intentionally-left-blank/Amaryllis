@@ -42,6 +42,11 @@ class AppConfig:
     automation_escalation_warning: int
     automation_escalation_critical: int
     automation_escalation_disable: int
+    automation_lease_ttl_sec: int
+    automation_backoff_base_sec: float
+    automation_backoff_max_sec: float
+    automation_circuit_failure_threshold: int
+    automation_circuit_open_sec: float
     task_max_duration_sec: float
     task_max_model_calls: int
     task_max_prompt_chars: int
@@ -217,6 +222,19 @@ class AppConfig:
                 1, int(os.getenv("AMARYLLIS_AUTOMATION_ESCALATION_CRITICAL", "4"))
             ),
             automation_escalation_disable=max(1, int(os.getenv("AMARYLLIS_AUTOMATION_ESCALATION_DISABLE", "6"))),
+            automation_lease_ttl_sec=max(5, int(os.getenv("AMARYLLIS_AUTOMATION_LEASE_TTL_SEC", "30"))),
+            automation_backoff_base_sec=max(
+                1.0, float(os.getenv("AMARYLLIS_AUTOMATION_BACKOFF_BASE_SEC", "5"))
+            ),
+            automation_backoff_max_sec=max(
+                1.0, float(os.getenv("AMARYLLIS_AUTOMATION_BACKOFF_MAX_SEC", "300"))
+            ),
+            automation_circuit_failure_threshold=max(
+                1, int(os.getenv("AMARYLLIS_AUTOMATION_CIRCUIT_FAILURE_THRESHOLD", "4"))
+            ),
+            automation_circuit_open_sec=max(
+                1.0, float(os.getenv("AMARYLLIS_AUTOMATION_CIRCUIT_OPEN_SEC", "120"))
+            ),
             task_max_duration_sec=max(10.0, float(os.getenv("AMARYLLIS_TASK_MAX_DURATION_SEC", "120"))),
             task_max_model_calls=max(1, int(os.getenv("AMARYLLIS_TASK_MAX_MODEL_CALLS", "6"))),
             task_max_prompt_chars=max(2000, int(os.getenv("AMARYLLIS_TASK_MAX_PROMPT_CHARS", "40000"))),

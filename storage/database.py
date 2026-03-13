@@ -966,10 +966,15 @@ class Database:
                     next_run_at,
                     last_run_at,
                     last_error,
+                    lease_owner,
+                    lease_expires_at,
+                    backoff_until,
+                    circuit_open_until,
+                    last_dispatch_key,
                     created_at,
                     updated_at
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NULL, NULL, ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)
                 """,
                 (
                     automation_id,
@@ -1041,6 +1046,207 @@ class Database:
             ).fetchall()
         return [self._decode_automation_row(dict(row)) for row in rows]
 
+    def claim_due_automations(
+        self,
+        *,
+        now_iso: str,
+        limit: int,
+        lease_owner: str,
+        lease_expires_at: str,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        claimed: list[dict[str, Any]] = []
+        with self._lock:
+            candidate_rows = self._conn.execute(
+                """
+                SELECT id FROM automations
+                WHERE
+                    is_enabled = 1
+                    AND next_run_at <= ?
+                    AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
+                    AND (backoff_until IS NULL OR backoff_until <= ?)
+                    AND (circuit_open_until IS NULL OR circuit_open_until <= ?)
+                ORDER BY next_run_at ASC
+                LIMIT ?
+                """,
+                (now_iso, now_iso, now_iso, now_iso, limit),
+            ).fetchall()
+            for row in candidate_rows:
+                automation_id = str(row["id"])
+                cursor = self._conn.execute(
+                    """
+                    UPDATE automations
+                    SET lease_owner = ?, lease_expires_at = ?, updated_at = ?
+                    WHERE
+                        id = ?
+                        AND is_enabled = 1
+                        AND next_run_at <= ?
+                        AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
+                        AND (backoff_until IS NULL OR backoff_until <= ?)
+                        AND (circuit_open_until IS NULL OR circuit_open_until <= ?)
+                    """,
+                    (
+                        lease_owner,
+                        lease_expires_at,
+                        self._utc_now(),
+                        automation_id,
+                        now_iso,
+                        now_iso,
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                if int(cursor.rowcount or 0) <= 0:
+                    continue
+                claimed_row = self._conn.execute(
+                    "SELECT * FROM automations WHERE id = ?",
+                    (automation_id,),
+                ).fetchone()
+                if claimed_row is not None:
+                    claimed.append(self._decode_automation_row(dict(claimed_row)))
+            self._conn.commit()
+        return claimed
+
+    def release_automation_lease(
+        self,
+        *,
+        automation_id: str,
+        lease_owner: str,
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE automations
+                SET lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+                WHERE id = ? AND (lease_owner = ? OR lease_owner IS NULL)
+                """,
+                (self._utc_now(), automation_id, lease_owner),
+            )
+            self._conn.commit()
+
+    def register_automation_dispatch(
+        self,
+        *,
+        automation_id: str,
+        dispatch_key: str,
+        source: str,
+        run_id: str | None = None,
+        stale_before_iso: str | None = None,
+    ) -> bool:
+        with self._lock:
+            try:
+                self._conn.execute(
+                    """
+                    INSERT INTO automation_dispatches(
+                        automation_id,
+                        dispatch_key,
+                        source,
+                        run_id,
+                        created_at
+                    )
+                    VALUES(?, ?, ?, ?, ?)
+                    """,
+                    (automation_id, dispatch_key, source, run_id, self._utc_now()),
+                )
+            except sqlite3.IntegrityError:
+                if stale_before_iso is None:
+                    self._conn.commit()
+                    return False
+                existing = self._conn.execute(
+                    """
+                    SELECT run_id, created_at
+                    FROM automation_dispatches
+                    WHERE automation_id = ? AND dispatch_key = ?
+                    """,
+                    (automation_id, dispatch_key),
+                ).fetchone()
+                if existing is None:
+                    self._conn.commit()
+                    return False
+                existing_run_id = existing["run_id"]
+                existing_created_at_raw = existing["created_at"]
+                if existing_run_id:
+                    self._conn.commit()
+                    return False
+                try:
+                    existing_created_at = datetime.fromisoformat(str(existing_created_at_raw))
+                    stale_before = datetime.fromisoformat(str(stale_before_iso))
+                    if existing_created_at.tzinfo is None:
+                        existing_created_at = existing_created_at.replace(tzinfo=timezone.utc)
+                    if stale_before.tzinfo is None:
+                        stale_before = stale_before.replace(tzinfo=timezone.utc)
+                    if existing_created_at > stale_before:
+                        self._conn.commit()
+                        return False
+                except Exception:
+                    self._conn.commit()
+                    return False
+
+                cursor = self._conn.execute(
+                    """
+                    UPDATE automation_dispatches
+                    SET source = ?, run_id = ?, created_at = ?
+                    WHERE automation_id = ? AND dispatch_key = ?
+                    """,
+                    (source, run_id, self._utc_now(), automation_id, dispatch_key),
+                )
+                self._conn.commit()
+                return int(cursor.rowcount or 0) > 0
+            self._conn.commit()
+        return True
+
+    def update_automation_dispatch_run_id(
+        self,
+        *,
+        automation_id: str,
+        dispatch_key: str,
+        run_id: str,
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE automation_dispatches
+                SET run_id = ?, created_at = ?
+                WHERE automation_id = ? AND dispatch_key = ?
+                """,
+                (run_id, self._utc_now(), automation_id, dispatch_key),
+            )
+            self._conn.commit()
+
+    def delete_automation_dispatch(
+        self,
+        *,
+        automation_id: str,
+        dispatch_key: str,
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                """
+                DELETE FROM automation_dispatches
+                WHERE automation_id = ? AND dispatch_key = ?
+                """,
+                (automation_id, dispatch_key),
+            )
+            self._conn.commit()
+
+    def list_recent_automation_events(self, limit: int = 500) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT id, automation_id, event_type, message, run_id, created_at
+                FROM automation_events
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        result = [dict(row) for row in rows]
+        result.reverse()
+        return result
+
     def update_automation_fields(self, automation_id: str, **fields: Any) -> None:
         if not fields:
             return
@@ -1060,6 +1266,11 @@ class Database:
             "last_error",
             "consecutive_failures",
             "escalation_level",
+            "lease_owner",
+            "lease_expires_at",
+            "backoff_until",
+            "circuit_open_until",
+            "last_dispatch_key",
             "updated_at",
         }
         sanitized: dict[str, Any] = {}
@@ -1110,6 +1321,10 @@ class Database:
             )
             self._conn.execute(
                 "DELETE FROM automation_events WHERE automation_id = ?",
+                (automation_id,),
+            )
+            self._conn.execute(
+                "DELETE FROM automation_dispatches WHERE automation_id = ?",
                 (automation_id,),
             )
             self._conn.commit()
@@ -1332,6 +1547,9 @@ class Database:
         if level not in {"none", "warning", "critical"}:
             level = "none"
         row["escalation_level"] = level
+        for key in ("lease_owner", "lease_expires_at", "backoff_until", "circuit_open_until", "last_dispatch_key"):
+            value = row.get(key)
+            row[key] = str(value) if value not in (None, "") else None
         return row
 
     @staticmethod

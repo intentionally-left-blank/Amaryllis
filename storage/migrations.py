@@ -283,6 +283,37 @@ MIGRATIONS: list[Migration] = [
             ON agent_runs(stop_reason, updated_at);
         """,
     ),
+    Migration(
+        version=9,
+        name="automation_reliability_v4",
+        sql="""
+        ALTER TABLE automations ADD COLUMN lease_owner TEXT;
+        ALTER TABLE automations ADD COLUMN lease_expires_at TEXT;
+        ALTER TABLE automations ADD COLUMN backoff_until TEXT;
+        ALTER TABLE automations ADD COLUMN circuit_open_until TEXT;
+        ALTER TABLE automations ADD COLUMN last_dispatch_key TEXT;
+
+        CREATE INDEX IF NOT EXISTS idx_automations_lease_expiry
+            ON automations(lease_expires_at, next_run_at);
+        CREATE INDEX IF NOT EXISTS idx_automations_backoff
+            ON automations(backoff_until, next_run_at);
+        CREATE INDEX IF NOT EXISTS idx_automations_circuit
+            ON automations(circuit_open_until, next_run_at);
+
+        CREATE TABLE IF NOT EXISTS automation_dispatches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            automation_id TEXT NOT NULL,
+            dispatch_key TEXT NOT NULL,
+            source TEXT NOT NULL,
+            run_id TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(automation_id, dispatch_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_automation_dispatches_automation_time
+            ON automation_dispatches(automation_id, created_at);
+        """,
+    ),
 ]
 
 

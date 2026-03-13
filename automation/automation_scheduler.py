@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Event, Thread
 from typing import Any, Protocol
@@ -28,6 +28,11 @@ class AutomationScheduler:
         escalation_warning_threshold: int = 2,
         escalation_critical_threshold: int = 4,
         escalation_disable_threshold: int = 6,
+        lease_ttl_sec: int = 30,
+        backoff_base_sec: float = 5.0,
+        backoff_max_sec: float = 300.0,
+        circuit_failure_threshold: int = 4,
+        circuit_open_sec: float = 120.0,
         telemetry: TelemetrySink | None = None,
     ) -> None:
         self.logger = logging.getLogger("amaryllis.automation.scheduler")
@@ -44,7 +49,13 @@ class AutomationScheduler:
             self.escalation_critical_threshold + 1,
             int(escalation_disable_threshold),
         )
+        self.lease_ttl_sec = max(5, int(lease_ttl_sec))
+        self.backoff_base_sec = max(1.0, float(backoff_base_sec))
+        self.backoff_max_sec = max(self.backoff_base_sec, float(backoff_max_sec))
+        self.circuit_failure_threshold = max(1, int(circuit_failure_threshold))
+        self.circuit_open_sec = max(1.0, float(circuit_open_sec))
         self.telemetry = telemetry
+        self._lease_owner = f"scheduler-{uuid4()}"
 
         self._thread: Thread | None = None
         self._stop = Event()
@@ -53,10 +64,6 @@ class AutomationScheduler:
     @staticmethod
     def _utc_now() -> datetime:
         return datetime.now(timezone.utc)
-
-    @classmethod
-    def _utc_now_iso(cls) -> str:
-        return cls._utc_now().isoformat()
 
     def start(self) -> None:
         if self._started:
@@ -68,13 +75,20 @@ class AutomationScheduler:
         self.logger.info(
             (
                 "automation_scheduler_started poll_interval_sec=%s batch_size=%s "
-                "escalation_warning=%s escalation_critical=%s escalation_disable=%s"
+                "escalation_warning=%s escalation_critical=%s escalation_disable=%s "
+                "lease_ttl_sec=%s backoff_base_sec=%s backoff_max_sec=%s "
+                "circuit_failure_threshold=%s circuit_open_sec=%s"
             ),
             self.poll_interval_sec,
             self.batch_size,
             self.escalation_warning_threshold,
             self.escalation_critical_threshold,
             self.escalation_disable_threshold,
+            self.lease_ttl_sec,
+            self.backoff_base_sec,
+            self.backoff_max_sec,
+            self.circuit_failure_threshold,
+            self.circuit_open_sec,
         )
 
     def stop(self) -> None:
@@ -197,6 +211,10 @@ class AutomationScheduler:
             "last_error": None,
             "consecutive_failures": 0,
             "escalation_level": "none",
+            "lease_owner": None,
+            "lease_expires_at": None,
+            "backoff_until": None,
+            "circuit_open_until": None,
         }
         if message is not None:
             updates["message"] = message
@@ -250,6 +268,8 @@ class AutomationScheduler:
         self.database.update_automation_fields(
             automation_id,
             is_enabled=False,
+            lease_owner=None,
+            lease_expires_at=None,
         )
         self.database.add_automation_event(
             automation_id=automation_id,
@@ -280,6 +300,10 @@ class AutomationScheduler:
             last_error=None,
             consecutive_failures=0,
             escalation_level="none",
+            lease_owner=None,
+            lease_expires_at=None,
+            backoff_until=None,
+            circuit_open_until=None,
         )
         self.database.add_automation_event(
             automation_id=automation_id,
@@ -329,6 +353,102 @@ class AutomationScheduler:
             raise ValueError(f"Inbox item not found: {item_id}")
         return item
 
+    def health_snapshot(
+        self,
+        *,
+        user_id: str | None = None,
+        limit: int = 500,
+    ) -> dict[str, Any]:
+        bounded_limit = max(1, min(int(limit), 5000))
+        automations = self.database.list_automations(user_id=user_id, limit=2000)
+        selected_ids = {str(item["id"]) for item in automations}
+        events = self.database.list_recent_automation_events(limit=bounded_limit)
+        if user_id:
+            events = [event for event in events if str(event.get("automation_id")) in selected_ids]
+
+        now = self._utc_now()
+        enabled_count = 0
+        warning_count = 0
+        critical_count = 0
+        lease_active_count = 0
+        backoff_active_count = 0
+        circuit_open_count = 0
+        for automation in automations:
+            if bool(automation.get("is_enabled", False)):
+                enabled_count += 1
+            level = str(automation.get("escalation_level", "none")).strip().lower()
+            if level == "warning":
+                warning_count += 1
+            elif level == "critical":
+                critical_count += 1
+            if self._is_future_timestamp(automation.get("lease_expires_at"), now=now):
+                lease_active_count += 1
+            if self._is_future_timestamp(automation.get("backoff_until"), now=now):
+                backoff_active_count += 1
+            if self._is_future_timestamp(automation.get("circuit_open_until"), now=now):
+                circuit_open_count += 1
+
+        event_breakdown: dict[str, int] = {}
+        for event in events:
+            event_type = str(event.get("event_type") or "unknown").strip().lower() or "unknown"
+            event_breakdown[event_type] = int(event_breakdown.get(event_type, 0)) + 1
+
+        queued_count = int(event_breakdown.get("run_queued", 0))
+        error_count = int(event_breakdown.get("run_error", 0))
+        dedup_count = int(event_breakdown.get("run_deduplicated", 0))
+        attempts = queued_count + error_count
+        success_rate = float(queued_count / attempts) if attempts > 0 else 1.0
+        error_rate = float(error_count / attempts) if attempts > 0 else 0.0
+
+        top_failures = sorted(
+            [
+                {
+                    "automation_id": str(item["id"]),
+                    "consecutive_failures": int(item.get("consecutive_failures", 0)),
+                    "is_enabled": bool(item.get("is_enabled", False)),
+                }
+                for item in automations
+                if int(item.get("consecutive_failures", 0)) > 0
+            ],
+            key=lambda row: int(row["consecutive_failures"]),
+            reverse=True,
+        )[:10]
+
+        return {
+            "total_automations": len(automations),
+            "enabled_automations": enabled_count,
+            "disabled_automations": max(0, len(automations) - enabled_count),
+            "escalation": {
+                "warning": warning_count,
+                "critical": critical_count,
+            },
+            "runtime_state": {
+                "lease_active": lease_active_count,
+                "backoff_active": backoff_active_count,
+                "circuit_open": circuit_open_count,
+            },
+            "recent_events": {
+                "count": len(events),
+                "breakdown": event_breakdown,
+            },
+            "slo": {
+                "sample_size": attempts,
+                "run_queue_success_rate": success_rate,
+                "run_queue_error_rate": error_rate,
+                "deduplicated_dispatches": dedup_count,
+            },
+            "top_failures": top_failures,
+            "scheduler": {
+                "poll_interval_sec": self.poll_interval_sec,
+                "batch_size": self.batch_size,
+                "lease_ttl_sec": self.lease_ttl_sec,
+                "backoff_base_sec": self.backoff_base_sec,
+                "backoff_max_sec": self.backoff_max_sec,
+                "circuit_failure_threshold": self.circuit_failure_threshold,
+                "circuit_open_sec": self.circuit_open_sec,
+            },
+        }
+
     def _normalized_schedule_from_row(self, automation: dict[str, Any]) -> tuple[str, dict[str, Any], int]:
         row_schedule = automation.get("schedule")
         if not isinstance(row_schedule, dict):
@@ -348,19 +468,40 @@ class AutomationScheduler:
             self._stop.wait(self.poll_interval_sec)
 
     def _tick(self) -> None:
-        now_iso = self._utc_now_iso()
-        due_items = self.database.list_due_automations(now_iso=now_iso, limit=self.batch_size)
+        now = self._utc_now()
+        now_iso = now.isoformat()
+        lease_expires_at = (now + timedelta(seconds=self.lease_ttl_sec)).isoformat()
+        due_items = self.database.claim_due_automations(
+            now_iso=now_iso,
+            limit=self.batch_size,
+            lease_owner=self._lease_owner,
+            lease_expires_at=lease_expires_at,
+        )
         if not due_items:
             return
         for automation in due_items:
+            automation_id = str(automation.get("id"))
             try:
                 self._trigger(automation, source="scheduled")
             except Exception as exc:
                 self.logger.error(
                     "automation_trigger_failed automation_id=%s error=%s",
-                    automation.get("id"),
+                    automation_id,
                     exc,
                 )
+            finally:
+                try:
+                    self.database.release_automation_lease(
+                        automation_id=automation_id,
+                        lease_owner=self._lease_owner,
+                    )
+                except Exception as release_exc:
+                    self.logger.warning(
+                        "automation_lease_release_failed automation_id=%s lease_owner=%s error=%s",
+                        automation_id,
+                        self._lease_owner,
+                        release_exc,
+                    )
 
     def _trigger(self, automation: dict[str, Any], *, source: str) -> None:
         automation_id = str(automation["id"])
@@ -371,6 +512,13 @@ class AutomationScheduler:
         user_id = str(automation["user_id"])
         previous_failures = max(0, int(automation.get("consecutive_failures", 0)))
         previous_level = str(automation.get("escalation_level", "none")).strip().lower() or "none"
+        source_name = str(source or "scheduled").strip().lower() or "scheduled"
+        scheduled_slot = now_iso if source_name == "manual" else str(automation.get("next_run_at") or now_iso)
+        dispatch_key = self._build_dispatch_key(
+            source=source_name,
+            schedule_type=schedule_type,
+            slot_iso=scheduled_slot,
+        )
 
         next_run_at = compute_next_run_at(
             schedule_type=schedule_type,
@@ -379,12 +527,14 @@ class AutomationScheduler:
             now_utc=now,
         )
 
+        dispatch_registered = False
+        run_id: str | None = None
         try:
             run_message = str(automation["message"])
             changed_files: list[str] = []
             if schedule_type == "watch_fs":
                 changed_files, schedule = self._scan_watch_changes(schedule)
-                if source != "manual" and not changed_files:
+                if source_name != "manual" and not changed_files:
                     self.database.update_automation_fields(
                         automation_id,
                         next_run_at=next_run_at,
@@ -392,12 +542,13 @@ class AutomationScheduler:
                         schedule_type=schedule_type,
                         schedule_json=schedule,
                         timezone=timezone_name,
+                        last_dispatch_key=dispatch_key,
                     )
                     self._emit(
                         "automation_watch_idle",
                         {
                             "automation_id": automation_id,
-                            "source": source,
+                            "source": source_name,
                         },
                     )
                     return
@@ -411,6 +562,41 @@ class AutomationScheduler:
             if agent_record is None:
                 raise ValueError(f"Agent not found: {automation['agent_id']}")
 
+            stale_before_iso = (
+                now - timedelta(seconds=max(float(self.lease_ttl_sec) * 2.0, 30.0))
+            ).isoformat()
+            dispatch_registered = self.database.register_automation_dispatch(
+                automation_id=automation_id,
+                dispatch_key=dispatch_key,
+                source=source_name,
+                run_id=None,
+                stale_before_iso=stale_before_iso if source_name == "scheduled" else None,
+            )
+            if not dispatch_registered:
+                self.database.update_automation_fields(
+                    automation_id,
+                    next_run_at=next_run_at,
+                    interval_sec=interval_sec,
+                    schedule_type=schedule_type,
+                    schedule_json=schedule,
+                    timezone=timezone_name,
+                    last_dispatch_key=dispatch_key,
+                )
+                self.database.add_automation_event(
+                    automation_id=automation_id,
+                    event_type="run_deduplicated",
+                    message=f"Duplicate dispatch skipped ({source_name}) key={dispatch_key}.",
+                )
+                self._emit(
+                    "automation_run_deduplicated",
+                    {
+                        "automation_id": automation_id,
+                        "source": source_name,
+                        "dispatch_key": dispatch_key,
+                    },
+                )
+                return
+
             run = self.run_manager.create_run(
                 agent=Agent.from_record(agent_record),
                 user_id=user_id,
@@ -418,6 +604,11 @@ class AutomationScheduler:
                 user_message=run_message,
             )
             run_id = str(run["id"])
+            self.database.update_automation_dispatch_run_id(
+                automation_id=automation_id,
+                dispatch_key=dispatch_key,
+                run_id=run_id,
+            )
             self.database.update_automation_fields(
                 automation_id,
                 last_run_at=now_iso,
@@ -429,6 +620,9 @@ class AutomationScheduler:
                 timezone=timezone_name,
                 consecutive_failures=0,
                 escalation_level="none",
+                backoff_until=None,
+                circuit_open_until=None,
+                last_dispatch_key=dispatch_key,
             )
             if previous_failures > 0 or previous_level != "none":
                 self.database.add_automation_event(
@@ -447,16 +641,16 @@ class AutomationScheduler:
                 automation_id=automation_id,
                 event_type="run_queued",
                 message=(
-                    f"Automation queued run ({source})"
+                    f"Automation queued run ({source_name})"
                     if not changed_files
                     else (
-                        f"Automation queued run ({source}); "
+                        f"Automation queued run ({source_name}); "
                         f"watcher detected {len(changed_files)} changed files."
                     )
                 ),
                 run_id=run_id,
             )
-            if changed_files and source != "manual":
+            if changed_files and source_name != "manual":
                 self._notify_watch_triggered(
                     automation_id=automation_id,
                     user_id=user_id,
@@ -469,15 +663,26 @@ class AutomationScheduler:
                 {
                     "automation_id": automation_id,
                     "run_id": run_id,
-                    "source": source,
+                    "source": source_name,
                     "schedule_type": schedule_type,
+                    "dispatch_key": dispatch_key,
                 },
             )
         except Exception as exc:
+            if dispatch_registered and run_id is None:
+                self.database.delete_automation_dispatch(
+                    automation_id=automation_id,
+                    dispatch_key=dispatch_key,
+                )
             error = str(exc)
             failures = previous_failures + 1
             level = self._escalation_level_for_failures(failures)
             disable_now = failures >= self.escalation_disable_threshold
+            backoff_seconds = self._backoff_seconds_for_failures(failures)
+            backoff_until = (now + timedelta(seconds=backoff_seconds)).isoformat()
+            circuit_open_until = None
+            if failures >= self.circuit_failure_threshold:
+                circuit_open_until = (now + timedelta(seconds=self.circuit_open_sec)).isoformat()
             retry_next = compute_next_run_at(
                 schedule_type="interval",
                 schedule={"interval_sec": max(interval_sec, 30)},
@@ -494,6 +699,9 @@ class AutomationScheduler:
                 timezone=timezone_name,
                 consecutive_failures=failures,
                 escalation_level=level,
+                backoff_until=backoff_until,
+                circuit_open_until=circuit_open_until,
+                last_dispatch_key=dispatch_key,
                 is_enabled=False if disable_now else bool(automation.get("is_enabled", True)),
             )
             self.database.add_automation_event(
@@ -501,7 +709,9 @@ class AutomationScheduler:
                 event_type="run_error",
                 message=(
                     f"Automation failed to queue run: {error} "
-                    f"(consecutive_failures={failures}, escalation={level})"
+                    f"(consecutive_failures={failures}, escalation={level}, "
+                    f"backoff_sec={backoff_seconds:.2f}, "
+                    f"circuit_open_until={circuit_open_until or 'none'})"
                 ),
             )
             should_notify_escalation = (level != previous_level and level != "none") or (
@@ -520,14 +730,48 @@ class AutomationScheduler:
                 "automation_run_error",
                 {
                     "automation_id": automation_id,
-                    "source": source,
+                    "source": source_name,
                     "error": error,
                     "consecutive_failures": failures,
                     "escalation_level": level,
                     "disabled": disable_now,
+                    "backoff_sec": backoff_seconds,
+                    "circuit_open_until": circuit_open_until,
+                    "dispatch_key": dispatch_key,
                 },
             )
             raise
+
+    def _backoff_seconds_for_failures(self, failures: int) -> float:
+        exponent = max(0, int(failures) - 1)
+        value = float(self.backoff_base_sec) * float(2**exponent)
+        return float(min(self.backoff_max_sec, value))
+
+    @staticmethod
+    def _build_dispatch_key(*, source: str, schedule_type: str, slot_iso: str) -> str:
+        normalized_source = str(source or "scheduled").strip().lower() or "scheduled"
+        normalized_schedule_type = str(schedule_type or "interval").strip().lower() or "interval"
+        normalized_slot = str(slot_iso or "").strip() or "unknown"
+        return f"{normalized_source}:{normalized_schedule_type}:{normalized_slot}"
+
+    @staticmethod
+    def _parse_iso_datetime(value: Any) -> datetime | None:
+        if value in (None, ""):
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(value))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except Exception:
+            return None
+
+    @classmethod
+    def _is_future_timestamp(cls, value: Any, *, now: datetime) -> bool:
+        parsed = cls._parse_iso_datetime(value)
+        if parsed is None:
+            return False
+        return parsed > now
 
     @staticmethod
     def _build_watch_message(base_message: str, changed_files: list[str]) -> str:

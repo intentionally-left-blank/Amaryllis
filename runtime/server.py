@@ -194,6 +194,11 @@ def create_services() -> ServiceContainer:
         escalation_warning_threshold=config.automation_escalation_warning,
         escalation_critical_threshold=config.automation_escalation_critical,
         escalation_disable_threshold=config.automation_escalation_disable,
+        lease_ttl_sec=config.automation_lease_ttl_sec,
+        backoff_base_sec=config.automation_backoff_base_sec,
+        backoff_max_sec=config.automation_backoff_max_sec,
+        circuit_failure_threshold=config.automation_circuit_failure_threshold,
+        circuit_open_sec=config.automation_circuit_open_sec,
         telemetry=telemetry,
     )
     automation_scheduler.start()

@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import time
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from agents.agent import Agent
@@ -200,6 +201,145 @@ class AutomationSchedulerTests(unittest.TestCase):
 
         unread_item = self.scheduler.set_inbox_item_read(item["id"], is_read=False)
         self.assertFalse(unread_item["is_read"])
+
+    def test_dispatch_dedup_skips_duplicate_slot(self) -> None:
+        automation = self.scheduler.create_automation(
+            agent_id=self.agent.id,
+            user_id="user-1",
+            session_id=None,
+            message="dedup check",
+            interval_sec=60,
+            start_immediately=False,
+        )
+        self.database.update_automation_fields(
+            automation["id"],
+            next_run_at="1970-01-01T00:00:00+00:00",
+        )
+
+        row = self.database.get_automation(automation["id"])
+        self.assertIsNotNone(row)
+        assert row is not None
+
+        self.scheduler._trigger(row, source="scheduled")  # noqa: SLF001
+        self.scheduler._trigger(row, source="scheduled")  # noqa: SLF001
+
+        runs = self.database.list_agent_runs(user_id="user-1", limit=20)
+        self.assertEqual(len(runs), 1)
+
+        events = self.scheduler.list_events(automation["id"], limit=50)
+        event_types = [item["event_type"] for item in events]
+        self.assertIn("run_queued", event_types)
+        self.assertIn("run_deduplicated", event_types)
+
+    def test_tick_recovers_after_stale_lease(self) -> None:
+        automation = self.scheduler.create_automation(
+            agent_id=self.agent.id,
+            user_id="user-1",
+            session_id=None,
+            message="lease recovery",
+            interval_sec=30,
+            start_immediately=True,
+        )
+
+        now = datetime.now(timezone.utc)
+        self.database.update_automation_fields(
+            automation["id"],
+            next_run_at="1970-01-01T00:00:00+00:00",
+            lease_owner="dead-scheduler",
+            lease_expires_at=(now + timedelta(minutes=5)).isoformat(),
+        )
+        self.scheduler._tick()  # noqa: SLF001
+        runs_initial = self.database.list_agent_runs(user_id="user-1", limit=20)
+        self.assertEqual(len(runs_initial), 0)
+
+        self.database.update_automation_fields(
+            automation["id"],
+            next_run_at="1970-01-01T00:00:00+00:00",
+            lease_expires_at=(now - timedelta(minutes=5)).isoformat(),
+        )
+        self.scheduler._tick()  # noqa: SLF001
+        runs_after_recovery = self.database.list_agent_runs(user_id="user-1", limit=20)
+        self.assertEqual(len(runs_after_recovery), 1)
+
+    def test_backoff_and_circuit_open_pause_scheduled_runs(self) -> None:
+        self.scheduler.circuit_failure_threshold = 1
+        self.scheduler.backoff_base_sec = 60.0
+        self.scheduler.backoff_max_sec = 60.0
+        self.scheduler.circuit_open_sec = 120.0
+
+        automation = self.scheduler.create_automation(
+            agent_id="missing-agent",
+            user_id="user-1",
+            session_id=None,
+            message="broken",
+            interval_sec=30,
+            start_immediately=True,
+        )
+        self.database.update_automation_fields(
+            automation["id"],
+            next_run_at="1970-01-01T00:00:00+00:00",
+        )
+
+        self.scheduler._tick()  # noqa: SLF001
+        row = self.database.get_automation(automation["id"])
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(int(row["consecutive_failures"]), 1)
+        self.assertIsNotNone(row.get("backoff_until"))
+        self.assertIsNotNone(row.get("circuit_open_until"))
+
+        self.database.update_automation_fields(
+            automation["id"],
+            next_run_at="1970-01-01T00:00:00+00:00",
+            backoff_until="1970-01-01T00:00:00+00:00",
+        )
+        self.scheduler._tick()  # noqa: SLF001
+        row_during_circuit = self.database.get_automation(automation["id"])
+        self.assertIsNotNone(row_during_circuit)
+        assert row_during_circuit is not None
+        self.assertEqual(int(row_during_circuit["consecutive_failures"]), 1)
+
+        self.database.update_automation_fields(
+            automation["id"],
+            next_run_at="1970-01-01T00:00:00+00:00",
+            backoff_until="1970-01-01T00:00:00+00:00",
+            circuit_open_until="1970-01-01T00:00:00+00:00",
+        )
+        self.scheduler._tick()  # noqa: SLF001
+        row_after_open = self.database.get_automation(automation["id"])
+        self.assertIsNotNone(row_after_open)
+        assert row_after_open is not None
+        self.assertEqual(int(row_after_open["consecutive_failures"]), 2)
+
+    def test_health_snapshot_contains_reliability_fields(self) -> None:
+        self.scheduler.create_automation(
+            agent_id=self.agent.id,
+            user_id="user-1",
+            session_id="session-ok",
+            message="ok run",
+            interval_sec=30,
+            start_immediately=True,
+        )
+        self.scheduler.create_automation(
+            agent_id="missing-agent",
+            user_id="user-1",
+            session_id="session-fail",
+            message="fail run",
+            interval_sec=30,
+            start_immediately=True,
+        )
+
+        self.scheduler._tick()  # noqa: SLF001
+
+        health = self.scheduler.health_snapshot(user_id="user-1", limit=200)
+        self.assertEqual(int(health["total_automations"]), 2)
+        self.assertIn("runtime_state", health)
+        self.assertIn("slo", health)
+        self.assertIn("recent_events", health)
+        self.assertIn("scheduler", health)
+        self.assertGreaterEqual(int(health["recent_events"]["count"]), 2)
+        self.assertGreaterEqual(int(health["slo"]["sample_size"]), 1)
+        self.assertIsInstance(health.get("top_failures"), list)
 
 
 if __name__ == "__main__":

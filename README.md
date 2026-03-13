@@ -649,9 +649,13 @@ Implemented now:
 - persistent automation schedules in SQLite (`automations`, `automation_events`)
 - typed schedules (`interval`, `hourly`, `weekly`, `watch_fs`) with timezone-aware next-run calculation
 - background scheduler loop (single-node) that queues agent runs
+- lease-based scheduler claim/release for due jobs (single-dispatch safety across concurrent scheduler instances)
+- dispatch dedup keys persisted in SQLite (`automation_dispatches`) to suppress duplicate queued runs for the same slot
+- adaptive retry backoff + circuit-open cooldown on repeated automation queue failures
 - manual `run now`, `pause`, `resume`, `delete`
 - automation update endpoint for changing schedule/message/session without recreation
 - automation event log for observability
+- automation reliability/SLO debug snapshot API (`GET /debug/automations/health`)
 - file watcher mode (`watch_fs`) that triggers runs only on detected file changes
 - inbox/notification feed in SQLite (`inbox_items`) with read/unread state
 - failure escalation policy (`none -> warning -> critical`) with auto-disable threshold
@@ -706,6 +710,9 @@ curl -X POST "http://localhost:8000/automations/<automation_id>/run"
 # events
 curl "http://localhost:8000/automations/<automation_id>/events?limit=100"
 
+# reliability + SLO snapshot
+curl "http://localhost:8000/debug/automations/health?user_id=user-001&limit=500"
+
 # watcher-based automation (folder polling)
 curl -X POST http://localhost:8000/automations/create \
   -H "Content-Type: application/json" \
@@ -735,6 +742,13 @@ Escalation env vars:
 - `AMARYLLIS_AUTOMATION_ESCALATION_WARNING` (default `2`)
 - `AMARYLLIS_AUTOMATION_ESCALATION_CRITICAL` (default `4`)
 - `AMARYLLIS_AUTOMATION_ESCALATION_DISABLE` (default `6`)
+
+Reliability env vars:
+- `AMARYLLIS_AUTOMATION_LEASE_TTL_SEC` (default `30`)
+- `AMARYLLIS_AUTOMATION_BACKOFF_BASE_SEC` (default `5`)
+- `AMARYLLIS_AUTOMATION_BACKOFF_MAX_SEC` (default `300`)
+- `AMARYLLIS_AUTOMATION_CIRCUIT_FAILURE_THRESHOLD` (default `4`)
+- `AMARYLLIS_AUTOMATION_CIRCUIT_OPEN_SEC` (default `120`)
 
 ### Tooling API
 
