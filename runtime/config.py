@@ -81,8 +81,11 @@ class AppConfig:
     tool_python_exec_max_code_chars: int
     tool_filesystem_allow_write: bool
     plugin_signing_key: str | None
+    plugin_signing_mode: str
     mcp_endpoints: tuple[str, ...]
     mcp_timeout_sec: float
+    mcp_failure_threshold: int
+    mcp_quarantine_sec: float
     identity_path: Path
 
     @classmethod
@@ -162,6 +165,12 @@ class AppConfig:
         ).strip().lower()
         if tool_isolation_profile not in {"balanced", "strict"}:
             tool_isolation_profile = "balanced"
+        plugin_signing_mode = os.getenv(
+            "AMARYLLIS_PLUGIN_SIGNING_MODE",
+            "warn",
+        ).strip().lower()
+        if plugin_signing_mode not in {"off", "warn", "strict"}:
+            plugin_signing_mode = "warn"
 
         return cls(
             app_name="Amaryllis",
@@ -289,8 +298,11 @@ class AppConfig:
                 os.getenv("AMARYLLIS_TOOL_FILESYSTEM_ALLOW_WRITE", "true")
             ),
             plugin_signing_key=(os.getenv("AMARYLLIS_PLUGIN_SIGNING_KEY") or "").strip() or None,
+            plugin_signing_mode=plugin_signing_mode,
             mcp_endpoints=mcp_endpoints,
             mcp_timeout_sec=max(1.0, float(os.getenv("AMARYLLIS_MCP_TIMEOUT_SEC", "10"))),
+            mcp_failure_threshold=max(1, int(os.getenv("AMARYLLIS_MCP_FAILURE_THRESHOLD", "2"))),
+            mcp_quarantine_sec=max(1.0, float(os.getenv("AMARYLLIS_MCP_QUARANTINE_SEC", "60"))),
             identity_path=identity_path,
         )
 

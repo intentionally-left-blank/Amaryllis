@@ -82,6 +82,9 @@ class ToolExecutor:
                     permission_id,
                     tool_name=name,
                     arguments=arguments,
+                    request_id=request_id,
+                    user_id=user_id,
+                    session_id=session_id,
                 )
             if not approved and permission_ids:
                 for candidate in permission_ids:
@@ -91,6 +94,9 @@ class ToolExecutor:
                         candidate,
                         tool_name=name,
                         arguments=arguments,
+                        request_id=request_id,
+                        user_id=user_id,
+                        session_id=session_id,
                     )
                     if approved:
                         break
@@ -99,6 +105,8 @@ class ToolExecutor:
                     tool_name=name,
                     arguments=arguments,
                     reason=f"Tool '{name}' requires manual approval.",
+                    scope=str(decision.approval_scope or "request"),
+                    ttl_sec=int(decision.approval_ttl_sec or 300),
                     request_id=request_id,
                     user_id=user_id,
                     session_id=session_id,
@@ -206,14 +214,7 @@ class ToolExecutor:
     ) -> dict[str, Any]:
         return {
             "approval_enforcement_mode": self.approval_enforcement_mode,
-            "isolation_policy": {
-                "profile": self.policy.profile,
-                "blocked_tools": sorted(self.policy.blocked_tools),
-                "allowed_high_risk_tools": sorted(self.policy.allowed_high_risk_tools),
-                "python_exec_max_timeout_sec": self.policy.python_exec_max_timeout_sec,
-                "python_exec_max_code_chars": self.policy.python_exec_max_code_chars,
-                "filesystem_allow_write": self.policy.filesystem_allow_write,
-            },
+            "isolation_policy": self.policy.describe(),
             "budget": self.budget_guard.debug_snapshot(
                 request_id=request_id,
                 user_id=user_id,
@@ -221,6 +222,7 @@ class ToolExecutor:
                 scopes_limit=scopes_limit,
                 top_tools_limit=top_tools_limit,
             ),
+            "plugin_signing": self.registry.plugin_discovery_report(limit=200),
         }
 
     @staticmethod

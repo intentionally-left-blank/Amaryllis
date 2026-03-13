@@ -121,6 +121,60 @@ class ToolsMCPTests(unittest.TestCase):
         self.assertEqual(result["result"]["returncode"], 0)
         self.assertIn("batch", result["result"]["stdout"])
 
+    def test_permission_scope_request_enforced(self) -> None:
+        registry = ToolRegistry()
+        registry.load_builtin_tools()
+        executor = ToolExecutor(
+            registry,
+            approval_enforcement_mode="strict",
+        )
+
+        with self.assertRaises(PermissionRequiredError) as ctx:
+            executor.execute("python_exec", {"code": "print('scoped')"}, request_id="req-1")
+        prompt_id = ctx.exception.prompt_id
+        executor.approve_permission_prompt(prompt_id)
+
+        with self.assertRaises(PermissionRequiredError):
+            executor.execute(
+                "python_exec",
+                {"code": "print('scoped')"},
+                request_id="req-2",
+                permission_id=prompt_id,
+            )
+
+        ok = executor.execute(
+            "python_exec",
+            {"code": "print('scoped')"},
+            request_id="req-1",
+            permission_id=prompt_id,
+        )
+        self.assertEqual(ok["tool"], "python_exec")
+        self.assertEqual(ok["result"]["returncode"], 0)
+        self.assertIn("scoped", ok["result"]["stdout"])
+
+    def test_mcp_endpoint_quarantine_after_failures(self) -> None:
+        registry = ToolRegistry()
+        mcp = MCPClientRegistry(
+            ["http://mcp.local"],
+            failure_threshold=1,
+            quarantine_sec=120.0,
+        )
+
+        with patch("tools.mcp_client_registry.httpx.get") as mock_get:
+            mock_get.side_effect = RuntimeError("boom")
+            discovered_first = mcp.register_remote_tools(registry)
+            discovered_second = mcp.register_remote_tools(registry)
+
+        self.assertEqual(discovered_first, 0)
+        self.assertEqual(discovered_second, 0)
+        self.assertEqual(mock_get.call_count, 1)
+
+        health = mcp.debug_health()
+        self.assertEqual(health["count"], 1)
+        first = health["items"][0]
+        self.assertTrue(first["is_quarantined"])
+        self.assertGreaterEqual(int(first["consecutive_failures"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

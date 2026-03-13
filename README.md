@@ -626,15 +626,16 @@ Run status values:
 ## Tools + MCP Layer Foundation (Current)
 
 Implemented now:
-- tool isolation policy (blocked tools + risk/approval metadata)
+- tool isolation policy with explicit risk tiers and sandbox presets
 - tool budget guardrails (window, per-tool, total, high-risk caps with session/user/request scoping)
-- permission prompts for risky tools (`pending -> approved/denied -> consumed`)
+- scoped + expiring permission prompts for risky tools (`pending -> approved/denied -> consumed|expired`)
 - batch permission handoff in chat API via `permission_ids`
 - MCP server endpoints:
   - `GET /mcp/tools`
   - `POST /mcp/tools/{tool_name}/invoke`
 - MCP client aggregation from remote MCP endpoints into local tool registry
-- signed plugin manifest verification (HMAC-SHA256 when signing key is configured)
+- signed plugin manifest verification modes (`off|warn|strict`) with discovery report
+- MCP endpoint health scoring with automatic temporary quarantine on repeated failures
 - structured tool execution trace (`status`, `duration_ms`, `permission_prompt_id`) in chat responses
 - telemetry events for tool controls:
   - `tool_budget_recorded`
@@ -767,6 +768,12 @@ Debug tool guardrails snapshot:
 curl "http://localhost:8000/debug/tools/guardrails?session_id=session-001&scopes_limit=20&top_tools_limit=5"
 ```
 
+Debug MCP endpoint health and quarantine state:
+
+```bash
+curl "http://localhost:8000/debug/tools/mcp-health"
+```
+
 ## Memory Debug API
 
 Desktop app now includes a structured Memory Debug inspector in `Settings`:
@@ -871,8 +878,11 @@ Run unit tests (memory + work mode + tools/MCP + automation):
   - `AMARYLLIS_TOOL_APPROVAL_ENFORCEMENT=prompt_and_allow|strict`
   - `AMARYLLIS_BLOCKED_TOOLS=python_exec,filesystem`
   - `AMARYLLIS_PLUGIN_SIGNING_KEY=<hmac_secret>`
+  - `AMARYLLIS_PLUGIN_SIGNING_MODE=off|warn|strict`
   - `AMARYLLIS_MCP_ENDPOINTS=http://localhost:9001,http://localhost:9002`
   - `AMARYLLIS_MCP_TIMEOUT_SEC=10`
+  - `AMARYLLIS_MCP_FAILURE_THRESHOLD=2`
+  - `AMARYLLIS_MCP_QUARANTINE_SEC=60`
 
 ## Example Environment Variables
 
@@ -905,8 +915,11 @@ export AMARYLLIS_MEMORY_PROFILE_DECAY_MIN_DELTA=0.05
 export AMARYLLIS_TOOL_APPROVAL_ENFORCEMENT=prompt_and_allow
 export AMARYLLIS_BLOCKED_TOOLS=
 export AMARYLLIS_PLUGIN_SIGNING_KEY=
+export AMARYLLIS_PLUGIN_SIGNING_MODE=warn
 export AMARYLLIS_MCP_ENDPOINTS=
 export AMARYLLIS_MCP_TIMEOUT_SEC=10
+export AMARYLLIS_MCP_FAILURE_THRESHOLD=2
+export AMARYLLIS_MCP_QUARANTINE_SEC=60
 ```
 
 ## License

@@ -11,6 +11,8 @@ class ToolDecision:
     allow: bool
     requires_approval: bool
     reason: str | None = None
+    approval_scope: str | None = None
+    approval_ttl_sec: int | None = None
 
 
 class ToolIsolationPolicy:
@@ -45,7 +47,21 @@ class ToolIsolationPolicy:
                 reason="Tool is blocked by policy.",
             )
 
-        if self.profile == "strict" and tool.risk_level == "high" and tool.name not in self.allowed_high_risk_tools:
+        normalized_risk = str(tool.risk_level or "low").strip().lower()
+        if normalized_risk not in {"low", "medium", "high", "critical"}:
+            normalized_risk = "medium"
+
+        if self.profile == "balanced" and normalized_risk == "critical" and tool.name not in self.allowed_high_risk_tools:
+            return ToolDecision(
+                allow=False,
+                requires_approval=False,
+                reason=(
+                    f"Tool '{tool.name}' is critical-risk and blocked in balanced isolation profile. "
+                    "Allow explicitly via policy config."
+                ),
+            )
+
+        if self.profile == "strict" and normalized_risk in {"high", "critical"} and tool.name not in self.allowed_high_risk_tools:
             return ToolDecision(
                 allow=False,
                 requires_approval=False,
@@ -99,15 +115,55 @@ class ToolIsolationPolicy:
             except Exception:
                 requires_approval = True
 
-        if self.profile == "strict" and tool.risk_level in {"high", "critical"}:
+        if normalized_risk in {"high", "critical"}:
+            requires_approval = True
+        if self.profile == "strict" and normalized_risk in {"medium", "high", "critical"}:
             requires_approval = True
         if self.profile == "strict" and tool_name == "filesystem":
             action = str(arguments.get("action", "")).strip().lower()
             if action == "write":
                 requires_approval = True
 
+        approval_scope: str | None = None
+        approval_ttl_sec: int | None = None
+        if requires_approval:
+            approval_scope = "request"
+            approval_ttl_sec = 300
+            if normalized_risk in {"high", "critical"}:
+                approval_scope = "session"
+                approval_ttl_sec = 600
+            if tool_name == "filesystem":
+                action = str(arguments.get("action", "")).strip().lower()
+                if action == "write":
+                    approval_scope = "session"
+                    approval_ttl_sec = 300
+            if tool_name == "python_exec":
+                approval_scope = "request"
+                approval_ttl_sec = 180
+
         return ToolDecision(
             allow=True,
             requires_approval=requires_approval,
             reason=None,
+            approval_scope=approval_scope,
+            approval_ttl_sec=approval_ttl_sec,
         )
+
+    def describe(self) -> dict[str, Any]:
+        tier_rules: dict[str, dict[str, str]] = {
+            "low": {"balanced": "allow", "strict": "allow"},
+            "medium": {"balanced": "allow", "strict": "allow_with_approval"},
+            "high": {"balanced": "allow_with_approval", "strict": "blocked_unless_allowlist"},
+            "critical": {"balanced": "blocked_unless_allowlist", "strict": "blocked_unless_allowlist"},
+        }
+        return {
+            "profile": self.profile,
+            "tier_rules": tier_rules,
+            "blocked_tools": sorted(self.blocked_tools),
+            "allowed_high_risk_tools": sorted(self.allowed_high_risk_tools),
+            "python_exec_limits": {
+                "max_timeout_sec": self.python_exec_max_timeout_sec,
+                "max_code_chars": self.python_exec_max_code_chars,
+            },
+            "filesystem_allow_write": self.filesystem_allow_write,
+        }

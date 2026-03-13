@@ -54,6 +54,7 @@ class ToolGuardrailsDebugResponse(BaseModel):
     approval_enforcement_mode: str
     isolation_policy: dict[str, Any]
     budget: dict[str, Any]
+    plugin_signing: dict[str, Any] = Field(default_factory=dict)
 
 
 @router.get("/tools")
@@ -228,7 +229,25 @@ def debug_tool_guardrails(
         approval_enforcement_mode=str(snapshot.get("approval_enforcement_mode", "prompt_and_allow")),
         isolation_policy=dict(snapshot.get("isolation_policy", {})),
         budget=dict(snapshot.get("budget", {})),
+        plugin_signing=dict(snapshot.get("plugin_signing", {})),
     )
+
+
+@router.get("/debug/tools/mcp-health")
+def debug_mcp_health(request: Request) -> dict[str, Any]:
+    services = request.app.state.services
+    registry = getattr(services, "mcp_registry", None)
+    if registry is None:
+        return {
+            "enabled": False,
+            "health": {"items": [], "count": 0},
+            "request_id": _request_id(request),
+        }
+    return {
+        "enabled": True,
+        "health": registry.debug_health(),
+        "request_id": _request_id(request),
+    }
 
 
 @router.post("/mcp/tools/{tool_name}/invoke")

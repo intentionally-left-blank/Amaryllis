@@ -61,6 +61,7 @@ class ServiceContainer:
     agent_manager: AgentManager
     automation_scheduler: AutomationScheduler
     memory_consolidation_worker: MemoryConsolidationWorker | None
+    mcp_registry: MCPClientRegistry | None
     telemetry: LocalTelemetry
     identity_manager: LocalIdentityManager
     security_manager: SecurityManager
@@ -103,13 +104,19 @@ def create_services() -> ServiceContainer:
         profile_decay_min_delta=config.memory_profile_decay_min_delta,
     )
 
-    tool_registry = ToolRegistry(plugin_signing_key=config.plugin_signing_key)
+    tool_registry = ToolRegistry(
+        plugin_signing_key=config.plugin_signing_key,
+        plugin_signing_mode=config.plugin_signing_mode,
+    )
     tool_registry.load_builtin_tools()
     tool_registry.discover_plugins(config.plugins_dir)
+    mcp_registry: MCPClientRegistry | None = None
     if config.mcp_endpoints:
         mcp_registry = MCPClientRegistry(
             endpoints=list(config.mcp_endpoints),
             timeout_sec=config.mcp_timeout_sec,
+            failure_threshold=config.mcp_failure_threshold,
+            quarantine_sec=config.mcp_quarantine_sec,
         )
         discovered = mcp_registry.register_remote_tools(tool_registry)
         logger.info("mcp_tools_discovered count=%s", discovered)
@@ -218,6 +225,7 @@ def create_services() -> ServiceContainer:
         agent_manager=agent_manager,
         automation_scheduler=automation_scheduler,
         memory_consolidation_worker=memory_consolidation_worker,
+        mcp_registry=mcp_registry,
         telemetry=telemetry,
         identity_manager=identity_manager,
         security_manager=security_manager,
