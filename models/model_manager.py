@@ -73,6 +73,7 @@ class ModelManager:
         self._suggested_cache_ttl_seconds = 6 * 60 * 60
         self._provider_failure_counts: dict[str, int] = {}
         self._provider_circuit_until: dict[str, float] = {}
+        self._provider_state_lock = Lock()
         self._cloud_rate_records: dict[str, deque[float]] = {}
         self._cloud_budget_records: dict[str, deque[tuple[float, int]]] = {}
         self._guardrail_lock = Lock()
@@ -93,7 +94,7 @@ class ModelManager:
                             f"cooldown_remaining_sec={self._provider_cooldown_remaining(name):.2f}"
                         ),
                         "items": [],
-                        "failure_count": self._provider_failure_counts.get(name, 0),
+                        "failure_count": self._provider_failure_count(name),
                         "circuit_open": True,
                     }
                     continue
@@ -105,7 +106,7 @@ class ModelManager:
                         operation="list_models",
                         call=provider.list_models,
                     ),
-                    "failure_count": self._provider_failure_counts.get(name, 0),
+                    "failure_count": self._provider_failure_count(name),
                     "circuit_open": False,
                     "guardrails": self._provider_guardrail_status(name),
                 }
@@ -114,7 +115,7 @@ class ModelManager:
                     "available": False,
                     "error": str(exc),
                     "items": [],
-                    "failure_count": self._provider_failure_counts.get(name, 0),
+                    "failure_count": self._provider_failure_count(name),
                     "circuit_open": self._is_provider_circuit_open(name),
                     "guardrails": self._provider_guardrail_status(name),
                 }
@@ -174,7 +175,7 @@ class ModelManager:
                         "detail": (
                             f"cooldown_remaining_sec={self._provider_cooldown_remaining(name):.2f}"
                         ),
-                        "failure_count": self._provider_failure_counts.get(name, 0),
+                        "failure_count": self._provider_failure_count(name),
                         "circuit_open": True,
                         "guardrails": self._provider_guardrail_status(name),
                     }
@@ -201,7 +202,7 @@ class ModelManager:
                     "latency_ms": latency_ms,
                     "active": name == self.active_provider,
                     "detail": payload.get("detail"),
-                    "failure_count": self._provider_failure_counts.get(name, 0),
+                    "failure_count": self._provider_failure_count(name),
                     "circuit_open": self._is_provider_circuit_open(name),
                     "guardrails": self._provider_guardrail_status(name),
                 }
@@ -212,7 +213,7 @@ class ModelManager:
                     "latency_ms": latency_ms,
                     "active": name == self.active_provider,
                     "detail": str(exc),
-                    "failure_count": self._provider_failure_counts.get(name, 0),
+                    "failure_count": self._provider_failure_count(name),
                     "circuit_open": self._is_provider_circuit_open(name),
                     "guardrails": self._provider_guardrail_status(name),
                 }
@@ -1304,16 +1305,21 @@ class ModelManager:
         raise ProviderOperationError(last_info)
 
     def _record_provider_success(self, provider_name: str) -> None:
-        self._provider_failure_counts[provider_name] = 0
-        self._provider_circuit_until.pop(provider_name, None)
+        with self._provider_state_lock:
+            self._provider_failure_counts[provider_name] = 0
+            self._provider_circuit_until.pop(provider_name, None)
 
     def _record_provider_failure(self, provider_name: str) -> None:
-        failures = self._provider_failure_counts.get(provider_name, 0) + 1
-        self._provider_failure_counts[provider_name] = failures
         threshold = max(1, int(self.config.provider_circuit_failure_threshold))
-        if failures >= threshold:
-            cooldown = max(1.0, float(self.config.provider_circuit_cooldown_sec))
-            self._provider_circuit_until[provider_name] = time.monotonic() + cooldown
+        cooldown = max(1.0, float(self.config.provider_circuit_cooldown_sec))
+        opened = False
+        with self._provider_state_lock:
+            failures = self._provider_failure_counts.get(provider_name, 0) + 1
+            self._provider_failure_counts[provider_name] = failures
+            if failures >= threshold:
+                self._provider_circuit_until[provider_name] = time.monotonic() + cooldown
+                opened = True
+        if opened:
             self.logger.warning(
                 "provider_circuit_open provider=%s failures=%s cooldown_sec=%.2f",
                 provider_name,
@@ -1322,20 +1328,31 @@ class ModelManager:
             )
 
     def _is_provider_circuit_open(self, provider_name: str) -> bool:
-        until = self._provider_circuit_until.get(provider_name)
-        if until is None:
-            return False
-        if time.monotonic() >= until:
-            self._provider_circuit_until.pop(provider_name, None)
-            self._provider_failure_counts[provider_name] = 0
-            return False
-        return True
+        with self._provider_state_lock:
+            until = self._provider_circuit_until.get(provider_name)
+            if until is None:
+                return False
+            if time.monotonic() >= until:
+                self._provider_circuit_until.pop(provider_name, None)
+                self._provider_failure_counts[provider_name] = 0
+                return False
+            return True
 
     def _provider_cooldown_remaining(self, provider_name: str) -> float:
-        until = self._provider_circuit_until.get(provider_name)
-        if until is None:
-            return 0.0
-        return max(0.0, until - time.monotonic())
+        with self._provider_state_lock:
+            until = self._provider_circuit_until.get(provider_name)
+            if until is None:
+                return 0.0
+            remaining = max(0.0, until - time.monotonic())
+            if remaining <= 0.0:
+                self._provider_circuit_until.pop(provider_name, None)
+                self._provider_failure_counts[provider_name] = 0
+                return 0.0
+            return remaining
+
+    def _provider_failure_count(self, provider_name: str) -> int:
+        with self._provider_state_lock:
+            return int(self._provider_failure_counts.get(provider_name, 0))
 
     def _provider_retry_delay(self, *, attempt: int) -> float:
         base = max(0.0, float(self.config.provider_retry_backoff_sec))

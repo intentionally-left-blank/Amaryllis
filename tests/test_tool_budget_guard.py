@@ -78,10 +78,38 @@ class ToolBudgetGuardTests(unittest.TestCase):
             max_high_risk_calls=1,
         )
         executor = ToolExecutor(registry=self.registry, budget_guard=guard)
-        executor.execute("high_a", {})
+        first_prompt = executor.permission_manager.request(
+            tool_name="high_a",
+            arguments={},
+            reason="test",
+            scope="request",
+            request_id="req-1",
+        )
+        executor.permission_manager.approve(str(first_prompt["id"]))
+        executor.execute(
+            "high_a",
+            {},
+            request_id="req-1",
+            user_id="user-1",
+            permission_id=str(first_prompt["id"]),
+        )
 
         with self.assertRaises(ToolBudgetLimitError) as ctx:
-            executor.execute("high_a", {})
+            second_prompt = executor.permission_manager.request(
+                tool_name="high_a",
+                arguments={},
+                reason="test",
+                scope="request",
+                request_id="req-2",
+            )
+            executor.permission_manager.approve(str(second_prompt["id"]))
+            executor.execute(
+                "high_a",
+                {},
+                request_id="req-2",
+                user_id="user-1",
+                permission_id=str(second_prompt["id"]),
+            )
 
         self.assertIn("high-risk", str(ctx.exception).lower())
 

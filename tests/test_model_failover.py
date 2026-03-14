@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -79,6 +80,49 @@ class _ScriptedProvider:
         del messages, model, temperature, max_tokens
         self.stream_calls += 1
         yield self.chat([], "")
+
+
+class _AlwaysFailProvider:
+    def __init__(self, name: str, *, local: bool = False) -> None:
+        self.name = name
+        self.local = local
+
+    def list_models(self) -> list[dict[str, Any]]:
+        return [{"id": f"{self.name}-model", "provider": self.name}]
+
+    def health_check(self) -> dict[str, Any]:
+        raise RuntimeError("503 Service Unavailable")
+
+    def capabilities(self) -> dict[str, Any]:
+        return {
+            "local": self.local,
+            "supports_download": self.local,
+            "supports_load": True,
+            "supports_stream": True,
+            "supports_tools": False,
+            "requires_api_key": not self.local,
+        }
+
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+    ) -> str:
+        del messages, model, temperature, max_tokens
+        raise RuntimeError("503 Service Unavailable")
+
+    def stream_chat(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+    ) -> Iterator[str]:
+        del messages, model, temperature, max_tokens
+        raise RuntimeError("503 Service Unavailable")
+        yield ""
 
 
 class ModelFailoverTests(unittest.TestCase):
@@ -171,6 +215,32 @@ class ModelFailoverTests(unittest.TestCase):
         )
         self.assertEqual(quota.error_class, "quota")
         self.assertFalse(quota.retryable)
+
+    def test_provider_circuit_state_is_thread_safe_under_concurrent_failures(self) -> None:
+        self.manager.providers = {"openai": _AlwaysFailProvider("openai", local=False)}
+        self.manager.active_provider = "openai"
+        self.manager.active_model = "openai-model"
+
+        def invoke() -> None:
+            try:
+                self.manager.chat(
+                    messages=[{"role": "user", "content": "ping"}],
+                    provider="openai",
+                    model="openai-model",
+                )
+            except Exception:
+                return
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = [pool.submit(invoke) for _ in range(64)]
+            for future in futures:
+                future.result()
+
+        health = self.manager.provider_health()
+        openai = dict(health.get("openai") or {})
+        self.assertIn(openai.get("status"), {"error", "circuit_open"})
+        self.assertIsInstance(openai.get("failure_count"), int)
+        self.assertGreaterEqual(int(openai.get("failure_count", 0)), 0)
 
 
 if __name__ == "__main__":

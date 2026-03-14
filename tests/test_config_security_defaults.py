@@ -45,6 +45,46 @@ class ConfigSecurityDefaultsTests(unittest.TestCase):
         self.assertEqual(config.tool_approval_enforcement, "strict")
         self.assertEqual(config.plugin_signing_mode, "strict")
 
+    def test_production_profile_forces_strict_even_when_env_requests_unsafe_modes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="amaryllis-config-tests-") as tmp:
+            support_dir = Path(tmp) / "support"
+            with patch.dict(
+                os.environ,
+                {
+                    "AMARYLLIS_SUPPORT_DIR": str(support_dir),
+                    "AMARYLLIS_AUTH_TOKENS": "token-1:user-1:user",
+                    "AMARYLLIS_SECURITY_PROFILE": "production",
+                    "AMARYLLIS_TOOL_APPROVAL_ENFORCEMENT": "prompt_and_allow",
+                    "AMARYLLIS_PLUGIN_SIGNING_MODE": "warn",
+                },
+                clear=True,
+            ):
+                config = AppConfig.from_env()
+
+        self.assertEqual(config.security_profile, "production")
+        self.assertEqual(config.tool_approval_enforcement, "strict")
+        self.assertEqual(config.plugin_signing_mode, "strict")
+
+    def test_development_profile_can_keep_non_strict_modes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="amaryllis-config-tests-") as tmp:
+            support_dir = Path(tmp) / "support"
+            with patch.dict(
+                os.environ,
+                {
+                    "AMARYLLIS_SUPPORT_DIR": str(support_dir),
+                    "AMARYLLIS_AUTH_TOKENS": "token-1:user-1:user",
+                    "AMARYLLIS_SECURITY_PROFILE": "development",
+                    "AMARYLLIS_TOOL_APPROVAL_ENFORCEMENT": "prompt_and_allow",
+                    "AMARYLLIS_PLUGIN_SIGNING_MODE": "warn",
+                },
+                clear=True,
+            ):
+                config = AppConfig.from_env()
+
+        self.assertEqual(config.security_profile, "development")
+        self.assertEqual(config.tool_approval_enforcement, "prompt_and_allow")
+        self.assertEqual(config.plugin_signing_mode, "warn")
+
     def test_parse_auth_tokens_from_csv(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-config-tests-") as tmp:
             support_dir = Path(tmp) / "support"

@@ -83,6 +83,8 @@ class AppConfig:
     cloud_rate_max_requests: int
     cloud_budget_window_sec: float
     cloud_budget_max_units: int
+    security_profile: str
+    security_allow_insecure_modes: bool
     auth_enabled: bool
     auth_tokens: tuple[AuthTokenConfig, ...]
     chat_max_messages: int
@@ -178,6 +180,15 @@ class AppConfig:
         ).strip().lower()
         if tool_approval_enforcement not in {"strict", "prompt_and_allow"}:
             tool_approval_enforcement = "strict"
+        security_profile = os.getenv(
+            "AMARYLLIS_SECURITY_PROFILE",
+            "production",
+        ).strip().lower()
+        if security_profile not in {"production", "development"}:
+            security_profile = "production"
+        security_allow_insecure_modes = _parse_bool(
+            os.getenv("AMARYLLIS_ALLOW_INSECURE_SECURITY_MODES", "false")
+        )
         tool_isolation_profile = os.getenv(
             "AMARYLLIS_TOOL_ISOLATION_PROFILE",
             "balanced",
@@ -189,6 +200,9 @@ class AppConfig:
             "strict",
         ).strip().lower()
         if plugin_signing_mode not in {"off", "warn", "strict"}:
+            plugin_signing_mode = "strict"
+        if security_profile == "production" and not security_allow_insecure_modes:
+            tool_approval_enforcement = "strict"
             plugin_signing_mode = "strict"
         auth_enabled = _parse_bool(os.getenv("AMARYLLIS_AUTH_ENABLED", "true"))
         auth_tokens = tuple(
@@ -322,6 +336,8 @@ class AppConfig:
             cloud_budget_max_units=max(
                 100, int(os.getenv("AMARYLLIS_CLOUD_BUDGET_MAX_UNITS", "400000"))
             ),
+            security_profile=security_profile,
+            security_allow_insecure_modes=security_allow_insecure_modes,
             auth_enabled=auth_enabled,
             auth_tokens=auth_tokens,
             chat_max_messages=max(1, int(os.getenv("AMARYLLIS_CHAT_MAX_MESSAGES", "80"))),

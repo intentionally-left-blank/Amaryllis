@@ -111,7 +111,7 @@ class ToolExecutor:
                     user_id=user_id,
                     session_id=session_id,
                 )
-                if self.approval_enforcement_mode == "strict":
+                if self._must_block_without_approval(tool=tool):
                     prompt_id = str(permission_prompt.get("id"))
                     self._emit_telemetry(
                         "tool_permission_required",
@@ -122,6 +122,8 @@ class ToolExecutor:
                             "session_id": session_id,
                             "prompt_id": prompt_id,
                             "approval_mode": self.approval_enforcement_mode,
+                            "risk_level": tool.risk_level,
+                            "approval_mode_tool": tool.approval_mode,
                         },
                     )
                     raise PermissionRequiredError(
@@ -193,6 +195,19 @@ class ToolExecutor:
             payload["permission_prompt"] = permission_prompt
             payload["approval_mode"] = self.approval_enforcement_mode
         return payload
+
+    def _must_block_without_approval(self, *, tool: Any) -> bool:
+        if self.approval_enforcement_mode == "strict":
+            return True
+
+        risk = str(getattr(tool, "risk_level", "low") or "low").strip().lower()
+        if risk in {"high", "critical"}:
+            return True
+
+        approval_mode = str(getattr(tool, "approval_mode", "none") or "none").strip().lower()
+        if approval_mode == "required":
+            return True
+        return False
 
     def list_permission_prompts(self, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
         return self.permission_manager.list(status=status, limit=limit)
