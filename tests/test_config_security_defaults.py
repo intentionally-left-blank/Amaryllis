@@ -32,6 +32,9 @@ class ConfigSecurityDefaultsTests(unittest.TestCase):
         self.assertEqual(config.api_version, "v1")
         self.assertEqual(config.api_release_channel, "stable")
         self.assertTrue(config.observability_otel_enabled)
+        self.assertTrue(config.backup_enabled)
+        self.assertTrue(config.backup_verify_on_create)
+        self.assertTrue(config.backup_restore_drill_enabled)
 
     def test_invalid_modes_fallback_to_strict(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-config-tests-") as tmp:

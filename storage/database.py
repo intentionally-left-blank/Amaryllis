@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import json
 import logging
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -72,6 +73,22 @@ class Database:
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+
+    def backup_to(self, destination_path: Path) -> None:
+        target = Path(destination_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp_target = target.with_suffix(f"{target.suffix}.tmp")
+        if tmp_target.exists():
+            tmp_target.unlink(missing_ok=True)
+        with self._lock:
+            self._conn.execute("PRAGMA wal_checkpoint(FULL)")
+            backup_conn = sqlite3.connect(str(tmp_target))
+            try:
+                self._conn.backup(backup_conn)
+                backup_conn.commit()
+            finally:
+                backup_conn.close()
+        os.replace(tmp_target, target)
 
     def set_setting(self, key: str, value: str) -> None:
         with self._lock:

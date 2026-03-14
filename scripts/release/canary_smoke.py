@@ -50,6 +50,7 @@ def main() -> int:
                 ("GET", "/models", 200),
                 ("GET", "/service/observability/slo", 200),
                 ("GET", "/service/api/lifecycle", 200),
+                ("GET", "/service/backup/status", 200),
                 ("POST", "/v1/models/route", 200),
             ]
             failed: list[str] = []

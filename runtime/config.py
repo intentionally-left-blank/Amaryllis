@@ -26,6 +26,7 @@ class AppConfig:
     support_dir: Path
     models_dir: Path
     data_dir: Path
+    backup_dir: Path
     plugins_dir: Path
     database_path: Path
     vector_index_path: Path
@@ -39,6 +40,13 @@ class AppConfig:
     observability_min_request_samples: int
     observability_min_run_samples: int
     observability_incident_cooldown_sec: float
+    backup_enabled: bool
+    backup_interval_sec: float
+    backup_retention_count: int
+    backup_retention_days: int
+    backup_verify_on_create: bool
+    backup_restore_drill_enabled: bool
+    backup_restore_drill_interval_sec: float
     api_version: str
     api_release_channel: str
     api_deprecation_sunset_days: int
@@ -167,6 +175,12 @@ class AppConfig:
                 str(Path.cwd() / "plugins"),
             )
         ).expanduser()
+        backup_dir = Path(
+            os.getenv(
+                "AMARYLLIS_BACKUP_DIR",
+                str(support_dir / "backups"),
+            )
+        ).expanduser()
 
         database_path = Path(
             os.getenv(
@@ -275,6 +289,7 @@ class AppConfig:
             support_dir=support_dir,
             models_dir=models_dir,
             data_dir=data_dir,
+            backup_dir=backup_dir,
             plugins_dir=plugins_dir,
             database_path=database_path,
             vector_index_path=vector_index_path,
@@ -305,6 +320,31 @@ class AppConfig:
             ),
             observability_incident_cooldown_sec=max(
                 5.0, float(os.getenv("AMARYLLIS_SLO_INCIDENT_COOLDOWN_SEC", "300"))
+            ),
+            backup_enabled=_parse_bool(os.getenv("AMARYLLIS_BACKUP_ENABLED", "true")),
+            backup_interval_sec=max(
+                30.0, float(os.getenv("AMARYLLIS_BACKUP_INTERVAL_SEC", "3600"))
+            ),
+            backup_retention_count=max(
+                1, int(os.getenv("AMARYLLIS_BACKUP_RETENTION_COUNT", "120"))
+            ),
+            backup_retention_days=max(
+                1, int(os.getenv("AMARYLLIS_BACKUP_RETENTION_DAYS", "30"))
+            ),
+            backup_verify_on_create=_parse_bool(
+                os.getenv("AMARYLLIS_BACKUP_VERIFY_ON_CREATE", "true")
+            ),
+            backup_restore_drill_enabled=_parse_bool(
+                os.getenv("AMARYLLIS_BACKUP_RESTORE_DRILL_ENABLED", "true")
+            ),
+            backup_restore_drill_interval_sec=max(
+                300.0,
+                float(
+                    os.getenv(
+                        "AMARYLLIS_BACKUP_RESTORE_DRILL_INTERVAL_SEC",
+                        "86400",
+                    )
+                ),
             ),
             api_version=os.getenv("AMARYLLIS_API_VERSION", "v1").strip() or "v1",
             api_release_channel=api_release_channel,
@@ -501,6 +541,7 @@ class AppConfig:
         self.support_dir.mkdir(parents=True, exist_ok=True)
         self.models_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.backup_dir.mkdir(parents=True, exist_ok=True)
         self.plugins_dir.mkdir(parents=True, exist_ok=True)
         self.identity_path.parent.mkdir(parents=True, exist_ok=True)
 

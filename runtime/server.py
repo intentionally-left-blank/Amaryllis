@@ -15,6 +15,7 @@ from agents.agent_manager import AgentManager
 from agents.agent_run_manager import AgentRunManager
 from api.agent_api import router as agent_router
 from api.automation_api import router as automation_router
+from api.backup_api import router as backup_router
 from api.chat_api import router as chat_router
 from api.inbox_api import router as inbox_router
 from api.memory_api import router as memory_router
@@ -31,6 +32,7 @@ from memory.user_memory import UserMemory
 from memory.working_memory import WorkingMemory
 from models.model_manager import ModelManager
 from planner.planner import Planner
+from runtime.backup import BackupManager, BackupScheduler
 from runtime.api_lifecycle import APILifecyclePolicy, canonical_api_path
 from runtime.auth import AuthContext, AuthManager, auth_context_from_request
 from runtime.config import AppConfig
@@ -66,6 +68,8 @@ class ServiceContainer:
     agent_manager: AgentManager
     automation_scheduler: AutomationScheduler
     memory_consolidation_worker: MemoryConsolidationWorker | None
+    backup_manager: BackupManager
+    backup_scheduler: BackupScheduler | None
     mcp_registry: MCPClientRegistry | None
     telemetry: Any
     local_telemetry: LocalTelemetry
@@ -275,6 +279,30 @@ def create_services() -> ServiceContainer:
         )
         memory_consolidation_worker.start()
 
+    backup_manager = BackupManager(
+        database=database,
+        vector_store=vector_store,
+        data_dir=config.data_dir,
+        backup_dir=config.backup_dir,
+        database_path=config.database_path,
+        identity_path=config.identity_path,
+        app_version=config.app_version,
+        retention_count=config.backup_retention_count,
+        retention_days=config.backup_retention_days,
+        verify_on_create=config.backup_verify_on_create,
+        telemetry=telemetry,
+    )
+    backup_scheduler: BackupScheduler | None = None
+    if config.backup_enabled:
+        backup_scheduler = BackupScheduler(
+            manager=backup_manager,
+            interval_sec=config.backup_interval_sec,
+            restore_drill_enabled=config.backup_restore_drill_enabled,
+            restore_drill_interval_sec=config.backup_restore_drill_interval_sec,
+            telemetry=telemetry,
+        )
+        backup_scheduler.start()
+
     return ServiceContainer(
         config=config,
         database=database,
@@ -290,6 +318,8 @@ def create_services() -> ServiceContainer:
         agent_manager=agent_manager,
         automation_scheduler=automation_scheduler,
         memory_consolidation_worker=memory_consolidation_worker,
+        backup_manager=backup_manager,
+        backup_scheduler=backup_scheduler,
         mcp_registry=mcp_registry,
         telemetry=telemetry,
         local_telemetry=local_telemetry,
@@ -553,6 +583,7 @@ def create_app() -> FastAPI:
     app.include_router(inbox_router)
     app.include_router(memory_router)
     app.include_router(tool_router)
+    app.include_router(backup_router)
     # Versioned API aliases for lifecycle-managed stable contract.
     app.include_router(model_router, prefix="/v1")
     app.include_router(agent_router, prefix="/v1")
@@ -655,6 +686,8 @@ def create_app() -> FastAPI:
         services.automation_scheduler.stop()
         if services.memory_consolidation_worker is not None:
             services.memory_consolidation_worker.stop()
+        if services.backup_scheduler is not None:
+            services.backup_scheduler.stop()
         services.agent_run_manager.stop()
         services.database.close()
         services.vector_store.persist()

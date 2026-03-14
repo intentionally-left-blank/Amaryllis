@@ -49,9 +49,10 @@ Implemented in this version:
 - automatic incident detection from SLO breaches (availability, latency p95, run success)
 - API lifecycle policy with version headers and legacy deprecation headers (`Deprecation`, `Sunset`)
 - versioned API aliases for core routes under `/v1/*` with compatibility contract gate
-- release gate assets: compatibility script, canary smoke script, rollback playbook
+- release gate assets: compatibility script, canary smoke script, disaster-recovery gate, rollback playbook
 - lease/CAS ownership for agent runs (single-owner execution under concurrent workers)
 - typed planner step execution with step contracts (pre/post conditions), verifier, retry and replan
+- production-grade backup and DR foundation (scheduled backups, retention, verification, restore drills)
 
 Out of scope for MVP:
 - distributed execution
@@ -73,6 +74,9 @@ Data storage location:
 Local telemetry log:
 - `~/Library/Application Support/amaryllis/data/telemetry.jsonl`
 
+Backup storage location:
+- `~/Library/Application Support/amaryllis/backups/`
+
 Service observability endpoints:
 - `GET /service/observability/slo`
 - `GET /service/observability/incidents`
@@ -80,6 +84,13 @@ Service observability endpoints:
 
 Service API lifecycle endpoint:
 - `GET /service/api/lifecycle`
+
+Service backup/DR endpoints:
+- `GET /service/backup/status`
+- `GET /service/backup/backups`
+- `POST /service/backup/run`
+- `POST /service/backup/verify`
+- `POST /service/backup/restore-drill`
 
 ## Project Structure
 
@@ -95,6 +106,7 @@ Service API lifecycle endpoint:
 ├── api
 │   ├── agent_api.py
 │   ├── automation_api.py
+│   ├── backup_api.py
 │   ├── chat_api.py
 │   ├── inbox_api.py
 │   ├── memory_api.py
@@ -137,9 +149,20 @@ Service API lifecycle endpoint:
 │   └── .gitkeep
 ├── runtime
 │   ├── auth.py
+│   ├── backup.py
 │   ├── config.py
 │   ├── security.py
 │   └── server.py
+├── scripts
+│   ├── disaster_recovery
+│   │   ├── backup_now.py
+│   │   ├── restore_drill.py
+│   │   └── restore_from_archive.py
+│   └── release
+│       ├── api_compat_gate.py
+│       ├── canary_smoke.py
+│       ├── disaster_recovery_gate.py
+│       └── rollback_local.sh
 ├── storage
 │   ├── database.py
 │   ├── migrations.py
@@ -1080,6 +1103,14 @@ Release/pull-request gate is blocking and includes:
   - `AMARYLLIS_SLO_MIN_REQUEST_SAMPLES=50`
   - `AMARYLLIS_SLO_MIN_RUN_SAMPLES=20`
   - `AMARYLLIS_SLO_INCIDENT_COOLDOWN_SEC=300`
+  - `AMARYLLIS_BACKUP_ENABLED=true|false`
+  - `AMARYLLIS_BACKUP_DIR=~/Library/Application Support/amaryllis/backups`
+  - `AMARYLLIS_BACKUP_INTERVAL_SEC=3600`
+  - `AMARYLLIS_BACKUP_RETENTION_COUNT=120`
+  - `AMARYLLIS_BACKUP_RETENTION_DAYS=30`
+  - `AMARYLLIS_BACKUP_VERIFY_ON_CREATE=true|false`
+  - `AMARYLLIS_BACKUP_RESTORE_DRILL_ENABLED=true|false`
+  - `AMARYLLIS_BACKUP_RESTORE_DRILL_INTERVAL_SEC=86400`
   - `AMARYLLIS_API_VERSION=v1`
   - `AMARYLLIS_RELEASE_CHANNEL=alpha|beta|stable`
   - `AMARYLLIS_API_DEPRECATION_SUNSET_DAYS=180`
@@ -1140,6 +1171,14 @@ export AMARYLLIS_SLO_WINDOW_SEC=3600
 export AMARYLLIS_SLO_REQUEST_AVAILABILITY_TARGET=0.995
 export AMARYLLIS_SLO_REQUEST_LATENCY_P95_MS_TARGET=1200
 export AMARYLLIS_SLO_RUN_SUCCESS_TARGET=0.98
+export AMARYLLIS_BACKUP_ENABLED=true
+export AMARYLLIS_BACKUP_DIR=~/Library/Application\ Support/amaryllis/backups
+export AMARYLLIS_BACKUP_INTERVAL_SEC=3600
+export AMARYLLIS_BACKUP_RETENTION_COUNT=120
+export AMARYLLIS_BACKUP_RETENTION_DAYS=30
+export AMARYLLIS_BACKUP_VERIFY_ON_CREATE=true
+export AMARYLLIS_BACKUP_RESTORE_DRILL_ENABLED=true
+export AMARYLLIS_BACKUP_RESTORE_DRILL_INTERVAL_SEC=86400
 export AMARYLLIS_API_VERSION=v1
 export AMARYLLIS_RELEASE_CHANNEL=stable
 export AMARYLLIS_API_DEPRECATION_SUNSET_DAYS=180
@@ -1156,6 +1195,23 @@ export AMARYLLIS_API_COMPAT_CONTRACT_PATH=contracts/api_compat_v1.json
   - `GET /service/observability/metrics`
 - Docs: `docs/observability-sre.md`
 
+## Backup and Disaster Recovery
+
+- Backup/DR docs: `docs/disaster-recovery.md`
+- Service endpoints:
+  - `GET /service/backup/status`
+  - `GET /service/backup/backups`
+  - `POST /service/backup/run`
+  - `POST /service/backup/verify`
+  - `POST /service/backup/restore-drill`
+- CLI:
+
+```bash
+python scripts/disaster_recovery/backup_now.py --trigger manual-cli --verify true
+python scripts/disaster_recovery/restore_drill.py
+python scripts/disaster_recovery/restore_from_archive.py --archive /path/to/backup.tar.gz
+```
+
 ## API Lifecycle and Release Process
 
 - Lifecycle policy docs: `docs/api-lifecycle.md`
@@ -1170,6 +1226,12 @@ python scripts/release/api_compat_gate.py
 
 ```bash
 python scripts/release/canary_smoke.py
+```
+
+- Disaster recovery gate:
+
+```bash
+python scripts/release/disaster_recovery_gate.py
 ```
 
 - Rollback playbook: `docs/release-playbook.md`

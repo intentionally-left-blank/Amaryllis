@@ -87,6 +87,8 @@ def _shutdown_app(app: object) -> None:
         services.automation_scheduler.stop()
         if services.memory_consolidation_worker is not None:
             services.memory_consolidation_worker.stop()
+        if services.backup_scheduler is not None:
+            services.backup_scheduler.stop()
         services.agent_run_manager.stop()
         services.database.close()
         services.vector_store.persist()
