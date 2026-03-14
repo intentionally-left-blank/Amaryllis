@@ -4,7 +4,7 @@ import logging
 import random
 from queue import Empty, Queue
 from threading import Event, Thread
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import time
 from typing import Any, Protocol
 from uuid import uuid4
@@ -62,6 +62,7 @@ class AgentRunManager:
         run_budget_max_duration_sec: float = 300.0,
         run_budget_max_tool_calls: int = 8,
         run_budget_max_tool_errors: int = 3,
+        run_lease_ttl_sec: float | None = None,
         telemetry: TelemetrySink | None = None,
     ) -> None:
         self.logger = logging.getLogger("amaryllis.agents.runs")
@@ -73,6 +74,11 @@ class AgentRunManager:
         self.retry_backoff_sec = max(0.0, float(retry_backoff_sec))
         self.retry_max_backoff_sec = max(0.0, float(retry_max_backoff_sec))
         self.retry_jitter_sec = max(0.0, float(retry_jitter_sec))
+        lease_floor = max(10.0, self.attempt_timeout_sec + 5.0)
+        if run_lease_ttl_sec is None:
+            self.run_lease_ttl_sec = max(lease_floor, self.attempt_timeout_sec * 2.0 + 5.0)
+        else:
+            self.run_lease_ttl_sec = max(lease_floor, float(run_lease_ttl_sec))
         self.default_run_budget = {
             "max_tokens": max(256, int(run_budget_max_tokens)),
             "max_duration_sec": max(10.0, float(run_budget_max_duration_sec)),
@@ -85,6 +91,7 @@ class AgentRunManager:
         self._workers: list[Thread] = []
         self._stop = Event()
         self._started = False
+        self._lease_owner = f"run-manager-{uuid4()}"
 
     def start(self) -> None:
         if self._started:
@@ -131,6 +138,9 @@ class AgentRunManager:
                 stop_reason=None,
                 failure_class=None,
                 finished_at=None,
+                lease_owner=None,
+                lease_token=None,
+                lease_expires_at=None,
             )
             self.database.append_agent_run_checkpoint(
                 run_id=run_id,
@@ -149,6 +159,12 @@ class AgentRunManager:
             run_id = str(item.get("id") or "").strip()
             if not run_id or run_id in requeued_ids:
                 continue
+            self.database.update_agent_run_fields(
+                run_id,
+                lease_owner=None,
+                lease_token=None,
+                lease_expires_at=None,
+            )
             self._queue.put(run_id)
             requeued_ids.add(run_id)
 
@@ -647,17 +663,36 @@ class AgentRunManager:
                 self._queue.task_done()
                 break
 
+            lease_token: str | None = None
             try:
-                self._process_run(item)
+                lease_token = self._process_run(item)
             except Exception as exc:
                 self.logger.exception("run_worker_unhandled run_id=%s error=%s", item, exc)
             finally:
+                self._release_run_lease(run_id=str(item), lease_token=lease_token)
                 self._queue.task_done()
 
-    def _process_run(self, run_id: str) -> None:
+    def _process_run(self, run_id: str) -> str | None:
         run = self.database.get_agent_run(run_id)
         if run is None:
-            return
+            return None
+        lease_token = str(uuid4())
+        claimed = self.database.claim_agent_run_lease(
+            run_id=run_id,
+            lease_owner=self._lease_owner,
+            lease_token=lease_token,
+            lease_expires_at=self._run_lease_expiry_iso(),
+            allowed_statuses=("queued", "running"),
+        )
+        if claimed is None:
+            self._emit(
+                "agent_run_claim_skipped",
+                {
+                    "run_id": run_id,
+                },
+            )
+            return None
+        run = claimed
 
         budget = self._normalize_run_budget(run.get("budget"))
         metrics_base = self._normalize_run_metrics(run.get("metrics"))
@@ -681,11 +716,11 @@ class AgentRunManager:
                         "failure_class": "canceled",
                     },
                 )
-            return
+            return lease_token
 
         status = str(run.get("status", ""))
         if status not in {"queued", "running"}:
-            return
+            return lease_token
 
         agent_record = self.database.get_agent(str(run["agent_id"]))
         if agent_record is None:
@@ -715,7 +750,7 @@ class AgentRunManager:
                     attempt=max(1, int(run.get("attempts", 0)) + 1),
                     error_message=error_message,
                 )
-            return
+            return lease_token
 
         agent = Agent.from_record(agent_record)
         attempt = int(run.get("attempts", 0)) + 1
@@ -751,7 +786,7 @@ class AgentRunManager:
                         "failure_class": "budget_exceeded",
                     },
                 )
-            return
+            return lease_token
 
         with self.database.write_transaction():
             self.database.update_agent_run_fields(
@@ -915,7 +950,7 @@ class AgentRunManager:
                 if backoff_sec > 0:
                     time.sleep(backoff_sec)
                 self._queue.put(run_id)
-            return
+            return lease_token
 
         latest = self.database.get_agent_run(run_id)
         metrics_final = self._extract_result_metrics(result=result, fallback=live_usage, attempt=attempt)
@@ -946,7 +981,7 @@ class AgentRunManager:
                     attempt=attempt,
                     message="Run canceled after task execution.",
                 )
-            return
+            return lease_token
 
         with self.database.write_transaction():
             self._finalize_open_issues(
@@ -985,6 +1020,7 @@ class AgentRunManager:
                 "budget": budget,
             },
         )
+        return lease_token
 
     def _ensure_core_issue_records(self, *, run_id: str) -> None:
         with self.database.write_transaction():
@@ -1372,6 +1408,23 @@ class AgentRunManager:
             self.telemetry.emit(event_type, payload)
         except Exception:
             self.logger.debug("run_telemetry_emit_failed event=%s", event_type)
+
+    def _release_run_lease(self, *, run_id: str, lease_token: str | None = None) -> None:
+        normalized_run_id = str(run_id or "").strip()
+        token = str(lease_token or "").strip()
+        if not normalized_run_id or not token:
+            return
+        try:
+            self.database.release_agent_run_lease(
+                run_id=normalized_run_id,
+                lease_owner=self._lease_owner,
+                lease_token=token,
+            )
+        except Exception as exc:
+            self.logger.debug("run_lease_release_failed run_id=%s error=%s", normalized_run_id, exc)
+
+    def _run_lease_expiry_iso(self) -> str:
+        return (datetime.now(timezone.utc) + timedelta(seconds=self.run_lease_ttl_sec)).isoformat()
 
     def _run_task_executor(
         self,

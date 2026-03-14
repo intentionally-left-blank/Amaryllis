@@ -12,6 +12,7 @@ from controller.meta_controller import MetaController
 from memory.memory_manager import MemoryManager
 from models.model_manager import ModelManager
 from planner.planner import Planner
+from tasks.step_registry import StepExecutionContext, StepExecutionResult, StepExecutorRegistry
 from tools.tool_executor import PermissionRequiredError, ToolExecutionError, ToolExecutor
 from tools.tool_registry import ToolRegistry
 
@@ -61,6 +62,9 @@ class TaskExecutor:
         issue_timeout_sec: float = 15.0,
         artifact_quality_enabled: bool = True,
         artifact_quality_max_repair_attempts: int = 1,
+        step_verifier_enabled: bool = True,
+        step_max_retries_default: int = 1,
+        step_replan_max_attempts: int = 1,
     ) -> None:
         self.model_manager = model_manager
         self.memory_manager = memory_manager
@@ -79,6 +83,11 @@ class TaskExecutor:
         self.issue_timeout_sec = max(0.01, float(issue_timeout_sec))
         self.artifact_quality_enabled = bool(artifact_quality_enabled)
         self.artifact_quality_max_repair_attempts = max(0, int(artifact_quality_max_repair_attempts))
+        self.step_verifier_enabled = bool(step_verifier_enabled)
+        self.step_max_retries_default = max(0, int(step_max_retries_default))
+        self.step_replan_max_attempts = max(0, int(step_replan_max_attempts))
+        self.step_executor_registry = StepExecutorRegistry()
+        self._register_step_executors()
 
     def execute(
         self,
@@ -1844,6 +1853,71 @@ class TaskExecutor:
 
                     if status == ISSUE_BLOCKED:
                         reason = str(result.get("reason") or "Plan issue is blocked.")
+                        current_step_payload = (
+                            dict(step_by_issue.get(issue_id, {}))
+                            if isinstance(step_by_issue.get(issue_id), dict)
+                            else {}
+                        )
+                        replanned = self._replan_step_payload(
+                            step_payload=current_step_payload,
+                            reason=reason,
+                            tools_available=tools_available,
+                        )
+                        if isinstance(replanned, dict):
+                            step_by_issue[issue_id] = replanned
+                            self._set_issue_status(
+                                issue_states=issue_states,
+                                issue_id=issue_id,
+                                status=ISSUE_PLANNED,
+                                checkpoint=checkpoint,
+                                attempt=issue_attempt,
+                                last_error=reason,
+                                payload={
+                                    "message": "Plan issue replanned.",
+                                    "error": reason,
+                                    "replanned": True,
+                                    "plan_step": replanned,
+                                    **payload,
+                                },
+                            )
+                            self._emit_checkpoint(
+                                checkpoint,
+                                stage="plan_step_replanned",
+                                message=f"Plan issue replanned: {issue_id}",
+                                issue_id=issue_id,
+                                reason=reason,
+                                plan_step=replanned,
+                            )
+                            pending.append(issue_id)
+                            continue
+                        max_retries = self._step_max_retries(current_step_payload)
+                        if issue_attempt <= max_retries:
+                            self._set_issue_status(
+                                issue_states=issue_states,
+                                issue_id=issue_id,
+                                status=ISSUE_PLANNED,
+                                checkpoint=checkpoint,
+                                attempt=issue_attempt,
+                                last_error=reason,
+                                payload={
+                                    "message": "Plan issue blocked; retry scheduled.",
+                                    "error": reason,
+                                    "retry_scheduled": True,
+                                    "remaining_retries": max(0, max_retries - issue_attempt),
+                                    **payload,
+                                },
+                            )
+                            self._emit_checkpoint(
+                                checkpoint,
+                                stage="plan_step_retry_scheduled",
+                                message=f"Plan issue retry scheduled: {issue_id}",
+                                issue_id=issue_id,
+                                reason=reason,
+                                attempt=issue_attempt + 1,
+                                max_retries=max_retries,
+                            )
+                            pending.append(issue_id)
+                            continue
                         self._set_issue_status(
                             issue_states=issue_states,
                             issue_id=issue_id,
@@ -1857,6 +1931,71 @@ class TaskExecutor:
 
                     if status == ISSUE_FAILED:
                         reason = str(result.get("reason") or "Plan issue failed.")
+                        current_step_payload = (
+                            dict(step_by_issue.get(issue_id, {}))
+                            if isinstance(step_by_issue.get(issue_id), dict)
+                            else {}
+                        )
+                        max_retries = self._step_max_retries(current_step_payload)
+                        if issue_attempt <= max_retries:
+                            self._set_issue_status(
+                                issue_states=issue_states,
+                                issue_id=issue_id,
+                                status=ISSUE_PLANNED,
+                                checkpoint=checkpoint,
+                                attempt=issue_attempt,
+                                last_error=reason,
+                                payload={
+                                    "message": "Plan issue failed; retry scheduled.",
+                                    "error": reason,
+                                    "retry_scheduled": True,
+                                    "remaining_retries": max(0, max_retries - issue_attempt),
+                                    **payload,
+                                },
+                            )
+                            self._emit_checkpoint(
+                                checkpoint,
+                                stage="plan_step_retry_scheduled",
+                                message=f"Plan issue retry scheduled: {issue_id}",
+                                issue_id=issue_id,
+                                reason=reason,
+                                attempt=issue_attempt + 1,
+                                max_retries=max_retries,
+                            )
+                            pending.append(issue_id)
+                            continue
+                        replanned = self._replan_step_payload(
+                            step_payload=current_step_payload,
+                            reason=reason,
+                            tools_available=tools_available,
+                        )
+                        if isinstance(replanned, dict):
+                            step_by_issue[issue_id] = replanned
+                            self._set_issue_status(
+                                issue_states=issue_states,
+                                issue_id=issue_id,
+                                status=ISSUE_PLANNED,
+                                checkpoint=checkpoint,
+                                attempt=issue_attempt,
+                                last_error=reason,
+                                payload={
+                                    "message": "Plan issue replanned after failure.",
+                                    "error": reason,
+                                    "replanned": True,
+                                    "plan_step": replanned,
+                                    **payload,
+                                },
+                            )
+                            self._emit_checkpoint(
+                                checkpoint,
+                                stage="plan_step_replanned",
+                                message=f"Plan issue replanned: {issue_id}",
+                                issue_id=issue_id,
+                                reason=reason,
+                                plan_step=replanned,
+                            )
+                            pending.append(issue_id)
+                            continue
                         self._set_issue_status(
                             issue_states=issue_states,
                             issue_id=issue_id,
@@ -2641,6 +2780,339 @@ class TaskExecutor:
             )
             raise TaskTimeoutError(error_message)
 
+    def _register_step_executors(self) -> None:
+        self.step_executor_registry.register("analyze_request", self._execute_step_analyze_request)
+        self.step_executor_registry.register(("fetch_source", "tool_query"), self._execute_step_fetch_source)
+        self.step_executor_registry.register("extract_facts", self._execute_step_extract_facts)
+        self.step_executor_registry.register(
+            ("summarize", "synthesize", "merge_results"),
+            self._execute_step_summarize_like,
+        )
+        self.step_executor_registry.register(
+            ("verify", "compare_targets"),
+            self._execute_step_verify_like,
+        )
+        self.step_executor_registry.register(
+            ("decompose_subtasks", "subtask_execution", "answer_direct", "general"),
+            self._execute_step_general,
+        )
+
+    @staticmethod
+    def _base_step_payload(ctx: StepExecutionContext) -> dict[str, Any]:
+        return {
+            "description": ctx.description,
+            "step_kind": ctx.step_kind,
+            "requires_tools": ctx.requires_tools,
+            "objective": ctx.objective,
+            "expected_output": ctx.expected_output,
+            "dependency_artifacts_count": len(ctx.dependency_artifacts),
+        }
+
+    def _execute_step_analyze_request(self, ctx: StepExecutionContext) -> StepExecutionResult:
+        payload = self._base_step_payload(ctx)
+        focus_text = str(ctx.hints.get("task") or ctx.description).strip()
+        lowered = focus_text.lower()
+        constraints = [
+            token
+            for token in (
+                "json",
+                "markdown",
+                "table",
+                "bullet",
+                "concise",
+                "short",
+                "detailed",
+                "security",
+                "anonymous",
+                "strict",
+                "quality",
+                "deadline",
+            )
+            if token in lowered
+        ]
+        deliverables = [
+            token
+            for token in (
+                "summary",
+                "plan",
+                "comparison",
+                "analysis",
+                "code",
+                "report",
+                "checklist",
+            )
+            if token in lowered
+        ]
+        payload.update(
+            {
+                "task_brief": focus_text[:500],
+                "constraints": constraints[:8],
+                "deliverables": deliverables[:6] or ["answer"],
+            }
+        )
+        return StepExecutionResult.done(payload)
+
+    def _execute_step_fetch_source(self, ctx: StepExecutionContext) -> StepExecutionResult:
+        payload = self._base_step_payload(ctx)
+        source_urls = [item for item in self._extract_urls_from_text(ctx.description) if item]
+        hint_urls = ctx.hints.get("urls")
+        if isinstance(hint_urls, list):
+            for item in hint_urls:
+                value = str(item).strip()
+                if value and value not in source_urls:
+                    source_urls.append(value)
+        query_text = str(ctx.hints.get("query") or ctx.hints.get("task") or ctx.description).strip()
+        payload.update(
+            {
+                "source_urls": source_urls[:8],
+                "tool_blueprint": {
+                    "intent": "fetch_content" if ctx.step_kind == "fetch_source" else "tool_query",
+                    "suggested_tools": ["web_search", "filesystem", "python_exec"],
+                    "query": query_text[:300],
+                    "targets": source_urls[:8],
+                },
+            }
+        )
+        return StepExecutionResult.done(payload)
+
+    def _execute_step_extract_facts(self, ctx: StepExecutionContext) -> StepExecutionResult:
+        payload = self._base_step_payload(ctx)
+        extracted = ctx.dependency_points[:12]
+        payload.update(
+            {
+                "source_issue_ids": sorted(ctx.dependency_artifacts.keys()),
+                "extracted_points": extracted,
+                "fact_count": len(extracted),
+            }
+        )
+        return StepExecutionResult.done(payload)
+
+    def _execute_step_summarize_like(self, ctx: StepExecutionContext) -> StepExecutionResult:
+        payload = self._base_step_payload(ctx)
+        summary_outline = ctx.dependency_points[:8]
+        payload.update(
+            {
+                "source_issue_ids": sorted(ctx.dependency_artifacts.keys()),
+                "summary_outline": summary_outline,
+                "dependency_insights_count": len(ctx.dependency_points),
+            }
+        )
+        return StepExecutionResult.done(payload)
+
+    def _execute_step_verify_like(self, ctx: StepExecutionContext) -> StepExecutionResult:
+        payload = self._base_step_payload(ctx)
+        checklist = [
+            "Check coverage against task goals.",
+            "Check internal consistency and contradictions.",
+            "Check whether output format matches expected constraints.",
+        ]
+        if ctx.dependency_points:
+            checklist.append("Validate claims against dependency artifacts.")
+        payload.update(
+            {
+                "verification_checklist": checklist,
+                "source_issue_ids": sorted(ctx.dependency_artifacts.keys()),
+            }
+        )
+        return StepExecutionResult.done(payload)
+
+    def _execute_step_general(self, ctx: StepExecutionContext) -> StepExecutionResult:
+        payload = self._base_step_payload(ctx)
+        if ctx.dependency_points:
+            payload["context_points"] = ctx.dependency_points[:8]
+        return StepExecutionResult.done(payload)
+
+    @staticmethod
+    def _default_step_contract_tokens(
+        *,
+        step_kind: str,
+        requires_tools: bool,
+        has_dependencies: bool,
+    ) -> tuple[list[str], list[str]]:
+        normalized_kind = str(step_kind or "").strip().lower()
+        preconditions: list[str] = []
+        postconditions = [
+            "artifact_has_description",
+            "artifact_has_step_kind",
+        ]
+        dependency_sensitive_kinds = {
+            "extract_facts",
+            "summarize",
+            "synthesize",
+            "merge_results",
+            "verify",
+            "compare_targets",
+        }
+        if has_dependencies or normalized_kind in dependency_sensitive_kinds:
+            preconditions.append("dependency_context_available")
+        if requires_tools or normalized_kind in {"fetch_source", "tool_query"}:
+            preconditions.append("tools_available_if_required")
+            postconditions.append("artifact_has_tool_blueprint")
+        if normalized_kind == "extract_facts":
+            postconditions.append("artifact_has_extracted_points")
+        if normalized_kind in {"summarize", "synthesize", "merge_results"}:
+            postconditions.append("artifact_has_summary_outline")
+        if normalized_kind in {"verify", "compare_targets"}:
+            postconditions.append("artifact_has_verification_checklist")
+        return preconditions, postconditions
+
+    def _normalize_step_contract_tokens(self, raw: Any, *, fallback: list[str]) -> list[str]:
+        if isinstance(raw, list):
+            values = [str(item).strip().lower() for item in raw]
+            result = [item for item in values if item]
+            if result:
+                return result
+        return [str(item).strip().lower() for item in fallback if str(item).strip()]
+
+    def _check_step_preconditions(
+        self,
+        *,
+        preconditions: list[str],
+        requires_tools: bool,
+        tools_available: bool,
+        dependency_artifacts: dict[str, dict[str, Any]],
+        dependency_points: list[str],
+    ) -> tuple[bool, str]:
+        for condition in preconditions:
+            token = str(condition or "").strip().lower()
+            if not token:
+                continue
+            if token == "tools_available_if_required":
+                if requires_tools and not tools_available:
+                    return False, "Plan step requires tools but agent has no tools configured."
+                continue
+            if token == "dependency_context_available":
+                if not dependency_artifacts and not dependency_points:
+                    return False, "Plan step requires dependency artifacts from previous steps."
+                continue
+        return True, ""
+
+    @staticmethod
+    def _check_step_postcondition(
+        *,
+        condition: str,
+        step_kind: str,
+        payload: dict[str, Any],
+    ) -> tuple[bool, str]:
+        token = str(condition or "").strip().lower()
+        if not token:
+            return True, ""
+        if token == "artifact_has_description":
+            value = str(payload.get("description") or "").strip()
+            return (bool(value), "description is empty" if not value else "")
+        if token == "artifact_has_step_kind":
+            value = str(payload.get("step_kind") or "").strip().lower()
+            return (value == step_kind, f"step_kind mismatch: expected={step_kind} actual={value}")
+        if token == "artifact_has_tool_blueprint":
+            value = payload.get("tool_blueprint")
+            return (isinstance(value, dict), "tool_blueprint is missing")
+        if token == "artifact_has_extracted_points":
+            value = payload.get("extracted_points")
+            return (isinstance(value, list) and bool(value), "extracted_points are missing")
+        if token == "artifact_has_summary_outline":
+            value = payload.get("summary_outline")
+            return (isinstance(value, list) and bool(value), "summary_outline is missing")
+        if token == "artifact_has_verification_checklist":
+            value = payload.get("verification_checklist")
+            return (isinstance(value, list) and bool(value), "verification_checklist is missing")
+        return True, ""
+
+    def _verify_step_payload(
+        self,
+        *,
+        step_kind: str,
+        payload: dict[str, Any],
+        postconditions: list[str],
+    ) -> dict[str, Any]:
+        checks: list[dict[str, Any]] = []
+        for condition in postconditions:
+            passed, reason = self._check_step_postcondition(
+                condition=condition,
+                step_kind=step_kind,
+                payload=payload,
+            )
+            checks.append(
+                {
+                    "condition": condition,
+                    "passed": bool(passed),
+                    "reason": str(reason or ""),
+                }
+            )
+        total = len(checks)
+        passed_total = sum(1 for item in checks if bool(item.get("passed")))
+        score = float(passed_total) / float(total) if total else 1.0
+        failed = [item for item in checks if not bool(item.get("passed"))]
+        return {
+            "enabled": self.step_verifier_enabled,
+            "checks": checks,
+            "passed": not failed,
+            "score": round(score, 6),
+            "failed_conditions": failed,
+        }
+
+    def _step_max_retries(self, step_payload: dict[str, Any]) -> int:
+        raw = step_payload.get("max_retries")
+        if raw is None:
+            return self.step_max_retries_default
+        try:
+            return max(0, int(raw))
+        except Exception:
+            return self.step_max_retries_default
+
+    @staticmethod
+    def _step_replan_attempts(step_payload: dict[str, Any]) -> int:
+        try:
+            return max(0, int(step_payload.get("_replan_attempts", 0)))
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _step_replan_allowed(step_payload: dict[str, Any]) -> bool:
+        value = step_payload.get("replan_allowed")
+        if isinstance(value, bool):
+            return value
+        return True
+
+    def _replan_step_payload(
+        self,
+        *,
+        step_payload: dict[str, Any],
+        reason: str,
+        tools_available: bool,
+    ) -> dict[str, Any] | None:
+        if not self._step_replan_allowed(step_payload):
+            return None
+        attempts = self._step_replan_attempts(step_payload)
+        if attempts >= self.step_replan_max_attempts:
+            return None
+        updated = dict(step_payload)
+        updated["_replan_attempts"] = attempts + 1
+        hints = updated.get("hints")
+        normalized_hints = dict(hints) if isinstance(hints, dict) else {}
+        normalized_hints["replan_reason"] = str(reason or "").strip()
+        updated["hints"] = normalized_hints
+        if bool(updated.get("requires_tools")) and not tools_available:
+            updated["kind"] = "analyze_request"
+            updated["requires_tools"] = False
+            updated["preconditions"] = [
+                item
+                for item in self._normalize_step_contract_tokens(updated.get("preconditions"), fallback=[])
+                if item != "tools_available_if_required"
+            ]
+            return updated
+        if "dependency artifacts" in str(reason or "").lower() or "dependency context" in str(reason or "").lower():
+            updated["kind"] = "analyze_request"
+            updated["preconditions"] = [
+                item
+                for item in self._normalize_step_contract_tokens(updated.get("preconditions"), fallback=[])
+                if item != "dependency_context_available"
+            ]
+            return updated
+        if "postconditions" in str(reason or "").lower() or "verifier" in str(reason or "").lower():
+            updated["max_retries"] = max(self._step_max_retries(updated), 1)
+            return updated
+        return None
+
     def _evaluate_plan_issue(
         self,
         *,
@@ -2669,34 +3141,36 @@ class TaskExecutor:
             step_payload=payload_input,
             step_kind=step_kind,
         )
-        if requires_tools and not tools_available:
+        fallback_preconditions, fallback_postconditions = self._default_step_contract_tokens(
+            step_kind=step_kind,
+            requires_tools=requires_tools,
+            has_dependencies=bool(dependency_artifacts) or bool(payload_input.get("depends_on")),
+        )
+        preconditions = self._normalize_step_contract_tokens(
+            payload_input.get("preconditions"),
+            fallback=fallback_preconditions,
+        )
+        postconditions = self._normalize_step_contract_tokens(
+            payload_input.get("postconditions"),
+            fallback=fallback_postconditions,
+        )
+        preconditions_ok, precondition_reason = self._check_step_preconditions(
+            preconditions=preconditions,
+            requires_tools=requires_tools,
+            tools_available=tools_available,
+            dependency_artifacts=dependency_artifacts,
+            dependency_points=dependency_points,
+        )
+        if not preconditions_ok:
             return {
                 "status": ISSUE_BLOCKED,
-                "reason": "Plan step requires tools but agent has no tools configured.",
+                "reason": precondition_reason,
                 "payload": {
                     "step_kind": step_kind,
-                    "requires_tools": True,
-                    "description": description,
-                },
-            }
-
-        requires_dependency_context = step_kind in {
-            "extract_facts",
-            "summarize",
-            "synthesize",
-            "merge_results",
-            "verify",
-            "compare_targets",
-        }
-        if requires_dependency_context and not dependency_artifacts and not dependency_points:
-            return {
-                "status": ISSUE_BLOCKED,
-                "reason": "Plan step requires dependency artifacts from previous steps.",
-                "payload": {
-                    "step_kind": step_kind,
-                    "description": description,
                     "requires_tools": requires_tools,
-                    "dependency_artifacts_count": 0,
+                    "description": description,
+                    "dependency_artifacts_count": len(dependency_artifacts),
+                    "preconditions": preconditions,
                 },
             }
 
@@ -2709,116 +3183,58 @@ class TaskExecutor:
                 },
             }
 
-        payload: dict[str, Any] = {
-            "description": description,
-            "step_kind": step_kind,
-            "requires_tools": requires_tools,
-            "objective": str(payload_input.get("objective") or "").strip(),
-            "expected_output": str(payload_input.get("expected_output") or "").strip(),
-            "dependency_artifacts_count": len(dependency_artifacts),
-        }
+        context = StepExecutionContext(
+            issue_id=issue_id,
+            step_kind=step_kind,
+            description=description,
+            requires_tools=requires_tools,
+            objective=str(payload_input.get("objective") or "").strip(),
+            expected_output=str(payload_input.get("expected_output") or "").strip(),
+            hints=normalized_hints,
+            dependency_artifacts=dependency_artifacts,
+            dependency_points=dependency_points,
+            issue_deadline_monotonic=issue_deadline_monotonic,
+        )
+        executor = self.step_executor_registry.resolve(step_kind) or self._execute_step_general
+        try:
+            step_result = executor(context)
+        except Exception as exc:
+            return {
+                "status": ISSUE_FAILED,
+                "reason": f"Step executor crashed: {exc}",
+                "payload": {
+                    "description": description,
+                    "step_kind": step_kind,
+                    "requires_tools": requires_tools,
+                },
+            }
+        if not isinstance(step_result, StepExecutionResult):
+            return {
+                "status": ISSUE_FAILED,
+                "reason": "Step executor returned invalid result type.",
+                "payload": {
+                    "description": description,
+                    "step_kind": step_kind,
+                    "requires_tools": requires_tools,
+                },
+            }
+        status = str(step_result.status or ISSUE_DONE).strip().lower() or ISSUE_DONE
+        if status not in ISSUE_STATUSES:
+            status = ISSUE_DONE
+        payload = dict(step_result.payload or {})
+        payload.setdefault("description", description)
+        payload.setdefault("step_kind", step_kind)
+        payload.setdefault("requires_tools", requires_tools)
+        payload.setdefault("objective", context.objective)
+        payload.setdefault("expected_output", context.expected_output)
+        payload.setdefault("dependency_artifacts_count", len(dependency_artifacts))
 
-        task_hint = str(normalized_hints.get("task") or "").strip()
-        if step_kind == "analyze_request":
-            focus_text = task_hint or description
-            lowered = focus_text.lower()
-            constraints = [
-                token
-                for token in (
-                    "json",
-                    "markdown",
-                    "table",
-                    "bullet",
-                    "concise",
-                    "short",
-                    "detailed",
-                    "security",
-                    "anonymous",
-                    "strict",
-                    "quality",
-                    "deadline",
-                )
-                if token in lowered
-            ]
-            deliverables = [
-                token
-                for token in (
-                    "summary",
-                    "plan",
-                    "comparison",
-                    "analysis",
-                    "code",
-                    "report",
-                    "checklist",
-                )
-                if token in lowered
-            ]
-            payload.update(
-                {
-                    "task_brief": focus_text[:500],
-                    "constraints": constraints[:8],
-                    "deliverables": deliverables[:6] or ["answer"],
-                }
-            )
-        elif step_kind in {"fetch_source", "tool_query"}:
-            source_urls = [
-                item
-                for item in self._extract_urls_from_text(description)
-                if item
-            ]
-            hint_urls = normalized_hints.get("urls")
-            if isinstance(hint_urls, list):
-                for item in hint_urls:
-                    value = str(item).strip()
-                    if value and value not in source_urls:
-                        source_urls.append(value)
-            query_text = str(normalized_hints.get("query") or task_hint or description).strip()
-            payload.update(
-                {
-                    "source_urls": source_urls[:8],
-                    "tool_blueprint": {
-                        "intent": "fetch_content" if step_kind == "fetch_source" else "tool_query",
-                        "suggested_tools": ["web_search", "filesystem", "python_exec"],
-                        "query": query_text[:300],
-                        "targets": source_urls[:8],
-                    },
-                }
-            )
-        elif step_kind == "extract_facts":
-            extracted = dependency_points[:12]
-            payload.update(
-                {
-                    "source_issue_ids": sorted(dependency_artifacts.keys()),
-                    "extracted_points": extracted,
-                    "fact_count": len(extracted),
-                }
-            )
-        elif step_kind in {"summarize", "synthesize", "merge_results"}:
-            summary_outline = dependency_points[:8]
-            payload.update(
-                {
-                    "source_issue_ids": sorted(dependency_artifacts.keys()),
-                    "summary_outline": summary_outline,
-                    "dependency_insights_count": len(dependency_points),
-                }
-            )
-        elif step_kind in {"verify", "compare_targets"}:
-            checklist = [
-                "Check coverage against task goals.",
-                "Check internal consistency and contradictions.",
-                "Check whether output format matches expected constraints.",
-            ]
-            if dependency_points:
-                checklist.append("Validate claims against dependency artifacts.")
-            payload.update(
-                {
-                    "verification_checklist": checklist,
-                    "source_issue_ids": sorted(dependency_artifacts.keys()),
-                }
-            )
-        else:
-            if dependency_points:
-                payload["context_points"] = dependency_points[:8]
+        if status != ISSUE_DONE:
+            return {
+                "status": status,
+                "reason": str(step_result.reason or "Step execution returned non-terminal success."),
+                "payload": payload,
+            }
 
         if time.monotonic() > issue_deadline_monotonic:
             return {
@@ -2828,11 +3244,32 @@ class TaskExecutor:
                     "description": description,
                     "step_kind": step_kind,
                 },
+            }
+        verifier = self._verify_step_payload(
+            step_kind=step_kind,
+            payload=payload,
+            postconditions=postconditions,
+        )
+        payload["verifier"] = verifier
+        if self.step_verifier_enabled and not bool(verifier.get("passed")):
+            failed_tokens = [
+                str(item.get("condition"))
+                for item in verifier.get("failed_conditions", [])
+                if isinstance(item, dict)
+            ]
+            reason = (
+                "Step verifier failed postconditions: "
+                + (", ".join(failed_tokens) if failed_tokens else "unspecified")
+            )
+            return {
+                "status": ISSUE_FAILED,
+                "reason": reason,
+                "payload": payload,
             }
         payload["duration_ms"] = round((time.monotonic() - started) * 1000.0, 3)
         return {
             "status": ISSUE_DONE,
-            "artifact_key": "result",
+            "artifact_key": str(step_result.artifact_key or "result").strip() or "result",
             "payload": payload,
         }
 

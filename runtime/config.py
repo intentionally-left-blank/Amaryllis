@@ -38,6 +38,7 @@ class AppConfig:
     run_workers: int
     run_max_attempts: int
     run_attempt_timeout_sec: float
+    run_lease_ttl_sec: float
     run_retry_backoff_sec: float
     run_retry_max_backoff_sec: float
     run_retry_jitter_sec: float
@@ -66,6 +67,9 @@ class AppConfig:
     task_verifier_min_response_chars: int
     task_artifact_quality_enabled: bool
     task_artifact_quality_max_repair_attempts: int
+    task_step_verifier_enabled: bool
+    task_step_max_retries_default: int
+    task_step_replan_max_attempts: int
     memory_consolidation_enabled: bool
     memory_consolidation_interval_sec: float
     memory_consolidation_semantic_limit: int
@@ -241,6 +245,15 @@ class AppConfig:
             run_workers=max(1, int(os.getenv("AMARYLLIS_RUN_WORKERS", "2"))),
             run_max_attempts=max(1, int(os.getenv("AMARYLLIS_RUN_MAX_ATTEMPTS", "2"))),
             run_attempt_timeout_sec=max(5.0, float(os.getenv("AMARYLLIS_RUN_ATTEMPT_TIMEOUT_SEC", "180"))),
+            run_lease_ttl_sec=max(
+                10.0,
+                float(
+                    os.getenv(
+                        "AMARYLLIS_RUN_LEASE_TTL_SEC",
+                        str(max(10.0, float(os.getenv("AMARYLLIS_RUN_ATTEMPT_TIMEOUT_SEC", "180")) * 2.0 + 5.0)),
+                    )
+                ),
+            ),
             run_retry_backoff_sec=max(0.0, float(os.getenv("AMARYLLIS_RUN_RETRY_BACKOFF_SEC", "0.3"))),
             run_retry_max_backoff_sec=max(0.0, float(os.getenv("AMARYLLIS_RUN_RETRY_MAX_BACKOFF_SEC", "2.0"))),
             run_retry_jitter_sec=max(0.0, float(os.getenv("AMARYLLIS_RUN_RETRY_JITTER_SEC", "0.15"))),
@@ -292,6 +305,15 @@ class AppConfig:
             ),
             task_artifact_quality_max_repair_attempts=max(
                 0, int(os.getenv("AMARYLLIS_TASK_ARTIFACT_QUALITY_MAX_REPAIR_ATTEMPTS", "1"))
+            ),
+            task_step_verifier_enabled=_parse_bool(
+                os.getenv("AMARYLLIS_TASK_STEP_VERIFIER_ENABLED", "true")
+            ),
+            task_step_max_retries_default=max(
+                0, int(os.getenv("AMARYLLIS_TASK_STEP_MAX_RETRIES_DEFAULT", "1"))
+            ),
+            task_step_replan_max_attempts=max(
+                0, int(os.getenv("AMARYLLIS_TASK_STEP_REPLAN_MAX_ATTEMPTS", "1"))
             ),
             memory_consolidation_enabled=memory_consolidation_enabled,
             memory_consolidation_interval_sec=max(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from storage.database import Database
@@ -141,6 +142,98 @@ class DatabasePersistenceHardeningTests(unittest.TestCase):
         self.assertEqual(self.database.list_automation_events(automation_id=automation_id, limit=10), [])
         assert dispatch_rows is not None
         self.assertEqual(int(dispatch_rows[0]), 0)
+
+    def test_agent_run_lease_claim_is_cas_and_release_requires_token(self) -> None:
+        run_id = "run-lease-1"
+        self.database.create_agent_run(
+            run_id=run_id,
+            agent_id="agent-1",
+            user_id="user-1",
+            session_id="session-1",
+            input_message="hello",
+            status="queued",
+            max_attempts=2,
+            budget={"max_attempts": 2},
+        )
+        now = datetime.now(timezone.utc)
+        lease_1 = self.database.claim_agent_run_lease(
+            run_id=run_id,
+            lease_owner="worker-a",
+            lease_token="token-a",
+            lease_expires_at=(now + timedelta(seconds=60)).isoformat(),
+            now_iso=now.isoformat(),
+        )
+        self.assertIsNotNone(lease_1)
+        assert lease_1 is not None
+        self.assertEqual(str(lease_1.get("lease_owner")), "worker-a")
+        self.assertEqual(str(lease_1.get("lease_token")), "token-a")
+
+        lease_2 = self.database.claim_agent_run_lease(
+            run_id=run_id,
+            lease_owner="worker-b",
+            lease_token="token-b",
+            lease_expires_at=(now + timedelta(seconds=60)).isoformat(),
+            now_iso=now.isoformat(),
+        )
+        self.assertIsNone(lease_2)
+
+        released_wrong = self.database.release_agent_run_lease(
+            run_id=run_id,
+            lease_owner="worker-a",
+            lease_token="token-wrong",
+        )
+        self.assertFalse(released_wrong)
+
+        released_ok = self.database.release_agent_run_lease(
+            run_id=run_id,
+            lease_owner="worker-a",
+            lease_token="token-a",
+        )
+        self.assertTrue(released_ok)
+
+        lease_3 = self.database.claim_agent_run_lease(
+            run_id=run_id,
+            lease_owner="worker-b",
+            lease_token="token-b",
+            lease_expires_at=(now + timedelta(seconds=120)).isoformat(),
+            now_iso=now.isoformat(),
+        )
+        self.assertIsNotNone(lease_3)
+        assert lease_3 is not None
+        self.assertEqual(str(lease_3.get("lease_owner")), "worker-b")
+
+    def test_agent_run_lease_can_be_reclaimed_after_expiry(self) -> None:
+        run_id = "run-lease-2"
+        self.database.create_agent_run(
+            run_id=run_id,
+            agent_id="agent-1",
+            user_id="user-1",
+            session_id="session-1",
+            input_message="hello",
+            status="queued",
+            max_attempts=2,
+            budget={"max_attempts": 2},
+        )
+        now = datetime.now(timezone.utc)
+        lease_1 = self.database.claim_agent_run_lease(
+            run_id=run_id,
+            lease_owner="worker-a",
+            lease_token="token-a",
+            lease_expires_at=(now + timedelta(seconds=2)).isoformat(),
+            now_iso=now.isoformat(),
+        )
+        self.assertIsNotNone(lease_1)
+
+        lease_2 = self.database.claim_agent_run_lease(
+            run_id=run_id,
+            lease_owner="worker-b",
+            lease_token="token-b",
+            lease_expires_at=(now + timedelta(seconds=30)).isoformat(),
+            now_iso=(now + timedelta(seconds=3)).isoformat(),
+        )
+        self.assertIsNotNone(lease_2)
+        assert lease_2 is not None
+        self.assertEqual(str(lease_2.get("lease_owner")), "worker-b")
 
 
 if __name__ == "__main__":

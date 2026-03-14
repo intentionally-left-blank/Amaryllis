@@ -610,6 +610,20 @@ MIGRATIONS: list[Migration] = [
         PRAGMA foreign_keys=ON;
         """,
     ),
+    Migration(
+        version=14,
+        name="agent_run_leases_v1",
+        sql="""
+        ALTER TABLE agent_runs ADD COLUMN lease_owner TEXT;
+        ALTER TABLE agent_runs ADD COLUMN lease_token TEXT;
+        ALTER TABLE agent_runs ADD COLUMN lease_expires_at TEXT;
+
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_lease_expiry
+            ON agent_runs(lease_expires_at, status, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_lease_owner
+            ON agent_runs(lease_owner, status, updated_at);
+        """,
+    ),
 ]
 
 

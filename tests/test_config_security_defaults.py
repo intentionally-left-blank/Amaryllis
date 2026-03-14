@@ -26,6 +26,7 @@ class ConfigSecurityDefaultsTests(unittest.TestCase):
         self.assertEqual(config.tool_approval_enforcement, "strict")
         self.assertEqual(config.plugin_signing_mode, "strict")
         self.assertTrue(config.auth_enabled)
+        self.assertGreaterEqual(config.run_lease_ttl_sec, config.run_attempt_timeout_sec + 5.0)
 
     def test_invalid_modes_fallback_to_strict(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-config-tests-") as tmp:

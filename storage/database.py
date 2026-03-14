@@ -830,13 +830,16 @@ class Database:
                     cancel_requested,
                     stop_reason,
                     failure_class,
+                    lease_owner,
+                    lease_token,
+                    lease_expires_at,
                     checkpoints_json,
                     budget_json,
                     metrics_json,
                     created_at,
                     updated_at
                 )
-                VALUES(?, ?, ?, ?, ?, ?, 0, ?, 0, NULL, NULL, '[]', ?, '{}', ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, 0, ?, 0, NULL, NULL, NULL, NULL, NULL, '[]', ?, '{}', ?, ?)
                 """,
                 (
                     run_id,
@@ -864,6 +867,9 @@ class Database:
             "cancel_requested",
             "stop_reason",
             "failure_class",
+            "lease_owner",
+            "lease_token",
+            "lease_expires_at",
             "result_json",
             "error_message",
             "checkpoints_json",
@@ -994,6 +1000,90 @@ class Database:
         with self._lock:
             rows = self._conn.execute(query, tuple(params)).fetchall()
         return [self._decode_agent_run_row(dict(row)) for row in rows]
+
+    def claim_agent_run_lease(
+        self,
+        *,
+        run_id: str,
+        lease_owner: str,
+        lease_token: str,
+        lease_expires_at: str,
+        now_iso: str | None = None,
+        allowed_statuses: tuple[str, ...] = ("queued", "running"),
+    ) -> dict[str, Any] | None:
+        normalized_run_id = str(run_id or "").strip()
+        normalized_owner = str(lease_owner or "").strip()
+        normalized_token = str(lease_token or "").strip()
+        normalized_statuses = tuple(
+            str(item or "").strip().lower()
+            for item in allowed_statuses
+            if str(item or "").strip()
+        )
+        if not normalized_run_id or not normalized_owner or not normalized_token or not normalized_statuses:
+            return None
+        now = str(now_iso or self._utc_now())
+        placeholders = ", ".join(["?"] * len(normalized_statuses))
+        with self._lock:
+            cursor = self._conn.execute(
+                f"""
+                UPDATE agent_runs
+                SET lease_owner = ?, lease_token = ?, lease_expires_at = ?, updated_at = ?
+                WHERE
+                    id = ?
+                    AND status IN ({placeholders})
+                    AND (
+                        lease_expires_at IS NULL
+                        OR lease_expires_at <= ?
+                        OR (lease_owner = ? AND lease_token = ?)
+                    )
+                """,
+                (
+                    normalized_owner,
+                    normalized_token,
+                    lease_expires_at,
+                    self._utc_now(),
+                    normalized_run_id,
+                    *normalized_statuses,
+                    now,
+                    normalized_owner,
+                    normalized_token,
+                ),
+            )
+            if int(cursor.rowcount or 0) <= 0:
+                self._commit_locked()
+                return None
+            row = self._conn.execute(
+                "SELECT * FROM agent_runs WHERE id = ?",
+                (normalized_run_id,),
+            ).fetchone()
+            self._commit_locked()
+        if row is None:
+            return None
+        return self._decode_agent_run_row(dict(row))
+
+    def release_agent_run_lease(
+        self,
+        *,
+        run_id: str,
+        lease_owner: str,
+        lease_token: str,
+    ) -> bool:
+        normalized_run_id = str(run_id or "").strip()
+        normalized_owner = str(lease_owner or "").strip()
+        normalized_token = str(lease_token or "").strip()
+        if not normalized_run_id or not normalized_owner or not normalized_token:
+            return False
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                UPDATE agent_runs
+                SET lease_owner = NULL, lease_token = NULL, lease_expires_at = NULL, updated_at = ?
+                WHERE id = ? AND lease_owner = ? AND lease_token = ?
+                """,
+                (self._utc_now(), normalized_run_id, normalized_owner, normalized_token),
+            )
+            self._commit_locked()
+        return int(cursor.rowcount or 0) > 0
 
     def upsert_agent_run_issue(
         self,
@@ -2020,6 +2110,9 @@ class Database:
             row["metrics"] = metrics if isinstance(metrics, dict) else {}
         except Exception:
             row["metrics"] = {}
+        for key in ("lease_owner", "lease_token", "lease_expires_at"):
+            value = row.get(key)
+            row[key] = str(value) if value not in (None, "") else None
         row.pop("result_json", None)
         row.pop("checkpoints_json", None)
         row.pop("budget_json", None)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import time
+from threading import Lock
 import unittest
 from pathlib import Path
 from typing import Any
@@ -161,6 +162,57 @@ class _FakeTaskExecutor:
                 "attempt_count": 1,
                 "duration_ms": 20.0,
                 "total_attempt_duration_ms": 20.0,
+            },
+        }
+
+
+class _SlowSideEffectTaskExecutor:
+    def __init__(self, sleep_sec: float = 0.12) -> None:
+        self.sleep_sec = max(0.01, float(sleep_sec))
+        self.call_count = 0
+        self.side_effect_count = 0
+        self._lock = Lock()
+
+    def execute(
+        self,
+        agent: Agent,
+        user_id: str,
+        session_id: str | None,
+        user_message: str,
+        checkpoint: Any = None,
+        run_deadline_monotonic: float | None = None,  # noqa: ARG002
+        resume_state: dict[str, Any] | None = None,  # noqa: ARG002
+    ) -> dict[str, Any]:
+        with self._lock:
+            self.call_count += 1
+            self.side_effect_count += 1
+        if callable(checkpoint):
+            checkpoint(
+                {
+                    "stage": "tool_call_recorded",
+                    "tool": "demo_tool",
+                    "idempotency_key": "side-effect:1",
+                    "status": "succeeded",
+                    "arguments": {"message": user_message},
+                    "result": {"ok": True},
+                    "cached": False,
+                    "executed": True,
+                }
+            )
+        time.sleep(self.sleep_sec)
+        return {
+            "agent_id": agent.id,
+            "user_id": user_id,
+            "session_id": session_id,
+            "response": f"ok:{user_message}",
+            "metrics": {
+                "model_calls": 1,
+                "tool_calls": 1,
+                "tool_errors": 0,
+                "estimated_tokens": 64,
+                "attempt_count": 1,
+                "duration_ms": 50.0,
+                "total_attempt_duration_ms": 50.0,
             },
         }
 
@@ -494,6 +546,9 @@ class AgentRunManagerTests(unittest.TestCase):
             status="running",
             attempts=1,
             started_at=self.manager._utc_now(),  # noqa: SLF001
+            lease_owner="crashed-worker",
+            lease_token="crashed-token",
+            lease_expires_at=self.manager._utc_now(),  # noqa: SLF001
         )
         self.database.append_agent_run_checkpoint(
             run_id=run["id"],
@@ -510,6 +565,9 @@ class AgentRunManagerTests(unittest.TestCase):
         assert final is not None
         self.assertEqual(final["status"], "succeeded")
         self.assertGreaterEqual(int(final.get("attempts", 0)), 2)
+        self.assertIsNone(final.get("lease_owner"))
+        self.assertIsNone(final.get("lease_token"))
+        self.assertIsNone(final.get("lease_expires_at"))
         stages = [str(item.get("stage")) for item in final.get("checkpoints", [])]
         self.assertIn("recovered_after_crash", stages)
 
@@ -665,6 +723,69 @@ class AgentRunManagerTests(unittest.TestCase):
         self.assertIn("success_rate", attempt_slo)
         tool_slo = slo.get("tool_call", {})
         self.assertIn("duration_ms", tool_slo)
+
+    def test_duplicate_queue_entries_do_not_duplicate_side_effects(self) -> None:
+        self.executor = _SlowSideEffectTaskExecutor(sleep_sec=0.2)
+        self.manager = AgentRunManager(
+            database=self.database,
+            task_executor=self.executor,  # type: ignore[arg-type]
+            worker_count=3,
+            default_max_attempts=1,
+            retry_backoff_sec=0.0,
+            retry_max_backoff_sec=0.0,
+            retry_jitter_sec=0.0,
+            run_lease_ttl_sec=30.0,
+        )
+        self.manager.start()
+        run = self.manager.create_run(
+            agent=self.agent,
+            user_id="user-1",
+            session_id="session-chaos",
+            user_message="single effect",
+            max_attempts=1,
+        )
+        for _ in range(8):
+            self.manager._queue.put(run["id"])  # noqa: SLF001
+
+        final = self._wait_for_status(run["id"], {"succeeded"})
+        self.assertIsNotNone(final)
+        assert final is not None
+        self.assertEqual(final["status"], "succeeded")
+        self.assertEqual(int(final.get("attempts", 0)), 1)
+        self.assertEqual(self.executor.call_count, 1)
+        self.assertEqual(self.executor.side_effect_count, 1)
+
+        tool_calls = self.manager.list_run_tool_calls(run["id"], limit=20)
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(str(tool_calls[0].get("idempotency_key")), "side-effect:1")
+
+    def test_run_lease_is_released_after_terminal_failure(self) -> None:
+        self.executor.always_fail = True
+        self.manager = AgentRunManager(
+            database=self.database,
+            task_executor=self.executor,  # type: ignore[arg-type]
+            worker_count=1,
+            default_max_attempts=1,
+            retry_backoff_sec=0.0,
+            retry_max_backoff_sec=0.0,
+            retry_jitter_sec=0.0,
+            run_lease_ttl_sec=60.0,
+        )
+        self.manager.start()
+        run = self.manager.create_run(
+            agent=self.agent,
+            user_id="user-1",
+            session_id="session-lease-release",
+            user_message="fail and release lease",
+            max_attempts=1,
+        )
+        final = self._wait_for_status(run["id"], {"failed"})
+        self.assertIsNotNone(final)
+        assert final is not None
+        self.assertEqual(final["status"], "failed")
+        self.assertIsNone(final.get("lease_owner"))
+        self.assertIsNone(final.get("lease_token"))
+        self.assertIsNone(final.get("lease_expires_at"))
 
     @staticmethod
     def _provider_error(

@@ -7,6 +7,7 @@ from typing import Any
 from agents.agent import Agent
 from controller.meta_controller import MetaController
 from planner.planner import PlanStep, Planner
+from tasks.step_registry import StepExecutionResult
 from tasks.task_executor import TaskExecutor, TaskGuardrailError, TaskTimeoutError
 from tools.tool_executor import ToolExecutor
 from tools.tool_registry import ToolRegistry
@@ -104,6 +105,36 @@ class _ParallelPlanner:
         ]
 
 
+class _RetryPlanner:
+    @staticmethod
+    def create_plan(task: str, strategy: str) -> list[PlanStep]:  # noqa: ARG004
+        return [
+            PlanStep(
+                id=1,
+                description="Prepare plan artifact",
+                kind="analyze_request",
+                max_retries=1,
+                replan_allowed=False,
+            )
+        ]
+
+
+class _ReplanPlanner:
+    @staticmethod
+    def create_plan(task: str, strategy: str) -> list[PlanStep]:  # noqa: ARG004
+        return [
+            PlanStep(
+                id=1,
+                description="Fetch source content from URL",
+                kind="fetch_source",
+                requires_tools=True,
+                max_retries=0,
+                replan_allowed=True,
+                hints={"urls": ["https://example.com/replan"]},
+            )
+        ]
+
+
 class _SlowIssueTaskExecutor(TaskExecutor):
     def _evaluate_plan_issue(  # type: ignore[override]
         self,
@@ -114,6 +145,35 @@ class _SlowIssueTaskExecutor(TaskExecutor):
         issue_deadline_monotonic: float,
     ) -> dict[str, Any]:
         time.sleep(0.03)
+        return super()._evaluate_plan_issue(
+            issue_id=issue_id,
+            step_payload=step_payload,
+            tools_available=tools_available,
+            issue_deadline_monotonic=issue_deadline_monotonic,
+        )
+
+
+class _RetryOnceIssueTaskExecutor(TaskExecutor):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._issue_attempts: dict[str, int] = {}
+
+    def _evaluate_plan_issue(  # type: ignore[override]
+        self,
+        *,
+        issue_id: str,
+        step_payload: dict[str, Any],
+        tools_available: bool,
+        issue_deadline_monotonic: float,
+    ) -> dict[str, Any]:
+        attempt = self._issue_attempts.get(issue_id, 0) + 1
+        self._issue_attempts[issue_id] = attempt
+        if issue_id == "plan_step:1" and attempt == 1:
+            return {
+                "status": "failed",
+                "reason": "Synthetic transient issue failure.",
+                "payload": {"description": "transient"},
+            }
         return super()._evaluate_plan_issue(
             issue_id=issue_id,
             step_payload=step_payload,
@@ -552,6 +612,109 @@ class TaskExecutorTests(unittest.TestCase):
                 user_message="Do A and B",
             )
 
+    def test_plan_issue_retry_policy_recovers_after_transient_failure(self) -> None:
+        model_manager = _FakeModelManager(
+            responses=[
+                {
+                    "content": "Final answer after retry.",
+                    "provider": "fake",
+                    "model": "fake-model",
+                }
+            ]
+        )
+        memory_manager = _FakeMemoryManager()
+        registry = ToolRegistry()
+        executor = _RetryOnceIssueTaskExecutor(
+            model_manager=model_manager,  # type: ignore[arg-type]
+            memory_manager=memory_manager,  # type: ignore[arg-type]
+            tool_registry=registry,
+            tool_executor=ToolExecutor(registry),
+            meta_controller=MetaController(),
+            planner=_RetryPlanner(),  # type: ignore[arg-type]
+            max_model_calls=4,
+            verifier_enabled=False,
+            step_max_retries_default=1,
+        )
+        agent = Agent.create(
+            name="Retry Agent",
+            system_prompt="Solve tasks.",
+            model="fake-model",
+            tools=[],
+            user_id="user-1",
+        )
+        checkpoints: list[dict[str, Any]] = []
+
+        result = executor.execute(
+            agent=agent,
+            user_id="user-1",
+            session_id="retry-session",
+            user_message="Need retry flow",
+            checkpoint=lambda payload: checkpoints.append(dict(payload)),
+        )
+
+        self.assertEqual(result["response"], "Final answer after retry.")
+        retry_events = [item for item in checkpoints if item.get("stage") == "plan_step_retry_scheduled"]
+        self.assertGreaterEqual(len(retry_events), 1)
+        issue_done = [
+            item
+            for item in checkpoints
+            if item.get("stage") == "issue_state"
+            and isinstance(item.get("issue"), dict)
+            and str(item.get("issue", {}).get("id")) == "plan_step:1"
+            and str(item.get("issue", {}).get("status")) == "done"
+        ]
+        self.assertGreaterEqual(len(issue_done), 1)
+
+    def test_plan_issue_replan_fallback_when_tools_unavailable(self) -> None:
+        model_manager = _FakeModelManager(
+            responses=[
+                {
+                    "content": "Final answer after replan.",
+                    "provider": "fake",
+                    "model": "fake-model",
+                }
+            ]
+        )
+        memory_manager = _FakeMemoryManager()
+        registry = ToolRegistry()
+        executor = TaskExecutor(
+            model_manager=model_manager,  # type: ignore[arg-type]
+            memory_manager=memory_manager,  # type: ignore[arg-type]
+            tool_registry=registry,
+            tool_executor=ToolExecutor(registry),
+            meta_controller=MetaController(),
+            planner=_ReplanPlanner(),  # type: ignore[arg-type]
+            max_model_calls=4,
+            verifier_enabled=False,
+            step_max_retries_default=0,
+            step_replan_max_attempts=1,
+        )
+        agent = Agent.create(
+            name="Replan Agent",
+            system_prompt="Solve tasks.",
+            model="fake-model",
+            tools=[],
+            user_id="user-1",
+        )
+        checkpoints: list[dict[str, Any]] = []
+
+        result = executor.execute(
+            agent=agent,
+            user_id="user-1",
+            session_id="replan-session",
+            user_message="Summarize https://example.com/replan",
+            checkpoint=lambda payload: checkpoints.append(dict(payload)),
+        )
+
+        self.assertEqual(result["response"], "Final answer after replan.")
+        replan_events = [item for item in checkpoints if item.get("stage") == "plan_step_replanned"]
+        self.assertGreaterEqual(len(replan_events), 1)
+        final_replan = replan_events[-1].get("plan_step")
+        self.assertIsInstance(final_replan, dict)
+        assert isinstance(final_replan, dict)
+        self.assertEqual(str(final_replan.get("kind")), "analyze_request")
+        self.assertFalse(bool(final_replan.get("requires_tools")))
+
     @staticmethod
     def _build_issue_eval_executor() -> TaskExecutor:
         model_manager = _FakeModelManager(
@@ -653,6 +816,47 @@ class TaskExecutorTests(unittest.TestCase):
         assert isinstance(outline, list)
         self.assertGreaterEqual(len(outline), 1)
         self.assertGreaterEqual(int(payload.get("dependency_insights_count", 0)), 1)
+
+    def test_evaluate_plan_issue_enforces_step_postconditions(self) -> None:
+        executor = self._build_issue_eval_executor()
+        executor.step_executor_registry.register(
+            "extract_facts",
+            lambda ctx: StepExecutionResult.done(  # noqa: ARG005
+                {
+                    "description": "Broken extraction payload",
+                    "step_kind": "extract_facts",
+                    "requires_tools": False,
+                }
+            ),
+        )
+        deadline = time.monotonic() + 2.0
+        result = executor._evaluate_plan_issue(  # noqa: SLF001
+            issue_id="plan_step:6",
+            step_payload={
+                "description": "Extract facts from dependencies",
+                "kind": "extract_facts",
+                "postconditions": ["artifact_has_extracted_points"],
+                "_dependency_artifacts": {
+                    "plan_step:5": {
+                        "result": {
+                            "description": "Source artifact",
+                            "summary_outline": ["Point A"],
+                        }
+                    }
+                },
+            },
+            tools_available=True,
+            issue_deadline_monotonic=deadline,
+        )
+        self.assertEqual(str(result.get("status")), "failed")
+        self.assertIn("postconditions", str(result.get("reason", "")).lower())
+        payload = result.get("payload")
+        self.assertIsInstance(payload, dict)
+        assert isinstance(payload, dict)
+        verifier = payload.get("verifier")
+        self.assertIsInstance(verifier, dict)
+        assert isinstance(verifier, dict)
+        self.assertFalse(bool(verifier.get("passed")))
 
     def test_artifact_quality_repair_loop(self) -> None:
         model_manager = _FakeModelManager(

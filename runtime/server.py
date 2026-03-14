@@ -173,6 +173,9 @@ def create_services() -> ServiceContainer:
         verifier_min_response_chars=config.task_verifier_min_response_chars,
         artifact_quality_enabled=config.task_artifact_quality_enabled,
         artifact_quality_max_repair_attempts=config.task_artifact_quality_max_repair_attempts,
+        step_verifier_enabled=config.task_step_verifier_enabled,
+        step_max_retries_default=config.task_step_max_retries_default,
+        step_replan_max_attempts=config.task_step_replan_max_attempts,
     )
 
     agent_run_manager = AgentRunManager(
@@ -181,6 +184,7 @@ def create_services() -> ServiceContainer:
         worker_count=config.run_workers,
         default_max_attempts=config.run_max_attempts,
         attempt_timeout_sec=config.run_attempt_timeout_sec,
+        run_lease_ttl_sec=config.run_lease_ttl_sec,
         retry_backoff_sec=config.run_retry_backoff_sec,
         retry_max_backoff_sec=config.run_retry_max_backoff_sec,
         retry_jitter_sec=config.run_retry_jitter_sec,

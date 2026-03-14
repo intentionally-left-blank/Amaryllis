@@ -15,6 +15,10 @@ class PlanStep:
     objective: str = ""
     expected_output: str = ""
     hints: dict[str, Any] = field(default_factory=dict)
+    preconditions: list[str] = field(default_factory=list)
+    postconditions: list[str] = field(default_factory=list)
+    max_retries: int = 1
+    replan_allowed: bool = True
 
 
 class Planner:
@@ -307,17 +311,77 @@ class Planner:
         objective: str = "",
         expected_output: str = "",
         hints: dict[str, Any] | None = None,
+        preconditions: list[str] | None = None,
+        postconditions: list[str] | None = None,
+        max_retries: int | None = None,
+        replan_allowed: bool | None = True,
     ) -> PlanStep:
+        normalized_kind = str(kind or "general").strip().lower() or "general"
+        normalized_depends_on = [max(1, int(item)) for item in list(depends_on or [])]
+        default_preconditions, default_postconditions, default_max_retries, default_replan_allowed = (
+            self._default_step_contract(
+                kind=normalized_kind,
+                requires_tools=bool(requires_tools),
+                depends_on=normalized_depends_on,
+            )
+        )
         return PlanStep(
             id=max(1, int(step_id)),
             description=str(description).strip() or f"Plan step {step_id}",
-            depends_on=list(depends_on or []),
-            kind=str(kind or "general").strip().lower() or "general",
+            depends_on=normalized_depends_on,
+            kind=normalized_kind,
             requires_tools=bool(requires_tools),
             objective=str(objective or "").strip(),
             expected_output=str(expected_output or "").strip(),
             hints=dict(hints or {}),
+            preconditions=[str(item) for item in (preconditions or default_preconditions)],
+            postconditions=[str(item) for item in (postconditions or default_postconditions)],
+            max_retries=max(0, int(default_max_retries if max_retries is None else max_retries)),
+            replan_allowed=bool(default_replan_allowed if replan_allowed is None else replan_allowed),
         )
+
+    @staticmethod
+    def _default_step_contract(
+        *,
+        kind: str,
+        requires_tools: bool,
+        depends_on: list[int],
+    ) -> tuple[list[str], list[str], int, bool]:
+        preconditions: list[str] = []
+        postconditions = [
+            "artifact_has_description",
+            "artifact_has_step_kind",
+        ]
+        max_retries = 1
+        replan_allowed = True
+
+        dependency_sensitive_kinds = {
+            "extract_facts",
+            "summarize",
+            "synthesize",
+            "merge_results",
+            "verify",
+            "compare_targets",
+        }
+        if depends_on or kind in dependency_sensitive_kinds:
+            preconditions.append("dependency_context_available")
+
+        if requires_tools or kind in {"fetch_source", "tool_query"}:
+            preconditions.append("tools_available_if_required")
+            postconditions.append("artifact_has_tool_blueprint")
+            max_retries = 2
+
+        if kind in {"extract_facts"}:
+            postconditions.append("artifact_has_extracted_points")
+        if kind in {"summarize", "synthesize", "merge_results"}:
+            postconditions.append("artifact_has_summary_outline")
+        if kind in {"verify", "compare_targets"}:
+            postconditions.append("artifact_has_verification_checklist")
+
+        if kind in {"answer_direct"}:
+            replan_allowed = False
+
+        return preconditions, postconditions, max_retries, replan_allowed
 
     def _extract_urls(self, task: str) -> list[str]:
         if not task:
