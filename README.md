@@ -49,10 +49,11 @@ Implemented in this version:
 - automatic incident detection from SLO breaches (availability, latency p95, run success)
 - API lifecycle policy with version headers and legacy deprecation headers (`Deprecation`, `Sunset`)
 - versioned API aliases for core routes under `/v1/*` with compatibility contract gate
-- release gate assets: compatibility script, canary smoke script, disaster-recovery gate, rollback playbook
+- release gate assets: compatibility script, canary smoke script, disaster-recovery gate, compliance gate, rollback playbook
 - lease/CAS ownership for agent runs (single-owner execution under concurrent workers)
 - typed planner step execution with step contracts (pre/post conditions), verifier, retry and replan
 - production-grade backup and DR foundation (scheduled backups, retention, verification, restore drills)
+- compliance/security operations baseline: secret inventory posture, access reviews, incident response workflow, signed audit evidence export
 
 Out of scope for MVP:
 - distributed execution
@@ -150,6 +151,7 @@ Service backup/DR endpoints:
 ├── runtime
 │   ├── auth.py
 │   ├── backup.py
+│   ├── compliance.py
 │   ├── config.py
 │   ├── security.py
 │   └── server.py
@@ -158,11 +160,16 @@ Service backup/DR endpoints:
 │   │   ├── backup_now.py
 │   │   ├── restore_drill.py
 │   │   └── restore_from_archive.py
-│   └── release
-│       ├── api_compat_gate.py
-│       ├── canary_smoke.py
-│       ├── disaster_recovery_gate.py
-│       └── rollback_local.sh
+│   ├── release
+│   │   ├── api_compat_gate.py
+│   │   ├── canary_smoke.py
+│   │   ├── compliance_ops_gate.py
+│   │   ├── disaster_recovery_gate.py
+│   │   └── rollback_local.sh
+│   └── security
+│       ├── compliance_check.py
+│       ├── export_audit_evidence.py
+│       └── policy_check.py
 ├── storage
 │   ├── database.py
 │   ├── migrations.py
@@ -178,6 +185,7 @@ Service backup/DR endpoints:
 │   ├── test_memory_manager.py
 │   ├── test_memory_quality_eval.py
 │   ├── test_model_routing.py
+│   ├── test_security_compliance_api.py
 │   ├── test_security_manager.py
 │   ├── test_task_executor.py
 │   ├── test_tool_sandbox.py
@@ -766,6 +774,27 @@ Implemented now:
 - security audit endpoints (admin scope):
   - `GET /security/identity`
   - `GET /security/audit`
+- compliance operations endpoints (admin scope):
+  - `GET /security/secrets`
+  - `POST /security/secrets/sync`
+  - `GET /security/auth/tokens/activity`
+  - `POST /security/access-reviews/start`
+  - `POST /security/access-reviews/{review_id}/complete`
+  - `GET /security/access-reviews`
+  - `GET /security/access-reviews/{review_id}`
+  - `POST /security/incidents/open`
+  - `POST /security/incidents/{incident_id}/ack`
+  - `POST /security/incidents/{incident_id}/resolve`
+  - `POST /security/incidents/{incident_id}/notes`
+  - `GET /security/incidents`
+  - `GET /security/incidents/{incident_id}`
+  - `GET /security/compliance/snapshot`
+  - `POST /security/compliance/evidence/export`
+- security/compliance operational scripts:
+  - `python scripts/security/compliance_check.py`
+  - `python scripts/security/export_audit_evidence.py --window-days 90 --event-limit 2000`
+- detailed runbook:
+  - `docs/security-compliance-baseline.md`
 
 ## Tools + MCP Layer Foundation (Current)
 
@@ -1033,6 +1062,8 @@ GitHub Actions workflow:
 Release/pull-request gate is blocking and includes:
 - mandatory security suite (`auth/authz`, security config, signing/enforcement tests)
 - policy gate (`scripts/security/policy_check.py`) that rejects insecure production config
+- compliance baseline gate (`scripts/security/compliance_check.py`)
+- evidence export smoke check (`scripts/security/export_audit_evidence.py`)
 - SAST (`bandit`) at high severity/high confidence
 - dependency vulnerability audit (`pip-audit`)
 - SBOM generation (`CycloneDX`)
@@ -1088,8 +1119,21 @@ Release/pull-request gate is blocking and includes:
   - `AMARYLLIS_TOOL_SANDBOX_ALLOWED_ROOTS=/path/to/workspace,/path/to/data`
   - `AMARYLLIS_BLOCKED_TOOLS=python_exec,filesystem`
   - `AMARYLLIS_PLUGIN_SIGNING_KEY=<hmac_secret>`
+  - `AMARYLLIS_PLUGIN_SIGNING_KEY_ROTATED_AT=2026-03-14T00:00:00+00:00`
+  - `AMARYLLIS_PLUGIN_SIGNING_KEY_EXPIRES_AT=2026-06-30T00:00:00+00:00`
   - `AMARYLLIS_PLUGIN_SIGNING_MODE=off|warn|strict`
   - `AMARYLLIS_PLUGIN_RUNTIME_MODE=sandboxed|legacy`
+  - `AMARYLLIS_OPENAI_API_KEY_ROTATED_AT=2026-03-14T00:00:00+00:00`
+  - `AMARYLLIS_OPENAI_API_KEY_EXPIRES_AT=2026-06-30T00:00:00+00:00`
+  - `AMARYLLIS_ANTHROPIC_API_KEY_ROTATED_AT=2026-03-14T00:00:00+00:00`
+  - `AMARYLLIS_ANTHROPIC_API_KEY_EXPIRES_AT=2026-06-30T00:00:00+00:00`
+  - `AMARYLLIS_OPENROUTER_API_KEY_ROTATED_AT=2026-03-14T00:00:00+00:00`
+  - `AMARYLLIS_OPENROUTER_API_KEY_EXPIRES_AT=2026-06-30T00:00:00+00:00`
+  - `AMARYLLIS_SECRET_ROTATION_MAX_AGE_DAYS=90`
+  - `AMARYLLIS_SECRET_EXPIRY_WARNING_DAYS=14`
+  - `AMARYLLIS_IDENTITY_ROTATION_MAX_AGE_DAYS=30`
+  - `AMARYLLIS_ACCESS_REVIEW_MAX_AGE_DAYS=30`
+  - `AMARYLLIS_EVIDENCE_DIR=~/Library/Application Support/amaryllis/evidence`
   - `AMARYLLIS_MCP_ENDPOINTS=http://localhost:9001,http://localhost:9002`
   - `AMARYLLIS_MCP_TIMEOUT_SEC=10`
   - `AMARYLLIS_MCP_FAILURE_THRESHOLD=2`
@@ -1132,10 +1176,16 @@ export AMARYLLIS_OLLAMA_FALLBACK=true
 export AMARYLLIS_TELEMETRY_PATH=~/Library/Application\ Support/amaryllis/data/telemetry.jsonl
 export AMARYLLIS_OPENAI_BASE_URL=https://api.openai.com/v1
 export AMARYLLIS_OPENAI_API_KEY=replace_me
+export AMARYLLIS_OPENAI_API_KEY_ROTATED_AT=2026-03-14T00:00:00+00:00
+export AMARYLLIS_OPENAI_API_KEY_EXPIRES_AT=2026-06-30T00:00:00+00:00
 export AMARYLLIS_ANTHROPIC_BASE_URL=https://api.anthropic.com/v1
 export AMARYLLIS_ANTHROPIC_API_KEY=replace_me
+export AMARYLLIS_ANTHROPIC_API_KEY_ROTATED_AT=2026-03-14T00:00:00+00:00
+export AMARYLLIS_ANTHROPIC_API_KEY_EXPIRES_AT=2026-06-30T00:00:00+00:00
 export AMARYLLIS_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 export AMARYLLIS_OPENROUTER_API_KEY=replace_me
+export AMARYLLIS_OPENROUTER_API_KEY_ROTATED_AT=2026-03-14T00:00:00+00:00
+export AMARYLLIS_OPENROUTER_API_KEY_EXPIRES_AT=2026-06-30T00:00:00+00:00
 export AMARYLLIS_RUN_WORKERS=2
 export AMARYLLIS_RUN_MAX_ATTEMPTS=2
 export AMARYLLIS_RUN_ATTEMPT_TIMEOUT_SEC=180
@@ -1160,11 +1210,18 @@ export AMARYLLIS_MEMORY_PROFILE_DECAY_MIN_DELTA=0.05
 export AMARYLLIS_TOOL_APPROVAL_ENFORCEMENT=strict
 export AMARYLLIS_BLOCKED_TOOLS=
 export AMARYLLIS_PLUGIN_SIGNING_KEY=
+export AMARYLLIS_PLUGIN_SIGNING_KEY_ROTATED_AT=2026-03-14T00:00:00+00:00
+export AMARYLLIS_PLUGIN_SIGNING_KEY_EXPIRES_AT=2026-06-30T00:00:00+00:00
 export AMARYLLIS_PLUGIN_SIGNING_MODE=strict
 export AMARYLLIS_MCP_ENDPOINTS=
 export AMARYLLIS_MCP_TIMEOUT_SEC=10
 export AMARYLLIS_MCP_FAILURE_THRESHOLD=2
 export AMARYLLIS_MCP_QUARANTINE_SEC=60
+export AMARYLLIS_SECRET_ROTATION_MAX_AGE_DAYS=90
+export AMARYLLIS_SECRET_EXPIRY_WARNING_DAYS=14
+export AMARYLLIS_IDENTITY_ROTATION_MAX_AGE_DAYS=30
+export AMARYLLIS_ACCESS_REVIEW_MAX_AGE_DAYS=30
+export AMARYLLIS_EVIDENCE_DIR=~/Library/Application\ Support/amaryllis/evidence
 export AMARYLLIS_OTEL_ENABLED=true
 export AMARYLLIS_OTEL_OTLP_ENDPOINT=
 export AMARYLLIS_SLO_WINDOW_SEC=3600
@@ -1212,6 +1269,26 @@ python scripts/disaster_recovery/restore_drill.py
 python scripts/disaster_recovery/restore_from_archive.py --archive /path/to/backup.tar.gz
 ```
 
+## Security and Compliance Operations
+
+- Compliance baseline docs: `docs/security-compliance-baseline.md`
+- Admin security operations endpoints:
+  - `GET /security/secrets`
+  - `POST /security/secrets/sync`
+  - `GET /security/auth/tokens/activity`
+  - `POST /security/access-reviews/start`
+  - `POST /security/access-reviews/{review_id}/complete`
+  - `POST /security/incidents/open`
+  - `POST /security/incidents/{incident_id}/ack`
+  - `POST /security/incidents/{incident_id}/resolve`
+  - `POST /security/compliance/evidence/export`
+- CLI:
+
+```bash
+python scripts/security/compliance_check.py
+python scripts/security/export_audit_evidence.py --window-days 90 --event-limit 2000
+```
+
 ## API Lifecycle and Release Process
 
 - Lifecycle policy docs: `docs/api-lifecycle.md`
@@ -1232,6 +1309,12 @@ python scripts/release/canary_smoke.py
 
 ```bash
 python scripts/release/disaster_recovery_gate.py
+```
+
+- Compliance operations gate:
+
+```bash
+python scripts/release/compliance_ops_gate.py
 ```
 
 - Rollback playbook: `docs/release-playbook.md`

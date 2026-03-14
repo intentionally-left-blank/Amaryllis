@@ -33,6 +33,7 @@ from memory.working_memory import WorkingMemory
 from models.model_manager import ModelManager
 from planner.planner import Planner
 from runtime.backup import BackupManager, BackupScheduler
+from runtime.compliance import ComplianceManager
 from runtime.api_lifecycle import APILifecyclePolicy, canonical_api_path
 from runtime.auth import AuthContext, AuthManager, auth_context_from_request
 from runtime.config import AppConfig
@@ -77,6 +78,7 @@ class ServiceContainer:
     api_lifecycle: APILifecyclePolicy
     identity_manager: LocalIdentityManager
     security_manager: SecurityManager
+    compliance_manager: ComplianceManager
     auth_manager: AuthManager
 
 
@@ -126,6 +128,11 @@ def create_services() -> ServiceContainer:
     auth_manager = AuthManager(
         enabled=config.auth_enabled,
         token_specs=config.auth_tokens,
+    )
+    compliance_manager = ComplianceManager(
+        config=config,
+        database=database,
+        security_manager=security_manager,
     )
 
     episodic = EpisodicMemory(database)
@@ -327,6 +334,7 @@ def create_services() -> ServiceContainer:
         api_lifecycle=api_lifecycle,
         identity_manager=identity_manager,
         security_manager=security_manager,
+        compliance_manager=compliance_manager,
         auth_manager=auth_manager,
     )
 
@@ -477,6 +485,15 @@ def create_app() -> FastAPI:
                         raise PermissionDeniedError("Service scope is required")
                 elif not auth_context.has_any_scope("user", "admin"):
                     raise PermissionDeniedError("User scope is required")
+                services.security_manager.record_authenticated_request(
+                    auth_context=auth_context,
+                    request_id=request_id,
+                    path=auth_path or path,
+                    method=request.method,
+                    metadata={
+                        "release_channel": services.config.api_release_channel,
+                    },
+                )
             response = await call_next(request)
         except AmaryllisError as exc:
             error_type = exc.error_type

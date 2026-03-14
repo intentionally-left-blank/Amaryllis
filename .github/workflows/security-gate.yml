@@ -38,6 +38,7 @@ jobs:
           python -m unittest \
             tests.test_auth_manager \
             tests.test_config_security_defaults \
+            tests.test_security_compliance_api \
             tests.test_security_manager \
             tests.test_security_http_authz \
             tests.test_tool_enforcement_modes \
@@ -48,6 +49,24 @@ jobs:
       - name: Run security policy check
         run: |
           python scripts/security/policy_check.py
+
+      - name: Run compliance baseline gate
+        run: |
+          python scripts/security/compliance_check.py
+
+      - name: Run evidence export smoke check
+        run: |
+          export AMARYLLIS_SUPPORT_DIR="$(mktemp -d)/support"
+          export AMARYLLIS_AUTH_ENABLED=true
+          export AMARYLLIS_SECURITY_PROFILE=production
+          export AMARYLLIS_TOOL_APPROVAL_ENFORCEMENT=strict
+          export AMARYLLIS_TOOL_SANDBOX_ENABLED=true
+          export AMARYLLIS_PLUGIN_SIGNING_MODE=strict
+          export AMARYLLIS_PLUGIN_RUNTIME_MODE=sandboxed
+          export AMARYLLIS_ALLOW_INSECURE_SECURITY_MODES=false
+          export AMARYLLIS_AUTH_TOKENS='token-admin:admin:admin|user'
+          python scripts/security/export_audit_evidence.py --output-name ci-security-evidence.json --window-days 30 --event-limit 500
+          test -s "${AMARYLLIS_SUPPORT_DIR}/evidence/ci-security-evidence.json"
 
   security-scans:
     name: SAST + Dependency Audit + SBOM

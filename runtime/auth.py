@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -60,7 +61,7 @@ class AuthManager:
                 continue
             effective_scopes = frozenset(scopes or ["user"])
             self._contexts_by_token[token] = AuthContext(
-                token_id=user_id,
+                token_id=token_fingerprint(token),
                 user_id=user_id,
                 scopes=effective_scopes,
             )
@@ -138,7 +139,16 @@ def assert_owner(
 
 def auth_context_payload(context: AuthContext) -> dict[str, Any]:
     return {
+        "token_id": context.token_id,
         "user_id": context.user_id,
         "scopes": sorted(context.scopes),
         "is_admin": context.is_admin,
     }
+
+
+def token_fingerprint(token: str) -> str:
+    normalized = str(token or "").strip()
+    if not normalized:
+        return ""
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return digest[:24]

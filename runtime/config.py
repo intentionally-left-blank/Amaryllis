@@ -27,6 +27,7 @@ class AppConfig:
     models_dir: Path
     data_dir: Path
     backup_dir: Path
+    evidence_dir: Path
     plugins_dir: Path
     database_path: Path
     vector_index_path: Path
@@ -57,10 +58,16 @@ class AppConfig:
     enable_ollama_fallback: bool
     openai_base_url: str
     openai_api_key: str | None
+    openai_api_key_rotated_at: str | None
+    openai_api_key_expires_at: str | None
     anthropic_base_url: str
     anthropic_api_key: str | None
+    anthropic_api_key_rotated_at: str | None
+    anthropic_api_key_expires_at: str | None
     openrouter_base_url: str
     openrouter_api_key: str | None
+    openrouter_api_key_rotated_at: str | None
+    openrouter_api_key_expires_at: str | None
     run_workers: int
     run_max_attempts: int
     run_attempt_timeout_sec: float
@@ -138,12 +145,18 @@ class AppConfig:
     tool_sandbox_allow_network_tools: tuple[str, ...]
     tool_sandbox_allowed_roots: tuple[str, ...]
     plugin_signing_key: str | None
+    plugin_signing_key_rotated_at: str | None
+    plugin_signing_key_expires_at: str | None
     plugin_signing_mode: str
     plugin_runtime_mode: str
     mcp_endpoints: tuple[str, ...]
     mcp_timeout_sec: float
     mcp_failure_threshold: int
     mcp_quarantine_sec: float
+    compliance_secret_rotation_max_age_days: int
+    compliance_secret_expiry_warning_days: int
+    compliance_identity_rotation_max_age_days: int
+    compliance_access_review_max_age_days: int
     identity_path: Path
 
     @classmethod
@@ -173,6 +186,12 @@ class AppConfig:
             os.getenv(
                 "AMARYLLIS_PLUGINS_DIR",
                 str(Path.cwd() / "plugins"),
+            )
+        ).expanduser()
+        evidence_dir = Path(
+            os.getenv(
+                "AMARYLLIS_EVIDENCE_DIR",
+                str(support_dir / "evidence"),
             )
         ).expanduser()
         backup_dir = Path(
@@ -290,6 +309,7 @@ class AppConfig:
             models_dir=models_dir,
             data_dir=data_dir,
             backup_dir=backup_dir,
+            evidence_dir=evidence_dir,
             plugins_dir=plugins_dir,
             database_path=database_path,
             vector_index_path=vector_index_path,
@@ -361,12 +381,18 @@ class AppConfig:
             enable_ollama_fallback=enable_ollama_fallback,
             openai_base_url=os.getenv("AMARYLLIS_OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
             openai_api_key=(os.getenv("AMARYLLIS_OPENAI_API_KEY") or "").strip() or None,
+            openai_api_key_rotated_at=(os.getenv("AMARYLLIS_OPENAI_API_KEY_ROTATED_AT") or "").strip() or None,
+            openai_api_key_expires_at=(os.getenv("AMARYLLIS_OPENAI_API_KEY_EXPIRES_AT") or "").strip() or None,
             anthropic_base_url=os.getenv("AMARYLLIS_ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1").rstrip(
                 "/"
             ),
             anthropic_api_key=(os.getenv("AMARYLLIS_ANTHROPIC_API_KEY") or "").strip() or None,
+            anthropic_api_key_rotated_at=(os.getenv("AMARYLLIS_ANTHROPIC_API_KEY_ROTATED_AT") or "").strip() or None,
+            anthropic_api_key_expires_at=(os.getenv("AMARYLLIS_ANTHROPIC_API_KEY_EXPIRES_AT") or "").strip() or None,
             openrouter_base_url=os.getenv("AMARYLLIS_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/"),
             openrouter_api_key=(os.getenv("AMARYLLIS_OPENROUTER_API_KEY") or "").strip() or None,
+            openrouter_api_key_rotated_at=(os.getenv("AMARYLLIS_OPENROUTER_API_KEY_ROTATED_AT") or "").strip() or None,
+            openrouter_api_key_expires_at=(os.getenv("AMARYLLIS_OPENROUTER_API_KEY_EXPIRES_AT") or "").strip() or None,
             run_workers=max(1, int(os.getenv("AMARYLLIS_RUN_WORKERS", "2"))),
             run_max_attempts=max(1, int(os.getenv("AMARYLLIS_RUN_MAX_ATTEMPTS", "2"))),
             run_attempt_timeout_sec=max(5.0, float(os.getenv("AMARYLLIS_RUN_ATTEMPT_TIMEOUT_SEC", "180"))),
@@ -526,12 +552,26 @@ class AppConfig:
             tool_sandbox_allow_network_tools=tool_sandbox_allow_network_tools,
             tool_sandbox_allowed_roots=tool_sandbox_allowed_roots,
             plugin_signing_key=(os.getenv("AMARYLLIS_PLUGIN_SIGNING_KEY") or "").strip() or None,
+            plugin_signing_key_rotated_at=(os.getenv("AMARYLLIS_PLUGIN_SIGNING_KEY_ROTATED_AT") or "").strip() or None,
+            plugin_signing_key_expires_at=(os.getenv("AMARYLLIS_PLUGIN_SIGNING_KEY_EXPIRES_AT") or "").strip() or None,
             plugin_signing_mode=plugin_signing_mode,
             plugin_runtime_mode=plugin_runtime_mode,
             mcp_endpoints=mcp_endpoints,
             mcp_timeout_sec=max(1.0, float(os.getenv("AMARYLLIS_MCP_TIMEOUT_SEC", "10"))),
             mcp_failure_threshold=max(1, int(os.getenv("AMARYLLIS_MCP_FAILURE_THRESHOLD", "2"))),
             mcp_quarantine_sec=max(1.0, float(os.getenv("AMARYLLIS_MCP_QUARANTINE_SEC", "60"))),
+            compliance_secret_rotation_max_age_days=max(
+                1, int(os.getenv("AMARYLLIS_SECRET_ROTATION_MAX_AGE_DAYS", "90"))
+            ),
+            compliance_secret_expiry_warning_days=max(
+                1, int(os.getenv("AMARYLLIS_SECRET_EXPIRY_WARNING_DAYS", "14"))
+            ),
+            compliance_identity_rotation_max_age_days=max(
+                1, int(os.getenv("AMARYLLIS_IDENTITY_ROTATION_MAX_AGE_DAYS", "30"))
+            ),
+            compliance_access_review_max_age_days=max(
+                1, int(os.getenv("AMARYLLIS_ACCESS_REVIEW_MAX_AGE_DAYS", "30"))
+            ),
             identity_path=identity_path,
         )
         config._validate_security_configuration()
@@ -542,6 +582,7 @@ class AppConfig:
         self.models_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.backup_dir.mkdir(parents=True, exist_ok=True)
+        self.evidence_dir.mkdir(parents=True, exist_ok=True)
         self.plugins_dir.mkdir(parents=True, exist_ok=True)
         self.identity_path.parent.mkdir(parents=True, exist_ok=True)
 

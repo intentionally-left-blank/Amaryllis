@@ -8,6 +8,7 @@ Mandatory gates before publish:
 2. API compatibility gate
 3. Canary smoke checks
 4. Disaster recovery gate (backup + verify + restore drill)
+5. Compliance operations gate (access review + incidents + evidence export)
 
 Commands:
 
@@ -16,6 +17,7 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 python scripts/release/api_compat_gate.py
 python scripts/release/canary_smoke.py
 python scripts/release/disaster_recovery_gate.py
+python scripts/release/compliance_ops_gate.py
 ```
 
 ## Canary Procedure

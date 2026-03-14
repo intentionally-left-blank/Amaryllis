@@ -13,6 +13,7 @@ from threading import Lock
 from typing import Any, Protocol
 from uuid import uuid4
 
+from runtime.auth import AuthContext
 from storage.database import Database
 
 
@@ -382,6 +383,43 @@ class SecurityManager:
             status=status,
             actor=actor,
         )
+
+    def record_authenticated_request(
+        self,
+        *,
+        auth_context: AuthContext,
+        request_id: str | None,
+        path: str,
+        method: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        self.database.record_auth_token_activity(
+            token_fingerprint=auth_context.token_id,
+            user_id=auth_context.user_id,
+            scopes=sorted(auth_context.scopes),
+            request_id=request_id,
+            path=path,
+            method=method,
+            metadata=metadata,
+        )
+        self._emit(
+            "security_auth_success",
+            {
+                "request_id": request_id,
+                "user_id": auth_context.user_id,
+                "token_id": auth_context.token_id,
+                "path": path,
+                "method": method,
+            },
+        )
+
+    def list_auth_token_activity(
+        self,
+        *,
+        limit: int = 200,
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.database.list_auth_token_activity(limit=limit, user_id=user_id)
 
     def audit_access_denied(
         self,

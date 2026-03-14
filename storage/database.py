@@ -819,6 +819,457 @@ class Database:
         result.reverse()
         return result
 
+    def record_auth_token_activity(
+        self,
+        *,
+        token_fingerprint: str,
+        user_id: str,
+        scopes: list[str] | tuple[str, ...] | set[str],
+        request_id: str | None,
+        path: str,
+        method: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        normalized_fingerprint = str(token_fingerprint or "").strip()
+        normalized_user = str(user_id or "").strip()
+        if not normalized_fingerprint or not normalized_user:
+            return
+        normalized_scopes = sorted({str(scope or "").strip().lower() for scope in scopes if str(scope or "").strip()})
+        now = self._utc_now()
+        metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
+        scopes_json = json.dumps(normalized_scopes, ensure_ascii=False)
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO security_auth_token_activity(
+                    token_fingerprint,
+                    user_id,
+                    scopes_json,
+                    first_seen_at,
+                    last_seen_at,
+                    last_request_id,
+                    last_path,
+                    last_method,
+                    request_count,
+                    metadata_json
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                ON CONFLICT(token_fingerprint) DO UPDATE SET
+                    user_id=excluded.user_id,
+                    scopes_json=excluded.scopes_json,
+                    last_seen_at=excluded.last_seen_at,
+                    last_request_id=excluded.last_request_id,
+                    last_path=excluded.last_path,
+                    last_method=excluded.last_method,
+                    request_count=security_auth_token_activity.request_count + 1,
+                    metadata_json=excluded.metadata_json
+                """,
+                (
+                    normalized_fingerprint,
+                    normalized_user,
+                    scopes_json,
+                    now,
+                    now,
+                    request_id,
+                    path,
+                    str(method or "").upper(),
+                    metadata_json,
+                ),
+            )
+            self._commit_locked()
+
+    def list_auth_token_activity(
+        self,
+        *,
+        limit: int = 200,
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        query = "SELECT * FROM security_auth_token_activity WHERE 1 = 1"
+        params: list[Any] = []
+        if user_id:
+            query += " AND user_id = ?"
+            params.append(str(user_id).strip())
+        query += " ORDER BY last_seen_at DESC LIMIT ?"
+        params.append(limit)
+        with self._lock:
+            rows = self._conn.execute(query, tuple(params)).fetchall()
+        return [self._decode_auth_token_activity_row(dict(row)) for row in rows]
+
+    def upsert_secret_inventory_items(self, items: list[dict[str, Any]]) -> None:
+        if not items:
+            return
+        now = self._utc_now()
+        with self._lock:
+            for item in items:
+                key = str(item.get("secret_key") or "").strip()
+                provider = str(item.get("provider") or "runtime").strip() or "runtime"
+                if not key:
+                    continue
+                metadata_json = json.dumps(item.get("metadata") or {}, ensure_ascii=False)
+                self._conn.execute(
+                    """
+                    INSERT INTO security_secret_inventory(
+                        secret_key,
+                        provider,
+                        is_required,
+                        source,
+                        value_fingerprint,
+                        value_present,
+                        last_rotated_at,
+                        rotation_period_days,
+                        expires_at,
+                        status,
+                        metadata_json,
+                        updated_at
+                    )
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(secret_key) DO UPDATE SET
+                        provider=excluded.provider,
+                        is_required=excluded.is_required,
+                        source=excluded.source,
+                        value_fingerprint=excluded.value_fingerprint,
+                        value_present=excluded.value_present,
+                        last_rotated_at=excluded.last_rotated_at,
+                        rotation_period_days=excluded.rotation_period_days,
+                        expires_at=excluded.expires_at,
+                        status=excluded.status,
+                        metadata_json=excluded.metadata_json,
+                        updated_at=excluded.updated_at
+                    """,
+                    (
+                        key,
+                        provider,
+                        1 if bool(item.get("is_required", True)) else 0,
+                        str(item.get("source") or "env").strip() or "env",
+                        str(item.get("value_fingerprint") or "").strip() or None,
+                        1 if bool(item.get("value_present", False)) else 0,
+                        str(item.get("last_rotated_at") or "").strip() or None,
+                        max(1, int(item.get("rotation_period_days", 90))),
+                        str(item.get("expires_at") or "").strip() or None,
+                        str(item.get("status") or "unknown").strip().lower() or "unknown",
+                        metadata_json,
+                        now,
+                    ),
+                )
+            self._commit_locked()
+
+    def list_secret_inventory(
+        self,
+        *,
+        limit: int = 200,
+        status: str | None = None,
+        provider: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        query = "SELECT * FROM security_secret_inventory WHERE 1 = 1"
+        params: list[Any] = []
+        if status:
+            query += " AND status = ?"
+            params.append(str(status).strip().lower())
+        if provider:
+            query += " AND provider = ?"
+            params.append(str(provider).strip())
+        query += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(limit)
+        with self._lock:
+            rows = self._conn.execute(query, tuple(params)).fetchall()
+        return [self._decode_secret_inventory_row(dict(row)) for row in rows]
+
+    def create_access_review(
+        self,
+        *,
+        review_id: str,
+        reviewer: str | None,
+        snapshot: dict[str, Any],
+        summary: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        now = self._utc_now()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO security_access_reviews(
+                    id,
+                    reviewer,
+                    status,
+                    started_at,
+                    completed_at,
+                    summary,
+                    snapshot_json,
+                    decisions_json,
+                    findings_json,
+                    metadata_json,
+                    updated_at
+                )
+                VALUES(?, ?, 'open', ?, NULL, ?, ?, '{}', '[]', ?, ?)
+                """,
+                (
+                    review_id,
+                    reviewer,
+                    now,
+                    summary,
+                    json.dumps(snapshot or {}, ensure_ascii=False),
+                    json.dumps(metadata or {}, ensure_ascii=False),
+                    now,
+                ),
+            )
+            self._commit_locked()
+
+    def complete_access_review(
+        self,
+        *,
+        review_id: str,
+        reviewer: str | None,
+        summary: str | None,
+        decisions: dict[str, Any] | None,
+        findings: list[dict[str, Any]] | None,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        now = self._utc_now()
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                UPDATE security_access_reviews
+                SET
+                    reviewer = COALESCE(?, reviewer),
+                    status = 'completed',
+                    completed_at = ?,
+                    summary = ?,
+                    decisions_json = ?,
+                    findings_json = ?,
+                    metadata_json = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    reviewer,
+                    now,
+                    summary,
+                    json.dumps(decisions or {}, ensure_ascii=False),
+                    json.dumps(findings or [], ensure_ascii=False),
+                    json.dumps(metadata or {}, ensure_ascii=False),
+                    now,
+                    review_id,
+                ),
+            )
+            self._commit_locked()
+        return int(cursor.rowcount or 0) > 0
+
+    def get_access_review(self, review_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM security_access_reviews WHERE id = ?",
+                (review_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._decode_access_review_row(dict(row))
+
+    def list_access_reviews(self, *, limit: int = 100, status: str | None = None) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        query = "SELECT * FROM security_access_reviews WHERE 1 = 1"
+        params: list[Any] = []
+        if status:
+            query += " AND status = ?"
+            params.append(str(status).strip().lower())
+        query += " ORDER BY started_at DESC LIMIT ?"
+        params.append(limit)
+        with self._lock:
+            rows = self._conn.execute(query, tuple(params)).fetchall()
+        return [self._decode_access_review_row(dict(row)) for row in rows]
+
+    def create_security_incident(
+        self,
+        *,
+        incident_id: str,
+        category: str,
+        severity: str,
+        status: str,
+        title: str,
+        description: str,
+        owner: str | None,
+        request_id: str | None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        now = self._utc_now()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO security_incidents(
+                    id,
+                    category,
+                    severity,
+                    status,
+                    title,
+                    description,
+                    owner,
+                    opened_at,
+                    acknowledged_at,
+                    resolved_at,
+                    impact,
+                    containment,
+                    root_cause,
+                    recovery_actions,
+                    request_id,
+                    metadata_json,
+                    updated_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)
+                """,
+                (
+                    incident_id,
+                    category,
+                    severity,
+                    status,
+                    title,
+                    description,
+                    owner,
+                    now,
+                    request_id,
+                    json.dumps(metadata or {}, ensure_ascii=False),
+                    now,
+                ),
+            )
+            self._commit_locked()
+
+    def update_security_incident_fields(self, incident_id: str, **fields: Any) -> bool:
+        if not fields:
+            return False
+        allowed = {
+            "status",
+            "owner",
+            "acknowledged_at",
+            "resolved_at",
+            "impact",
+            "containment",
+            "root_cause",
+            "recovery_actions",
+            "metadata_json",
+            "updated_at",
+        }
+        sanitized: dict[str, Any] = {}
+        for key, value in fields.items():
+            if key not in allowed:
+                continue
+            if key == "metadata_json" and isinstance(value, dict):
+                sanitized[key] = json.dumps(value, ensure_ascii=False)
+            elif key == "status":
+                normalized = str(value or "").strip().lower()
+                if normalized not in {"open", "acknowledged", "contained", "resolved", "closed"}:
+                    continue
+                sanitized[key] = normalized
+            else:
+                sanitized[key] = value
+        if not sanitized:
+            return False
+        if "updated_at" not in sanitized:
+            sanitized["updated_at"] = self._utc_now()
+        assignments = ", ".join(f"{column} = ?" for column in sanitized.keys())
+        values = list(sanitized.values()) + [incident_id]
+        with self._lock:
+            cursor = self._conn.execute(
+                f"UPDATE security_incidents SET {assignments} WHERE id = ?",
+                values,
+            )
+            self._commit_locked()
+        return int(cursor.rowcount or 0) > 0
+
+    def get_security_incident(self, incident_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM security_incidents WHERE id = ?",
+                (incident_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._decode_security_incident_row(dict(row))
+
+    def list_security_incidents(
+        self,
+        *,
+        limit: int = 200,
+        status: str | None = None,
+        severity: str | None = None,
+        category: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        query = "SELECT * FROM security_incidents WHERE 1 = 1"
+        params: list[Any] = []
+        if status:
+            query += " AND status = ?"
+            params.append(str(status).strip().lower())
+        if severity:
+            query += " AND severity = ?"
+            params.append(str(severity).strip().lower())
+        if category:
+            query += " AND category = ?"
+            params.append(str(category).strip().lower())
+        query += " ORDER BY opened_at DESC LIMIT ?"
+        params.append(limit)
+        with self._lock:
+            rows = self._conn.execute(query, tuple(params)).fetchall()
+        return [self._decode_security_incident_row(dict(row)) for row in rows]
+
+    def add_security_incident_event(
+        self,
+        *,
+        incident_id: str,
+        event_type: str,
+        actor: str | None,
+        message: str,
+        details: dict[str, Any] | None = None,
+    ) -> int:
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                INSERT INTO security_incident_events(
+                    incident_id,
+                    event_type,
+                    actor,
+                    message,
+                    details_json,
+                    created_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    incident_id,
+                    str(event_type or "").strip().lower() or "note",
+                    actor,
+                    message,
+                    json.dumps(details or {}, ensure_ascii=False),
+                    self._utc_now(),
+                ),
+            )
+            self._commit_locked()
+            return int(cursor.lastrowid)
+
+    def list_security_incident_events(
+        self,
+        *,
+        incident_id: str,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT id, incident_id, event_type, actor, message, details_json, created_at
+                FROM security_incident_events
+                WHERE incident_id = ?
+                ORDER BY id ASC
+                LIMIT ?
+                """,
+                (incident_id, limit),
+            ).fetchall()
+        return [self._decode_security_incident_event_row(dict(row)) for row in rows]
+
     def create_agent_run(
         self,
         run_id: str,
@@ -2315,6 +2766,101 @@ class Database:
         row["signature"] = signature if isinstance(signature, dict) else {}
         row["status"] = str(row.get("status") or "succeeded").strip().lower() or "succeeded"
         row["event_type"] = str(row.get("event_type") or "signed_action").strip() or "signed_action"
+        return row
+
+    @staticmethod
+    def _decode_auth_token_activity_row(row: dict[str, Any]) -> dict[str, Any]:
+        scopes_json = row.pop("scopes_json", "[]")
+        metadata_json = row.pop("metadata_json", "{}")
+        try:
+            parsed_scopes = json.loads(scopes_json or "[]")
+            row["scopes"] = [str(item).strip().lower() for item in parsed_scopes] if isinstance(parsed_scopes, list) else []
+        except Exception:
+            row["scopes"] = []
+        try:
+            parsed_meta = json.loads(metadata_json or "{}")
+            row["metadata"] = parsed_meta if isinstance(parsed_meta, dict) else {}
+        except Exception:
+            row["metadata"] = {}
+        try:
+            row["request_count"] = max(0, int(row.get("request_count", 0)))
+        except Exception:
+            row["request_count"] = 0
+        row["token_fingerprint"] = str(row.get("token_fingerprint") or "").strip()
+        row["user_id"] = str(row.get("user_id") or "").strip()
+        row["last_method"] = str(row.get("last_method") or "").strip().upper() or None
+        return row
+
+    @staticmethod
+    def _decode_secret_inventory_row(row: dict[str, Any]) -> dict[str, Any]:
+        metadata_json = row.pop("metadata_json", "{}")
+        try:
+            parsed_meta = json.loads(metadata_json or "{}")
+            row["metadata"] = parsed_meta if isinstance(parsed_meta, dict) else {}
+        except Exception:
+            row["metadata"] = {}
+        row["is_required"] = bool(int(row.get("is_required", 0)))
+        row["value_present"] = bool(int(row.get("value_present", 0)))
+        try:
+            row["rotation_period_days"] = max(1, int(row.get("rotation_period_days", 90)))
+        except Exception:
+            row["rotation_period_days"] = 90
+        row["status"] = str(row.get("status") or "unknown").strip().lower() or "unknown"
+        row["secret_key"] = str(row.get("secret_key") or "").strip()
+        row["provider"] = str(row.get("provider") or "runtime").strip() or "runtime"
+        return row
+
+    @staticmethod
+    def _decode_access_review_row(row: dict[str, Any]) -> dict[str, Any]:
+        snapshot_json = row.pop("snapshot_json", "{}")
+        decisions_json = row.pop("decisions_json", "{}")
+        findings_json = row.pop("findings_json", "[]")
+        metadata_json = row.pop("metadata_json", "{}")
+        try:
+            parsed_snapshot = json.loads(snapshot_json or "{}")
+            row["snapshot"] = parsed_snapshot if isinstance(parsed_snapshot, dict) else {}
+        except Exception:
+            row["snapshot"] = {}
+        try:
+            parsed_decisions = json.loads(decisions_json or "{}")
+            row["decisions"] = parsed_decisions if isinstance(parsed_decisions, dict) else {}
+        except Exception:
+            row["decisions"] = {}
+        try:
+            parsed_findings = json.loads(findings_json or "[]")
+            row["findings"] = parsed_findings if isinstance(parsed_findings, list) else []
+        except Exception:
+            row["findings"] = []
+        try:
+            parsed_meta = json.loads(metadata_json or "{}")
+            row["metadata"] = parsed_meta if isinstance(parsed_meta, dict) else {}
+        except Exception:
+            row["metadata"] = {}
+        row["status"] = str(row.get("status") or "open").strip().lower() or "open"
+        return row
+
+    @staticmethod
+    def _decode_security_incident_row(row: dict[str, Any]) -> dict[str, Any]:
+        metadata_json = row.pop("metadata_json", "{}")
+        try:
+            parsed_meta = json.loads(metadata_json or "{}")
+            row["metadata"] = parsed_meta if isinstance(parsed_meta, dict) else {}
+        except Exception:
+            row["metadata"] = {}
+        row["status"] = str(row.get("status") or "open").strip().lower() or "open"
+        row["severity"] = str(row.get("severity") or "medium").strip().lower() or "medium"
+        row["category"] = str(row.get("category") or "security").strip().lower() or "security"
+        return row
+
+    @staticmethod
+    def _decode_security_incident_event_row(row: dict[str, Any]) -> dict[str, Any]:
+        details_json = row.pop("details_json", "{}")
+        try:
+            parsed_details = json.loads(details_json or "{}")
+            row["details"] = parsed_details if isinstance(parsed_details, dict) else {}
+        except Exception:
+            row["details"] = {}
+        row["event_type"] = str(row.get("event_type") or "note").strip().lower() or "note"
         return row
 
     def upsert_agent(self, agent: dict[str, Any]) -> None:

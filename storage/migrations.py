@@ -624,6 +624,109 @@ MIGRATIONS: list[Migration] = [
             ON agent_runs(lease_owner, status, updated_at);
         """,
     ),
+    Migration(
+        version=15,
+        name="security_operations_baseline_v1",
+        sql="""
+        CREATE TABLE IF NOT EXISTS security_auth_token_activity (
+            token_fingerprint TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            scopes_json TEXT NOT NULL DEFAULT '[]',
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            last_request_id TEXT,
+            last_path TEXT,
+            last_method TEXT,
+            request_count INTEGER NOT NULL DEFAULT 0,
+            metadata_json TEXT NOT NULL DEFAULT '{}'
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_security_auth_token_last_seen
+            ON security_auth_token_activity(last_seen_at);
+        CREATE INDEX IF NOT EXISTS idx_security_auth_token_user
+            ON security_auth_token_activity(user_id, last_seen_at);
+
+        CREATE TABLE IF NOT EXISTS security_secret_inventory (
+            secret_key TEXT PRIMARY KEY,
+            provider TEXT NOT NULL,
+            is_required INTEGER NOT NULL DEFAULT 1,
+            source TEXT NOT NULL DEFAULT 'env',
+            value_fingerprint TEXT,
+            value_present INTEGER NOT NULL DEFAULT 0,
+            last_rotated_at TEXT,
+            rotation_period_days INTEGER NOT NULL DEFAULT 90,
+            expires_at TEXT,
+            status TEXT NOT NULL DEFAULT 'unknown',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_security_secret_status
+            ON security_secret_inventory(status, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_security_secret_provider
+            ON security_secret_inventory(provider, updated_at);
+
+        CREATE TABLE IF NOT EXISTS security_access_reviews (
+            id TEXT PRIMARY KEY,
+            reviewer TEXT,
+            status TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            completed_at TEXT,
+            summary TEXT,
+            snapshot_json TEXT NOT NULL DEFAULT '{}',
+            decisions_json TEXT NOT NULL DEFAULT '{}',
+            findings_json TEXT NOT NULL DEFAULT '[]',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_security_access_reviews_status
+            ON security_access_reviews(status, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_security_access_reviews_started
+            ON security_access_reviews(started_at);
+
+        CREATE TABLE IF NOT EXISTS security_incidents (
+            id TEXT PRIMARY KEY,
+            category TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            status TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            owner TEXT,
+            opened_at TEXT NOT NULL,
+            acknowledged_at TEXT,
+            resolved_at TEXT,
+            impact TEXT,
+            containment TEXT,
+            root_cause TEXT,
+            recovery_actions TEXT,
+            request_id TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_security_incidents_status
+            ON security_incidents(status, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_security_incidents_severity
+            ON security_incidents(severity, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_security_incidents_opened
+            ON security_incidents(opened_at);
+
+        CREATE TABLE IF NOT EXISTS security_incident_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            incident_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            actor TEXT,
+            message TEXT NOT NULL,
+            details_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(incident_id) REFERENCES security_incidents(id) ON DELETE CASCADE ON UPDATE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_security_incident_events_time
+            ON security_incident_events(incident_id, created_at);
+        """,
+    ),
 ]
 
 

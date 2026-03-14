@@ -17,6 +17,7 @@ python3 -m pip install -r requirements.txt
 
 echo "[rollback] validating runtime boots"
 python3 -m unittest tests.test_security_http_authz -v
+python3 -m unittest tests.test_security_compliance_api -v
+python3 scripts/security/compliance_check.py
 
 echo "[rollback] done - pin this ref as rollback baseline"
-
