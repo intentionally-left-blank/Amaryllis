@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from threading import Event, Thread
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -125,6 +126,56 @@ class _AlwaysFailProvider:
         yield ""
 
 
+class _OutOfOrderProvider:
+    def __init__(self, name: str, *, local: bool = False) -> None:
+        self.name = name
+        self.local = local
+        self.chat_calls = 0
+        self.slow_started = Event()
+        self.allow_slow_success = Event()
+
+    def list_models(self) -> list[dict[str, Any]]:
+        return [{"id": f"{self.name}-model", "provider": self.name}]
+
+    def health_check(self) -> dict[str, Any]:
+        return {"status": "ok", "detail": "race"}
+
+    def capabilities(self) -> dict[str, Any]:
+        return {
+            "local": self.local,
+            "supports_download": self.local,
+            "supports_load": True,
+            "supports_stream": True,
+            "supports_tools": False,
+            "requires_api_key": not self.local,
+        }
+
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+    ) -> str:
+        del messages, model, temperature, max_tokens
+        self.chat_calls += 1
+        if self.chat_calls == 1:
+            self.slow_started.set()
+            self.allow_slow_success.wait(timeout=2.0)
+            return "late-success"
+        raise RuntimeError("503 Service Unavailable")
+
+    def stream_chat(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+    ) -> Iterator[str]:
+        del messages, model, temperature, max_tokens
+        yield self.chat([], "")
+
+
 class ModelFailoverTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="amaryllis-tests-model-failover-")
@@ -241,6 +292,56 @@ class ModelFailoverTests(unittest.TestCase):
         self.assertIn(openai.get("status"), {"error", "circuit_open"})
         self.assertIsInstance(openai.get("failure_count"), int)
         self.assertGreaterEqual(int(openai.get("failure_count", 0)), 0)
+
+    def test_stale_success_does_not_clear_newer_circuit_state(self) -> None:
+        provider = _OutOfOrderProvider("openai", local=False)
+        self.manager.providers = {"openai": provider}
+        self.manager.active_provider = "openai"
+        self.manager.active_model = "openai-model"
+
+        errors: list[Exception] = []
+        late_success_result: dict[str, Any] = {}
+
+        def _slow_success_call() -> None:
+            try:
+                payload = self.manager.chat(
+                    messages=[{"role": "user", "content": "slow"}],
+                    provider="openai",
+                    model="openai-model",
+                )
+                late_success_result.update(payload)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        thread = Thread(target=_slow_success_call, daemon=True)
+        thread.start()
+        started = provider.slow_started.wait(timeout=2.0)
+        self.assertTrue(started)
+
+        failures_to_open = max(1, int(self.config.provider_circuit_failure_threshold))
+        for _ in range(failures_to_open):
+            with self.assertRaises(Exception):
+                self.manager.chat(
+                    messages=[{"role": "user", "content": "fast-fail"}],
+                    provider="openai",
+                    model="openai-model",
+                )
+        self.assertTrue(self.manager._is_provider_circuit_open("openai"))  # noqa: SLF001
+
+        provider.allow_slow_success.set()
+        thread.join(timeout=2.0)
+        self.assertFalse(thread.is_alive())
+        self.assertFalse(errors)
+        self.assertEqual(late_success_result.get("content"), "late-success")
+
+        # The late success started before the newer failure, so it must not
+        # reset failure_count/circuit_open state.
+        self.assertTrue(self.manager._is_provider_circuit_open("openai"))  # noqa: SLF001
+        self.assertGreaterEqual(self.manager._provider_failure_count("openai"), 1)  # noqa: SLF001
+        debug = self.manager.debug_failover_state(limit=10)
+        runtime = dict(debug.get("provider_runtime") or {}).get("openai", {})
+        self.assertTrue(bool(runtime.get("circuit_open")))
+        self.assertGreaterEqual(float(runtime.get("circuit_remaining_sec", 0.0)), 0.0)
 
 
 if __name__ == "__main__":

@@ -30,6 +30,20 @@ class AuthContext:
     def is_admin(self) -> bool:
         return self.has_scope("admin")
 
+    @property
+    def is_service(self) -> bool:
+        return self.has_scope("service")
+
+    @property
+    def is_user(self) -> bool:
+        return self.has_scope("user")
+
+    def has_any_scope(self, *scopes: str) -> bool:
+        for scope in scopes:
+            if self.has_scope(scope):
+                return True
+        return False
+
 
 class AuthManager:
     def __init__(self, *, enabled: bool, token_specs: tuple[AuthTokenSpec, ...]) -> None:

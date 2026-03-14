@@ -65,6 +65,26 @@ class AuthManagerTests(unittest.TestCase):
         self.assertEqual(resolved, "user-2")
         assert_owner(owner_user_id="user-3", auth=context, resource_name="run", resource_id="run-1")
 
+    def test_service_scope_is_present_but_cannot_cross_user(self) -> None:
+        manager = AuthManager(
+            enabled=True,
+            token_specs=(
+                AuthTokenSpec(token="service-token", user_id="svc-runtime", scopes=("service",)),
+            ),
+        )
+        request = _request_with_headers({"authorization": "Bearer service-token"})
+        context = manager.authenticate_request(request)
+
+        self.assertTrue(context.is_service)
+        self.assertFalse(context.is_admin)
+        self.assertFalse(context.is_user)
+        self.assertTrue(context.has_any_scope("service", "admin"))
+
+        resolved = resolve_user_id(request_user_id=None, auth=context)
+        self.assertEqual(resolved, "svc-runtime")
+        with self.assertRaises(PermissionDeniedError):
+            resolve_user_id(request_user_id="user-2", auth=context)
+
 
 if __name__ == "__main__":
     unittest.main()

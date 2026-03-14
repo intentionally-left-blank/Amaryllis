@@ -30,7 +30,7 @@ from memory.user_memory import UserMemory
 from memory.working_memory import WorkingMemory
 from models.model_manager import ModelManager
 from planner.planner import Planner
-from runtime.auth import AuthManager
+from runtime.auth import AuthContext, AuthManager, auth_context_from_request
 from runtime.config import AppConfig
 from runtime.errors import AmaryllisError, InternalError, PermissionDeniedError
 from runtime.security import LocalIdentityManager, SecurityManager
@@ -282,6 +282,30 @@ def create_app() -> FastAPI:
         message: str,
     ) -> JSONResponse:
         request_id = request_id_from_request(request)
+        if error_type in {"authentication_error", "permission_denied"}:
+            actor: str | None = None
+            scopes: list[str] = []
+            auth_context = getattr(request.state, "auth_context", None)
+            if isinstance(auth_context, AuthContext):
+                actor = auth_context.user_id
+                scopes = sorted(auth_context.scopes)
+            try:
+                services.security_manager.audit_access_denied(
+                    denial_type=error_type,
+                    request_id=request_id,
+                    actor=actor,
+                    path=request.url.path,
+                    method=request.method,
+                    message=message,
+                    status_code=status_code,
+                    scopes=scopes,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "security_access_audit_failed request_id=%s error=%s",
+                    request_id,
+                    exc,
+                )
         services.telemetry.emit(
             "request_error",
             {
@@ -326,6 +350,11 @@ def create_app() -> FastAPI:
             if path.startswith("/security/") or path.startswith("/debug/"):
                 if not auth_context.is_admin:
                     raise PermissionDeniedError("Admin scope is required")
+            elif path.startswith("/service/"):
+                if not auth_context.has_any_scope("service", "admin"):
+                    raise PermissionDeniedError("Service scope is required")
+            elif not auth_context.has_any_scope("user", "admin"):
+                raise PermissionDeniedError("User scope is required")
 
         start = time.perf_counter()
         services.telemetry.emit(
@@ -441,6 +470,20 @@ def create_app() -> FastAPI:
         return {
             "status": overall_status,
             "request_id": request_id_from_request(request),
+            "active_provider": services.model_manager.active_provider,
+            "active_model": services.model_manager.active_model,
+            "providers": checks,
+        }
+
+    @app.get("/service/health")
+    def service_health(request: Request) -> dict[str, Any]:
+        auth = auth_context_from_request(request)
+        checks = services.model_manager.provider_health()
+        return {
+            "status": "ok",
+            "request_id": request_id_from_request(request),
+            "actor": auth.user_id,
+            "scopes": sorted(auth.scopes),
             "active_provider": services.model_manager.active_provider,
             "active_model": services.model_manager.active_model,
             "providers": checks,

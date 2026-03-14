@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
 import random
@@ -33,6 +34,13 @@ from runtime.config import AppConfig
 from storage.database import Database
 
 
+@dataclass
+class _ProviderRuntimeState:
+    failure_count: int = 0
+    circuit_until_monotonic: float | None = None
+    latest_failure_started_at: float = 0.0
+
+
 class ModelManager:
     def __init__(self, config: AppConfig, database: Database) -> None:
         self.config = config
@@ -59,6 +67,7 @@ class ModelManager:
                 api_key=config.openrouter_api_key,
             )
 
+        self._active_target_lock = Lock()
         self.active_provider = database.get_setting("active_provider", config.default_provider) or config.default_provider
         self.active_model = database.get_setting("active_model", config.default_model) or config.default_model
 
@@ -71,8 +80,8 @@ class ModelManager:
         self._suggested_cache: dict[str, list[dict[str, str]]] = {}
         self._suggested_cache_until: float = 0.0
         self._suggested_cache_ttl_seconds = 6 * 60 * 60
-        self._provider_failure_counts: dict[str, int] = {}
-        self._provider_circuit_until: dict[str, float] = {}
+        self._suggested_cache_lock = Lock()
+        self._provider_states: dict[str, _ProviderRuntimeState] = {}
         self._provider_state_lock = Lock()
         self._cloud_rate_records: dict[str, deque[float]] = {}
         self._cloud_budget_records: dict[str, deque[tuple[float, int]]] = {}
@@ -82,6 +91,7 @@ class ModelManager:
         self._route_lock = Lock()
 
     def list_models(self) -> dict[str, Any]:
+        active_provider, active_model = self._active_target()
         provider_payload: dict[str, Any] = {}
 
         for name, provider in self.providers.items():
@@ -122,8 +132,8 @@ class ModelManager:
 
         return {
             "active": {
-                "provider": self.active_provider,
-                "model": self.active_model,
+                "provider": active_provider,
+                "model": active_model,
             },
             "providers": provider_payload,
             "capabilities": self.provider_capabilities(),
@@ -162,6 +172,7 @@ class ModelManager:
         return matrix
 
     def provider_health(self) -> dict[str, Any]:
+        active_provider, _ = self._active_target()
         checks: dict[str, Any] = {}
         for name, provider in self.providers.items():
             start = time.perf_counter()
@@ -171,7 +182,7 @@ class ModelManager:
                     checks[name] = {
                         "status": "circuit_open",
                         "latency_ms": latency_ms,
-                        "active": name == self.active_provider,
+                        "active": name == active_provider,
                         "detail": (
                             f"cooldown_remaining_sec={self._provider_cooldown_remaining(name):.2f}"
                         ),
@@ -200,7 +211,7 @@ class ModelManager:
                 checks[name] = {
                     "status": str(payload.get("status", "ok")),
                     "latency_ms": latency_ms,
-                    "active": name == self.active_provider,
+                    "active": name == active_provider,
                     "detail": payload.get("detail"),
                     "failure_count": self._provider_failure_count(name),
                     "circuit_open": self._is_provider_circuit_open(name),
@@ -211,7 +222,7 @@ class ModelManager:
                 checks[name] = {
                     "status": "error",
                     "latency_ms": latency_ms,
-                    "active": name == self.active_provider,
+                    "active": name == active_provider,
                     "detail": str(exc),
                     "failure_count": self._provider_failure_count(name),
                     "circuit_open": self._is_provider_circuit_open(name),
@@ -225,6 +236,7 @@ class ModelManager:
         include_suggested: bool = True,
         limit_per_provider: int = 120,
     ) -> dict[str, Any]:
+        active_provider, active_model = self._active_target()
         provider_caps = self.provider_capabilities()
         candidates = self._build_model_candidates(
             provider_capabilities=provider_caps,
@@ -242,8 +254,8 @@ class ModelManager:
         return {
             "generated_at": self._utc_now_iso(),
             "active": {
-                "provider": self.active_provider,
-                "model": self.active_model,
+                "provider": active_provider,
+                "model": active_model,
             },
             "providers": provider_caps,
             "count": len(items),
@@ -348,7 +360,8 @@ class ModelManager:
         }
 
     def download_model(self, model_id: str, provider: str | None = None) -> dict[str, Any]:
-        provider_name = provider or self.active_provider
+        active_provider, _ = self._active_target()
+        provider_name = provider or active_provider
         selected = self.providers.get(provider_name)
         if selected is None:
             raise ValueError(f"Unknown provider: {provider_name}")
@@ -358,23 +371,24 @@ class ModelManager:
         return result
 
     def load_model(self, model_id: str, provider: str | None = None) -> dict[str, Any]:
-        provider_name = provider or self.active_provider
+        active_provider, _ = self._active_target()
+        provider_name = provider or active_provider
         selected = self.providers.get(provider_name)
         if selected is None:
             raise ValueError(f"Unknown provider: {provider_name}")
 
         result = selected.load_model(model_id)
-        self.active_provider = provider_name
-        self.active_model = model_id
+        self._set_active_target(provider_name=provider_name, model_name=model_id)
 
         self.database.set_setting("active_provider", provider_name)
         self.database.set_setting("active_model", model_id)
+        final_provider, final_model = self._active_target()
 
         return {
             **result,
             "active": {
-                "provider": self.active_provider,
-                "model": self.active_model,
+                "provider": final_provider,
+                "model": final_model,
             },
         }
 
@@ -658,7 +672,24 @@ class ModelManager:
             ],
             "recent_failovers": items,
             "recent_failovers_count": len(items),
+            "provider_runtime": self._provider_runtime_snapshot(),
         }
+
+    def _provider_runtime_snapshot(self) -> dict[str, dict[str, Any]]:
+        now = time.monotonic()
+        with self._provider_state_lock:
+            snapshot: dict[str, dict[str, Any]] = {}
+            for provider_name, state in self._provider_states.items():
+                remaining = 0.0
+                if state.circuit_until_monotonic is not None:
+                    remaining = max(0.0, float(state.circuit_until_monotonic) - now)
+                snapshot[str(provider_name)] = {
+                    "failure_count": int(state.failure_count),
+                    "circuit_open": bool(remaining > 0.0),
+                    "circuit_remaining_sec": round(remaining, 3),
+                    "latest_failure_started_at": float(state.latest_failure_started_at),
+                }
+            return snapshot
 
     def _resolve_runtime_targets(
         self,
@@ -868,8 +899,9 @@ class ModelManager:
 
     def _get_suggested_models(self) -> dict[str, list[dict[str, str]]]:
         now = time.time()
-        if self._suggested_cache and now < self._suggested_cache_until:
-            return self._suggested_cache
+        with self._suggested_cache_lock:
+            if self._suggested_cache and now < self._suggested_cache_until:
+                return self._clone_suggested_map(self._suggested_cache)
 
         suggested: dict[str, list[dict[str, str]]] = {}
         for provider_name, provider in self.providers.items():
@@ -887,9 +919,10 @@ class ModelManager:
                     )
             suggested[provider_name] = items
 
-        self._suggested_cache = suggested
-        self._suggested_cache_until = now + self._suggested_cache_ttl_seconds
-        return suggested
+        with self._suggested_cache_lock:
+            self._suggested_cache = self._clone_suggested_map(suggested)
+            self._suggested_cache_until = now + self._suggested_cache_ttl_seconds
+            return self._clone_suggested_map(self._suggested_cache)
 
     @staticmethod
     def _normalize_suggested(items: Any) -> list[dict[str, str]]:
@@ -917,6 +950,7 @@ class ModelManager:
         include_suggested: bool,
         limit_per_provider: int,
     ) -> list[ModelCandidate]:
+        active_provider, active_model = self._active_target()
         rows: list[ModelCandidate] = []
         seen: set[str] = set()
 
@@ -956,15 +990,15 @@ class ModelManager:
                         supports_stream=supports_stream,
                         supports_tools=supports_tools,
                         requires_api_key=requires_api_key,
-                        active=bool(item.get("active", False) or model_id == self.active_model),
+                        active=bool(item.get("active", False) or model_id == active_model),
                         installed=bool(local),
                         metadata=metadata if isinstance(metadata, dict) else {},
                     )
                 )
 
             defaults = [self._default_model_for_provider(provider_name)]
-            if provider_name == self.active_provider and self.active_model:
-                defaults.append(self.active_model)
+            if provider_name == active_provider and active_model:
+                defaults.append(active_model)
             for model_id in defaults:
                 normalized = str(model_id).strip()
                 if not normalized:
@@ -982,8 +1016,8 @@ class ModelManager:
                         supports_stream=supports_stream,
                         supports_tools=supports_tools,
                         requires_api_key=requires_api_key,
-                        active=provider_name == self.active_provider and normalized == self.active_model,
-                        installed=bool(local and provider_name == self.active_provider and normalized == self.active_model),
+                        active=provider_name == active_provider and normalized == active_model,
+                        installed=bool(local and provider_name == active_provider and normalized == active_model),
                         metadata={},
                     )
                 )
@@ -1107,18 +1141,40 @@ class ModelManager:
         except Exception:
             return None
 
+    def _active_target(self) -> tuple[str, str]:
+        with self._active_target_lock:
+            return self.active_provider, self.active_model
+
+    def _set_active_target(self, *, provider_name: str, model_name: str) -> None:
+        with self._active_target_lock:
+            self.active_provider = provider_name
+            self.active_model = model_name
+
+    @staticmethod
+    def _clone_suggested_map(items: dict[str, list[dict[str, str]]]) -> dict[str, list[dict[str, str]]]:
+        result: dict[str, list[dict[str, str]]] = {}
+        for provider_name, values in items.items():
+            normalized_provider = str(provider_name)
+            if not isinstance(values, list):
+                result[normalized_provider] = []
+                continue
+            result[normalized_provider] = [dict(item) for item in values if isinstance(item, dict)]
+        return result
+
     def _invalidate_suggested_cache(self) -> None:
-        self._suggested_cache = {}
-        self._suggested_cache_until = 0.0
+        with self._suggested_cache_lock:
+            self._suggested_cache = {}
+            self._suggested_cache_until = 0.0
 
     def _resolve_target(self, model: str | None, provider: str | None) -> tuple[str, str]:
-        provider_name = provider or self.active_provider or self.config.default_provider
+        active_provider, active_model = self._active_target()
+        provider_name = provider or active_provider or self.config.default_provider
         if model:
             model_name = model
-        elif provider and provider != self.active_provider:
+        elif provider and provider != active_provider:
             model_name = self._default_model_for_provider(provider_name)
         else:
-            model_name = self.active_model or self.config.default_model
+            model_name = active_model or self.config.default_model
         if provider_name not in self.providers:
             raise ValueError(f"Unknown provider: {provider_name}")
         return provider_name, model_name
@@ -1144,6 +1200,7 @@ class ModelManager:
         if not self.config.enable_ollama_fallback:
             return []
 
+        active_provider, active_model = self._active_target()
         targets: list[tuple[str, str]] = []
 
         if provider_name == "mlx":
@@ -1153,9 +1210,9 @@ class ModelManager:
             return self._unique_targets(targets)
 
         if provider_name in {"openai", "openrouter", "anthropic"}:
-            if self.active_provider in {"mlx", "ollama"} and self.active_provider in self.providers:
-                local_active_model = self.active_model or self._default_model_for_provider(self.active_provider)
-                targets.append((self.active_provider, local_active_model))
+            if active_provider in {"mlx", "ollama"} and active_provider in self.providers:
+                local_active_model = active_model or self._default_model_for_provider(active_provider)
+                targets.append((active_provider, local_active_model))
 
             if "mlx" in self.providers:
                 targets.append(("mlx", self.config.default_model))
@@ -1272,11 +1329,12 @@ class ModelManager:
         attempts = max(1, int(self.config.provider_retry_attempts))
         last_info: ProviderErrorInfo | None = None
         for attempt in range(1, attempts + 1):
+            call_started_at = time.monotonic()
             try:
                 if callable(before_call):
                     before_call()
                 result = call()
-                self._record_provider_success(provider_name)
+                self._record_provider_success(provider_name, call_started_at=call_started_at)
                 return result
             except Exception as exc:  # noqa: BLE001
                 info = classify_provider_error(
@@ -1285,7 +1343,7 @@ class ModelManager:
                     error=exc,
                 )
                 last_info = info
-                self._record_provider_failure(provider_name)
+                self._record_provider_failure(provider_name, call_started_at=call_started_at)
                 retryable = info.retryable
                 if attempt >= attempts or not retryable:
                     break
@@ -1304,20 +1362,41 @@ class ModelManager:
             )
         raise ProviderOperationError(last_info)
 
-    def _record_provider_success(self, provider_name: str) -> None:
-        with self._provider_state_lock:
-            self._provider_failure_counts[provider_name] = 0
-            self._provider_circuit_until.pop(provider_name, None)
+    def _provider_state_unlocked(self, provider_name: str) -> _ProviderRuntimeState:
+        state = self._provider_states.get(provider_name)
+        if state is None:
+            state = _ProviderRuntimeState()
+            self._provider_states[provider_name] = state
+        return state
 
-    def _record_provider_failure(self, provider_name: str) -> None:
+    def _record_provider_success(self, provider_name: str, *, call_started_at: float) -> None:
+        ignored_stale_success = False
+        with self._provider_state_lock:
+            state = self._provider_state_unlocked(provider_name)
+            if call_started_at < state.latest_failure_started_at:
+                ignored_stale_success = True
+            else:
+                state.failure_count = 0
+                state.circuit_until_monotonic = None
+        if ignored_stale_success:
+            self.logger.debug(
+                "provider_success_ignored_stale provider=%s started_at=%.6f",
+                provider_name,
+                call_started_at,
+            )
+
+    def _record_provider_failure(self, provider_name: str, *, call_started_at: float) -> None:
         threshold = max(1, int(self.config.provider_circuit_failure_threshold))
         cooldown = max(1.0, float(self.config.provider_circuit_cooldown_sec))
         opened = False
+        failures = 0
         with self._provider_state_lock:
-            failures = self._provider_failure_counts.get(provider_name, 0) + 1
-            self._provider_failure_counts[provider_name] = failures
+            state = self._provider_state_unlocked(provider_name)
+            state.latest_failure_started_at = max(float(state.latest_failure_started_at), float(call_started_at))
+            failures = int(state.failure_count) + 1
+            state.failure_count = failures
             if failures >= threshold:
-                self._provider_circuit_until[provider_name] = time.monotonic() + cooldown
+                state.circuit_until_monotonic = time.monotonic() + cooldown
                 opened = True
         if opened:
             self.logger.warning(
@@ -1329,30 +1408,33 @@ class ModelManager:
 
     def _is_provider_circuit_open(self, provider_name: str) -> bool:
         with self._provider_state_lock:
-            until = self._provider_circuit_until.get(provider_name)
+            state = self._provider_state_unlocked(provider_name)
+            until = state.circuit_until_monotonic
             if until is None:
                 return False
             if time.monotonic() >= until:
-                self._provider_circuit_until.pop(provider_name, None)
-                self._provider_failure_counts[provider_name] = 0
+                state.circuit_until_monotonic = None
+                state.failure_count = 0
                 return False
             return True
 
     def _provider_cooldown_remaining(self, provider_name: str) -> float:
         with self._provider_state_lock:
-            until = self._provider_circuit_until.get(provider_name)
+            state = self._provider_state_unlocked(provider_name)
+            until = state.circuit_until_monotonic
             if until is None:
                 return 0.0
             remaining = max(0.0, until - time.monotonic())
             if remaining <= 0.0:
-                self._provider_circuit_until.pop(provider_name, None)
-                self._provider_failure_counts[provider_name] = 0
+                state.circuit_until_monotonic = None
+                state.failure_count = 0
                 return 0.0
             return remaining
 
     def _provider_failure_count(self, provider_name: str) -> int:
         with self._provider_state_lock:
-            return int(self._provider_failure_counts.get(provider_name, 0))
+            state = self._provider_state_unlocked(provider_name)
+            return int(state.failure_count)
 
     def _provider_retry_delay(self, *, attempt: int) -> float:
         base = max(0.0, float(self.config.provider_retry_backoff_sec))

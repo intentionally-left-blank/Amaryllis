@@ -92,16 +92,21 @@ class ConfigSecurityDefaultsTests(unittest.TestCase):
                 os.environ,
                 {
                     "AMARYLLIS_SUPPORT_DIR": str(support_dir),
-                    "AMARYLLIS_AUTH_TOKENS": "token-admin:admin:admin|user,token-user:user-1:user",
+                    "AMARYLLIS_AUTH_TOKENS": (
+                        "token-admin:admin:admin|user,"
+                        "token-user:user-1:user,"
+                        "token-service:svc-runner:service"
+                    ),
                 },
                 clear=True,
             ):
                 config = AppConfig.from_env()
 
-        self.assertEqual(len(config.auth_tokens), 2)
+        self.assertEqual(len(config.auth_tokens), 3)
         by_token = {item.token: item for item in config.auth_tokens}
         self.assertEqual(set(by_token["token-admin"].scopes), {"admin", "user"})
         self.assertEqual(by_token["token-user"].user_id, "user-1")
+        self.assertEqual(set(by_token["token-service"].scopes), {"service"})
 
 
 if __name__ == "__main__":
