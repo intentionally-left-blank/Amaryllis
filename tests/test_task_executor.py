@@ -552,6 +552,108 @@ class TaskExecutorTests(unittest.TestCase):
                 user_message="Do A and B",
             )
 
+    @staticmethod
+    def _build_issue_eval_executor() -> TaskExecutor:
+        model_manager = _FakeModelManager(
+            responses=[
+                {
+                    "content": "ok",
+                    "provider": "fake",
+                    "model": "fake-model",
+                }
+            ]
+        )
+        memory_manager = _FakeMemoryManager()
+        registry = ToolRegistry()
+        return TaskExecutor(
+            model_manager=model_manager,  # type: ignore[arg-type]
+            memory_manager=memory_manager,  # type: ignore[arg-type]
+            tool_registry=registry,
+            tool_executor=ToolExecutor(registry),
+            meta_controller=MetaController(),
+            planner=Planner(),
+            verifier_enabled=False,
+        )
+
+    def test_evaluate_plan_issue_fetch_source_returns_tool_blueprint(self) -> None:
+        executor = self._build_issue_eval_executor()
+        deadline = time.monotonic() + 2.0
+        result = executor._evaluate_plan_issue(  # noqa: SLF001
+            issue_id="plan_step:2",
+            step_payload={
+                "description": "Fetch source content from URL",
+                "kind": "fetch_source",
+                "requires_tools": True,
+                "hints": {
+                    "urls": ["https://example.com/page"],
+                },
+            },
+            tools_available=True,
+            issue_deadline_monotonic=deadline,
+        )
+        self.assertEqual(str(result.get("status")), "done")
+        payload = result.get("payload")
+        self.assertIsInstance(payload, dict)
+        assert isinstance(payload, dict)
+        self.assertEqual(str(payload.get("step_kind")), "fetch_source")
+        self.assertTrue(bool(payload.get("requires_tools")))
+        self.assertIn("tool_blueprint", payload)
+        blueprint = payload.get("tool_blueprint")
+        self.assertIsInstance(blueprint, dict)
+        assert isinstance(blueprint, dict)
+        self.assertEqual(str(blueprint.get("intent")), "fetch_content")
+        self.assertIn("https://example.com/page", payload.get("source_urls", []))
+
+    def test_evaluate_plan_issue_blocks_when_dependency_context_missing(self) -> None:
+        executor = self._build_issue_eval_executor()
+        deadline = time.monotonic() + 2.0
+        result = executor._evaluate_plan_issue(  # noqa: SLF001
+            issue_id="plan_step:4",
+            step_payload={
+                "description": "Compose concise summary",
+                "kind": "summarize",
+                "requires_tools": False,
+            },
+            tools_available=True,
+            issue_deadline_monotonic=deadline,
+        )
+        self.assertEqual(str(result.get("status")), "blocked")
+        self.assertIn("dependency artifacts", str(result.get("reason", "")).lower())
+
+    def test_evaluate_plan_issue_summarize_uses_dependency_artifacts(self) -> None:
+        executor = self._build_issue_eval_executor()
+        deadline = time.monotonic() + 2.0
+        result = executor._evaluate_plan_issue(  # noqa: SLF001
+            issue_id="plan_step:5",
+            step_payload={
+                "description": "Compose final summary",
+                "kind": "summarize",
+                "_dependency_artifacts": {
+                    "plan_step:3": {
+                        "result": {
+                            "description": "Extracted key facts",
+                            "extracted_points": [
+                                "Release introduces security hardening.",
+                                "Migration requires schema update.",
+                            ],
+                        }
+                    }
+                },
+            },
+            tools_available=True,
+            issue_deadline_monotonic=deadline,
+        )
+        self.assertEqual(str(result.get("status")), "done")
+        payload = result.get("payload")
+        self.assertIsInstance(payload, dict)
+        assert isinstance(payload, dict)
+        self.assertEqual(str(payload.get("step_kind")), "summarize")
+        outline = payload.get("summary_outline")
+        self.assertIsInstance(outline, list)
+        assert isinstance(outline, list)
+        self.assertGreaterEqual(len(outline), 1)
+        self.assertGreaterEqual(int(payload.get("dependency_insights_count", 0)), 1)
+
     def test_artifact_quality_repair_loop(self) -> None:
         model_manager = _FakeModelManager(
             responses=[

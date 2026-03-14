@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from typing import Any, Callable
@@ -1708,6 +1709,15 @@ class TaskExecutor:
 
                     pending.remove(ready_issue)
                     step_payload = step_by_issue.get(ready_issue, {})
+                    if not isinstance(step_payload, dict):
+                        step_payload = {}
+                    dependency_artifacts = self._collect_dependency_artifacts(
+                        dependencies=dependencies,
+                        issue_artifacts=issue_artifacts,
+                    )
+                    step_payload_for_execution = dict(step_payload)
+                    if dependency_artifacts:
+                        step_payload_for_execution["_dependency_artifacts"] = dependency_artifacts
                     issue_deadline = self._compute_issue_deadline(run_deadline_monotonic=run_deadline_monotonic)
                     self._set_issue_status(
                         issue_states=issue_states,
@@ -1724,7 +1734,7 @@ class TaskExecutor:
                     future = pool.submit(
                         self._evaluate_plan_issue,
                         issue_id=ready_issue,
-                        step_payload=step_payload,
+                        step_payload=step_payload_for_execution,
                         tools_available=tools_available,
                         issue_deadline_monotonic=issue_deadline,
                     )
@@ -2542,6 +2552,27 @@ class TaskExecutor:
         return result
 
     @staticmethod
+    def _collect_dependency_artifacts(
+        *,
+        dependencies: list[str],
+        issue_artifacts: dict[str, dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        result: dict[str, dict[str, Any]] = {}
+        for dependency in dependencies:
+            artifacts = issue_artifacts.get(str(dependency))
+            if not isinstance(artifacts, dict):
+                continue
+            normalized: dict[str, Any] = {}
+            for key, value in artifacts.items():
+                normalized_key = str(key).strip()
+                if not normalized_key or not isinstance(value, dict):
+                    continue
+                normalized[normalized_key] = dict(value)
+            if normalized:
+                result[str(dependency)] = normalized
+        return result
+
+    @staticmethod
     def _dependency_satisfied(*, issue_states: dict[str, dict[str, Any]], dependency: str) -> bool:
         if dependency == STEP_PREPARE_CONTEXT:
             status = str((issue_states.get(dependency) or {}).get("status") or ISSUE_PLANNED).strip().lower()
@@ -2626,29 +2657,46 @@ class TaskExecutor:
                 "payload": {},
             }
 
-        description = str(step_payload.get("description") or issue_id).strip() or issue_id
-        lower = description.lower()
-        requires_tools = any(
-            token in lower
-            for token in (
-                "tool",
-                "search",
-                "fetch",
-                "read",
-                "write",
-                "file",
-                "website",
-                "url",
-                "python",
-            )
+        payload_input = dict(step_payload) if isinstance(step_payload, dict) else {}
+        description = str(payload_input.get("description") or issue_id).strip() or issue_id
+        step_kind = self._infer_plan_step_kind(description=description, step_payload=payload_input)
+        hints = payload_input.get("hints")
+        normalized_hints = dict(hints) if isinstance(hints, dict) else {}
+        dependency_artifacts = self._normalize_dependency_artifacts(payload_input.get("_dependency_artifacts"))
+        dependency_points = self._extract_dependency_points(dependency_artifacts)
+        requires_tools = self._plan_step_requires_tools(
+            description=description,
+            step_payload=payload_input,
+            step_kind=step_kind,
         )
         if requires_tools and not tools_available:
             return {
                 "status": ISSUE_BLOCKED,
                 "reason": "Plan step requires tools but agent has no tools configured.",
                 "payload": {
+                    "step_kind": step_kind,
                     "requires_tools": True,
                     "description": description,
+                },
+            }
+
+        requires_dependency_context = step_kind in {
+            "extract_facts",
+            "summarize",
+            "synthesize",
+            "merge_results",
+            "verify",
+            "compare_targets",
+        }
+        if requires_dependency_context and not dependency_artifacts and not dependency_points:
+            return {
+                "status": ISSUE_BLOCKED,
+                "reason": "Plan step requires dependency artifacts from previous steps.",
+                "payload": {
+                    "step_kind": step_kind,
+                    "description": description,
+                    "requires_tools": requires_tools,
+                    "dependency_artifacts_count": 0,
                 },
             }
 
@@ -2661,15 +2709,263 @@ class TaskExecutor:
                 },
             }
 
+        payload: dict[str, Any] = {
+            "description": description,
+            "step_kind": step_kind,
+            "requires_tools": requires_tools,
+            "objective": str(payload_input.get("objective") or "").strip(),
+            "expected_output": str(payload_input.get("expected_output") or "").strip(),
+            "dependency_artifacts_count": len(dependency_artifacts),
+        }
+
+        task_hint = str(normalized_hints.get("task") or "").strip()
+        if step_kind == "analyze_request":
+            focus_text = task_hint or description
+            lowered = focus_text.lower()
+            constraints = [
+                token
+                for token in (
+                    "json",
+                    "markdown",
+                    "table",
+                    "bullet",
+                    "concise",
+                    "short",
+                    "detailed",
+                    "security",
+                    "anonymous",
+                    "strict",
+                    "quality",
+                    "deadline",
+                )
+                if token in lowered
+            ]
+            deliverables = [
+                token
+                for token in (
+                    "summary",
+                    "plan",
+                    "comparison",
+                    "analysis",
+                    "code",
+                    "report",
+                    "checklist",
+                )
+                if token in lowered
+            ]
+            payload.update(
+                {
+                    "task_brief": focus_text[:500],
+                    "constraints": constraints[:8],
+                    "deliverables": deliverables[:6] or ["answer"],
+                }
+            )
+        elif step_kind in {"fetch_source", "tool_query"}:
+            source_urls = [
+                item
+                for item in self._extract_urls_from_text(description)
+                if item
+            ]
+            hint_urls = normalized_hints.get("urls")
+            if isinstance(hint_urls, list):
+                for item in hint_urls:
+                    value = str(item).strip()
+                    if value and value not in source_urls:
+                        source_urls.append(value)
+            query_text = str(normalized_hints.get("query") or task_hint or description).strip()
+            payload.update(
+                {
+                    "source_urls": source_urls[:8],
+                    "tool_blueprint": {
+                        "intent": "fetch_content" if step_kind == "fetch_source" else "tool_query",
+                        "suggested_tools": ["web_search", "filesystem", "python_exec"],
+                        "query": query_text[:300],
+                        "targets": source_urls[:8],
+                    },
+                }
+            )
+        elif step_kind == "extract_facts":
+            extracted = dependency_points[:12]
+            payload.update(
+                {
+                    "source_issue_ids": sorted(dependency_artifacts.keys()),
+                    "extracted_points": extracted,
+                    "fact_count": len(extracted),
+                }
+            )
+        elif step_kind in {"summarize", "synthesize", "merge_results"}:
+            summary_outline = dependency_points[:8]
+            payload.update(
+                {
+                    "source_issue_ids": sorted(dependency_artifacts.keys()),
+                    "summary_outline": summary_outline,
+                    "dependency_insights_count": len(dependency_points),
+                }
+            )
+        elif step_kind in {"verify", "compare_targets"}:
+            checklist = [
+                "Check coverage against task goals.",
+                "Check internal consistency and contradictions.",
+                "Check whether output format matches expected constraints.",
+            ]
+            if dependency_points:
+                checklist.append("Validate claims against dependency artifacts.")
+            payload.update(
+                {
+                    "verification_checklist": checklist,
+                    "source_issue_ids": sorted(dependency_artifacts.keys()),
+                }
+            )
+        else:
+            if dependency_points:
+                payload["context_points"] = dependency_points[:8]
+
+        if time.monotonic() > issue_deadline_monotonic:
+            return {
+                "status": ISSUE_FAILED,
+                "reason": "Issue deadline exceeded during execution.",
+                "payload": {
+                    "description": description,
+                    "step_kind": step_kind,
+                },
+            }
+        payload["duration_ms"] = round((time.monotonic() - started) * 1000.0, 3)
         return {
             "status": ISSUE_DONE,
             "artifact_key": "result",
-            "payload": {
-                "description": description,
-                "requires_tools": requires_tools,
-                "duration_ms": round((time.monotonic() - started) * 1000.0, 3),
-            },
+            "payload": payload,
         }
+
+    @staticmethod
+    def _infer_plan_step_kind(*, description: str, step_payload: dict[str, Any]) -> str:
+        explicit = str(step_payload.get("kind") or "").strip().lower()
+        if explicit:
+            return explicit
+        text = description.lower()
+        if any(token in text for token in ("fetch", "crawl", "website", "url", "source")):
+            return "fetch_source"
+        if any(token in text for token in ("extract", "parse", "facts", "claims")):
+            return "extract_facts"
+        if any(token in text for token in ("summarize", "summary", "digest")):
+            return "summarize"
+        if any(token in text for token in ("merge", "combine", "aggregate")):
+            return "merge_results"
+        if any(token in text for token in ("verify", "validate", "check")):
+            return "verify"
+        if any(token in text for token in ("compare", "versus", "vs")):
+            return "compare_targets"
+        if any(token in text for token in ("analyze", "clarify", "intent", "requirements")):
+            return "analyze_request"
+        if any(token in text for token in ("tool", "query", "search", "lookup")):
+            return "tool_query"
+        return "general"
+
+    @staticmethod
+    def _plan_step_requires_tools(*, description: str, step_payload: dict[str, Any], step_kind: str) -> bool:
+        explicit = step_payload.get("requires_tools")
+        if isinstance(explicit, bool):
+            return explicit
+        hints = step_payload.get("hints")
+        if isinstance(hints, dict):
+            hint_urls = hints.get("urls")
+            if isinstance(hint_urls, list) and any(str(item).strip() for item in hint_urls):
+                return True
+        if step_kind in {"fetch_source", "tool_query"}:
+            return True
+        lowered = description.lower()
+        return any(
+            token in lowered
+            for token in (
+                "tool",
+                "search",
+                "fetch",
+                "read",
+                "write",
+                "file",
+                "website",
+                "url",
+                "python",
+                "command",
+            )
+        )
+
+    @staticmethod
+    def _normalize_dependency_artifacts(raw: Any) -> dict[str, dict[str, Any]]:
+        if not isinstance(raw, dict):
+            return {}
+        result: dict[str, dict[str, Any]] = {}
+        for issue_id, artifacts in raw.items():
+            normalized_issue_id = str(issue_id).strip()
+            if not normalized_issue_id or not isinstance(artifacts, dict):
+                continue
+            normalized: dict[str, Any] = {}
+            for key, value in artifacts.items():
+                normalized_key = str(key).strip()
+                if not normalized_key or not isinstance(value, dict):
+                    continue
+                normalized[normalized_key] = dict(value)
+            if normalized:
+                result[normalized_issue_id] = normalized
+        return result
+
+    @staticmethod
+    def _extract_dependency_points(dependency_artifacts: dict[str, dict[str, Any]]) -> list[str]:
+        points: list[str] = []
+        for issue_id in sorted(dependency_artifacts.keys()):
+            artifacts = dependency_artifacts.get(issue_id) or {}
+            for artifact in artifacts.values():
+                if not isinstance(artifact, dict):
+                    continue
+                for key in (
+                    "description",
+                    "task_brief",
+                    "objective",
+                    "expected_output",
+                    "query",
+                    "subtask",
+                ):
+                    value = artifact.get(key)
+                    if isinstance(value, str):
+                        text = value.strip()
+                        if text:
+                            points.append(text)
+                for key in (
+                    "constraints",
+                    "deliverables",
+                    "extracted_points",
+                    "summary_outline",
+                    "verification_checklist",
+                    "context_points",
+                ):
+                    value = artifact.get(key)
+                    if isinstance(value, list):
+                        for item in value:
+                            text = str(item).strip()
+                            if text:
+                                points.append(text)
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for item in points:
+            if item in seen:
+                continue
+            seen.add(item)
+            deduped.append(item)
+            if len(deduped) >= 24:
+                break
+        return deduped
+
+    @staticmethod
+    def _extract_urls_from_text(text: str) -> list[str]:
+        raw_items = re.findall(r"https?://[^\s)\]>]+", str(text or ""), flags=re.IGNORECASE)
+        result: list[str] = []
+        seen: set[str] = set()
+        for item in raw_items:
+            url = str(item).strip().rstrip(".,;)")
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            result.append(url)
+        return result
 
     def _ensure_issue(
         self,
