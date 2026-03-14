@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 import unittest
 from typing import Any
+from unittest.mock import patch
 
 from agents.agent import Agent
 from controller.meta_controller import MetaController
@@ -741,14 +742,67 @@ class TaskExecutorTests(unittest.TestCase):
     def test_evaluate_plan_issue_fetch_source_returns_tool_blueprint(self) -> None:
         executor = self._build_issue_eval_executor()
         deadline = time.monotonic() + 2.0
+        with patch("tasks.task_executor.httpx.get") as mock_get:
+            mock_get.return_value.status_code = 200
+            mock_get.return_value.headers = {"content-type": "text/html; charset=utf-8"}
+            mock_get.return_value.url = "https://example.com/page"
+            mock_get.return_value.text = (
+                "<html><head><title>Example Page</title></head>"
+                "<body><p>Amaryllis runtime isolates runs and validates outputs.</p></body></html>"
+            )
+            result = executor._evaluate_plan_issue(  # noqa: SLF001
+                issue_id="plan_step:2",
+                step_payload={
+                    "description": "Fetch source content from URL",
+                    "kind": "fetch_source",
+                    "requires_tools": True,
+                    "hints": {
+                        "urls": ["https://example.com/page"],
+                    },
+                },
+                tools_available=True,
+                issue_deadline_monotonic=deadline,
+            )
+        self.assertEqual(str(result.get("status")), "done")
+        payload = result.get("payload")
+        self.assertIsInstance(payload, dict)
+        assert isinstance(payload, dict)
+        self.assertEqual(str(payload.get("step_kind")), "fetch_source")
+        self.assertTrue(bool(payload.get("requires_tools")))
+        self.assertIn("tool_blueprint", payload)
+        self.assertIn("fetched_sources", payload)
+        self.assertEqual(str(payload.get("fetch_status")), "ok")
+        blueprint = payload.get("tool_blueprint")
+        self.assertIsInstance(blueprint, dict)
+        assert isinstance(blueprint, dict)
+        self.assertEqual(str(blueprint.get("intent")), "fetch_content")
+        self.assertIn("https://example.com/page", payload.get("source_urls", []))
+
+    def test_evaluate_plan_issue_extract_facts_builds_evidence_bundle(self) -> None:
+        executor = self._build_issue_eval_executor()
+        deadline = time.monotonic() + 2.0
         result = executor._evaluate_plan_issue(  # noqa: SLF001
-            issue_id="plan_step:2",
+            issue_id="plan_step:3",
             step_payload={
-                "description": "Fetch source content from URL",
-                "kind": "fetch_source",
-                "requires_tools": True,
-                "hints": {
-                    "urls": ["https://example.com/page"],
+                "description": "Extract facts from fetched sources",
+                "kind": "extract_facts",
+                "requires_tools": False,
+                "_dependency_artifacts": {
+                    "plan_step:2": {
+                        "result": {
+                            "description": "Fetched source material",
+                            "source_documents": [
+                                {
+                                    "url": "https://example.com/docs",
+                                    "text": (
+                                        "Amaryllis uses lease-based run ownership. "
+                                        "The manager persists tool calls with idempotency keys. "
+                                        "Recovery requeues stale running runs after restart."
+                                    ),
+                                }
+                            ],
+                        }
+                    }
                 },
             },
             tools_available=True,
@@ -758,14 +812,59 @@ class TaskExecutorTests(unittest.TestCase):
         payload = result.get("payload")
         self.assertIsInstance(payload, dict)
         assert isinstance(payload, dict)
-        self.assertEqual(str(payload.get("step_kind")), "fetch_source")
-        self.assertTrue(bool(payload.get("requires_tools")))
-        self.assertIn("tool_blueprint", payload)
-        blueprint = payload.get("tool_blueprint")
-        self.assertIsInstance(blueprint, dict)
-        assert isinstance(blueprint, dict)
-        self.assertEqual(str(blueprint.get("intent")), "fetch_content")
-        self.assertIn("https://example.com/page", payload.get("source_urls", []))
+        extracted = payload.get("extracted_points")
+        self.assertIsInstance(extracted, list)
+        assert isinstance(extracted, list)
+        self.assertGreaterEqual(len(extracted), 1)
+        self.assertGreaterEqual(int(payload.get("fact_count", 0)), 1)
+        facts = payload.get("facts")
+        self.assertIsInstance(facts, list)
+        assert isinstance(facts, list)
+        self.assertGreaterEqual(len(facts), 1)
+        self.assertIn("evidence", payload)
+
+    def test_evaluate_plan_issue_verify_reports_missing_evidence(self) -> None:
+        executor = self._build_issue_eval_executor()
+        deadline = time.monotonic() + 2.0
+        result = executor._evaluate_plan_issue(  # noqa: SLF001
+            issue_id="plan_step:7",
+            step_payload={
+                "description": "Verify claims from merged summary",
+                "kind": "verify",
+                "_dependency_artifacts": {
+                    "plan_step:4": {
+                        "result": {
+                            "description": "Summary output",
+                            "summary_outline": [
+                                "Runtime supports full DAG execution across distributed workers.",
+                                "Agent execution is always safe without approval checks.",
+                            ],
+                            "source_documents": [
+                                {
+                                    "url": "https://example.com/notes",
+                                    "text": "Runtime currently executes a linear single-run pipeline.",
+                                }
+                            ],
+                        }
+                    }
+                },
+            },
+            tools_available=True,
+            issue_deadline_monotonic=deadline,
+        )
+        self.assertEqual(str(result.get("status")), "failed")
+        self.assertIn("unsupported claims", str(result.get("reason", "")).lower())
+        payload = result.get("payload")
+        self.assertIsInstance(payload, dict)
+        assert isinstance(payload, dict)
+        verification = payload.get("verification_results")
+        self.assertIsInstance(verification, list)
+        assert isinstance(verification, list)
+        self.assertGreaterEqual(len(verification), 1)
+        summary = payload.get("verification_summary")
+        self.assertIsInstance(summary, dict)
+        assert isinstance(summary, dict)
+        self.assertGreater(int(summary.get("missing_evidence", 0)), 0)
 
     def test_evaluate_plan_issue_blocks_when_dependency_context_missing(self) -> None:
         executor = self._build_issue_eval_executor()

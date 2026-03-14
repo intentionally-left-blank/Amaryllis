@@ -31,6 +31,10 @@ class RunBudgetExceededError(TaskGuardrailError):
     pass
 
 
+class RunLeaseLostError(TaskGuardrailError):
+    pass
+
+
 RUN_RETRYABLE_FAILURE_CLASSES: set[str] = {
     "timeout",
     "rate_limit",
@@ -79,6 +83,8 @@ class AgentRunManager:
             self.run_lease_ttl_sec = max(lease_floor, self.attempt_timeout_sec * 2.0 + 5.0)
         else:
             self.run_lease_ttl_sec = max(lease_floor, float(run_lease_ttl_sec))
+        self.run_lease_heartbeat_sec = max(1.0, min(self.run_lease_ttl_sec / 3.0, 15.0))
+        self.run_lease_heartbeat_max_failures = 3
         self.default_run_budget = {
             "max_tokens": max(256, int(run_budget_max_tokens)),
             "max_duration_sec": max(10.0, float(run_budget_max_duration_sec)),
@@ -853,6 +859,8 @@ class AgentRunManager:
                 attempt=attempt,
                 started_at=started_at,
                 budget=budget,
+                run_id=run_id,
+                lease_token=lease_token,
                 checkpoint=push_checkpoint,
                 resume_state=resume_state,
             )
@@ -1439,6 +1447,8 @@ class AgentRunManager:
         attempt: int,
         started_at: str,
         budget: dict[str, Any],
+        run_id: str,
+        lease_token: str | None,
         checkpoint: Any,
         resume_state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -1448,6 +1458,16 @@ class AgentRunManager:
         if remaining_duration <= 0.0:
             raise RunBudgetExceededError("Run duration budget exceeded.")
         attempt_deadline = min(attempt_deadline, attempt_started + remaining_duration)
+        heartbeat = self._start_run_lease_heartbeat(run_id=run_id, lease_token=lease_token)
+
+        def guarded_checkpoint(payload: dict[str, Any]) -> None:
+            self._assert_active_run_lease(
+                run_id=run_id,
+                lease_token=lease_token,
+                heartbeat=heartbeat,
+            )
+            checkpoint(payload)
+
         result: dict[str, Any]
         try:
             result = self.task_executor.execute(
@@ -1455,7 +1475,7 @@ class AgentRunManager:
                 user_id=str(run["user_id"]),
                 session_id=run.get("session_id"),
                 user_message=str(run["input_message"]),
-                checkpoint=checkpoint,
+                checkpoint=guarded_checkpoint,
                 run_deadline_monotonic=attempt_deadline,
                 resume_state=resume_state,
                 run_budget=budget,
@@ -1469,7 +1489,7 @@ class AgentRunManager:
                     user_id=str(run["user_id"]),
                     session_id=run.get("session_id"),
                     user_message=str(run["input_message"]),
-                    checkpoint=checkpoint,
+                    checkpoint=guarded_checkpoint,
                 )
             elif "run_budget" in message and "resume_state" in message:
                 result = self.task_executor.execute(
@@ -1477,7 +1497,7 @@ class AgentRunManager:
                     user_id=str(run["user_id"]),
                     session_id=run.get("session_id"),
                     user_message=str(run["input_message"]),
-                    checkpoint=checkpoint,
+                    checkpoint=guarded_checkpoint,
                     run_deadline_monotonic=attempt_deadline,
                 )
             elif "run_budget" in message and "run_deadline_monotonic" in message:
@@ -1486,7 +1506,7 @@ class AgentRunManager:
                     user_id=str(run["user_id"]),
                     session_id=run.get("session_id"),
                     user_message=str(run["input_message"]),
-                    checkpoint=checkpoint,
+                    checkpoint=guarded_checkpoint,
                     resume_state=resume_state,
                 )
             elif "run_budget" in message:
@@ -1495,7 +1515,7 @@ class AgentRunManager:
                     user_id=str(run["user_id"]),
                     session_id=run.get("session_id"),
                     user_message=str(run["input_message"]),
-                    checkpoint=checkpoint,
+                    checkpoint=guarded_checkpoint,
                     run_deadline_monotonic=attempt_deadline,
                     resume_state=resume_state,
                 )
@@ -1505,7 +1525,7 @@ class AgentRunManager:
                     user_id=str(run["user_id"]),
                     session_id=run.get("session_id"),
                     user_message=str(run["input_message"]),
-                    checkpoint=checkpoint,
+                    checkpoint=guarded_checkpoint,
                 )
             elif "resume_state" in message:
                 try:
@@ -1514,7 +1534,7 @@ class AgentRunManager:
                         user_id=str(run["user_id"]),
                         session_id=run.get("session_id"),
                         user_message=str(run["input_message"]),
-                        checkpoint=checkpoint,
+                        checkpoint=guarded_checkpoint,
                         run_deadline_monotonic=attempt_deadline,
                     )
                 except TypeError as nested_exc:
@@ -1525,7 +1545,7 @@ class AgentRunManager:
                         user_id=str(run["user_id"]),
                         session_id=run.get("session_id"),
                         user_message=str(run["input_message"]),
-                        checkpoint=checkpoint,
+                        checkpoint=guarded_checkpoint,
                     )
             elif "run_deadline_monotonic" in message:
                 try:
@@ -1534,7 +1554,7 @@ class AgentRunManager:
                         user_id=str(run["user_id"]),
                         session_id=run.get("session_id"),
                         user_message=str(run["input_message"]),
-                        checkpoint=checkpoint,
+                        checkpoint=guarded_checkpoint,
                         resume_state=resume_state,
                     )
                 except TypeError as nested_exc:
@@ -1545,10 +1565,18 @@ class AgentRunManager:
                         user_id=str(run["user_id"]),
                         session_id=run.get("session_id"),
                         user_message=str(run["input_message"]),
-                        checkpoint=checkpoint,
+                        checkpoint=guarded_checkpoint,
                     )
             else:
                 raise
+        finally:
+            self._stop_run_lease_heartbeat(heartbeat)
+
+        self._assert_active_run_lease(
+            run_id=run_id,
+            lease_token=lease_token,
+            heartbeat=heartbeat,
+        )
         elapsed = time.monotonic() - attempt_started
         if elapsed > self.attempt_timeout_sec:
             self.database.append_agent_run_checkpoint(
@@ -1567,12 +1595,119 @@ class AgentRunManager:
             )
         return result
 
+    def _start_run_lease_heartbeat(
+        self,
+        *,
+        run_id: str,
+        lease_token: str | None,
+    ) -> dict[str, Any] | None:
+        token = str(lease_token or "").strip()
+        normalized_run_id = str(run_id or "").strip()
+        if not normalized_run_id or not token:
+            return None
+
+        stop = Event()
+        lost = Event()
+        state: dict[str, Any] = {
+            "stop": stop,
+            "lost": lost,
+            "reason": "",
+            "failures": 0,
+            "run_id": normalized_run_id,
+            "lease_token": token,
+            "owner": self._lease_owner,
+            "thread": None,
+        }
+
+        def _heartbeat_loop() -> None:
+            while not stop.wait(self.run_lease_heartbeat_sec):
+                try:
+                    refreshed = self.database.refresh_agent_run_lease(
+                        run_id=normalized_run_id,
+                        lease_owner=self._lease_owner,
+                        lease_token=token,
+                        lease_expires_at=self._run_lease_expiry_iso(),
+                    )
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    failures = int(state.get("failures", 0)) + 1
+                    state["failures"] = failures
+                    self.logger.error(
+                        "run_lease_heartbeat_error run_id=%s attempt=%s error=%s",
+                        normalized_run_id,
+                        failures,
+                        exc,
+                    )
+                    if failures >= self.run_lease_heartbeat_max_failures:
+                        state["reason"] = (
+                            "Run lease heartbeat failed repeatedly. "
+                            "Stopping run to prevent duplicate side effects."
+                        )
+                        lost.set()
+                        return
+                    continue
+                if not refreshed:
+                    state["reason"] = "Run lease ownership lost during execution."
+                    lost.set()
+                    return
+                state["failures"] = 0
+
+        thread = Thread(
+            target=_heartbeat_loop,
+            name=f"amaryllis-run-lease-heartbeat-{normalized_run_id[:8]}",
+            daemon=True,
+        )
+        thread.start()
+        state["thread"] = thread
+        return state
+
+    @staticmethod
+    def _stop_run_lease_heartbeat(heartbeat: dict[str, Any] | None) -> None:
+        if not isinstance(heartbeat, dict):
+            return
+        stop = heartbeat.get("stop")
+        if isinstance(stop, Event):
+            stop.set()
+        thread = heartbeat.get("thread")
+        if isinstance(thread, Thread):
+            thread.join(timeout=1.0)
+
+    def _assert_active_run_lease(
+        self,
+        *,
+        run_id: str,
+        lease_token: str | None,
+        heartbeat: dict[str, Any] | None,
+    ) -> None:
+        token = str(lease_token or "").strip()
+        normalized_run_id = str(run_id or "").strip()
+        if not normalized_run_id or not token:
+            return
+        if isinstance(heartbeat, dict):
+            lost = heartbeat.get("lost")
+            if isinstance(lost, Event) and lost.is_set():
+                reason = str(heartbeat.get("reason") or "Run lease ownership lost.").strip()
+                raise RunLeaseLostError(reason)
+        refreshed = self.database.refresh_agent_run_lease(
+            run_id=normalized_run_id,
+            lease_owner=self._lease_owner,
+            lease_token=token,
+            lease_expires_at=self._run_lease_expiry_iso(),
+        )
+        if not refreshed:
+            raise RunLeaseLostError("Run lease ownership lost during execution.")
+
     def _classify_failure(self, exc: Exception) -> dict[str, Any]:
         if isinstance(exc, RunBudgetExceededError):
             return {
                 "failure_class": "budget_exceeded",
                 "stop_reason": "budget_exceeded",
                 "retryable": False,
+            }
+        if isinstance(exc, RunLeaseLostError):
+            return {
+                "failure_class": "lease_lost",
+                "stop_reason": "lease_lost",
+                "retryable": True,
             }
         if isinstance(exc, TaskTimeoutError):
             return {

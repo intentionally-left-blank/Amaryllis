@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
 import tempfile
 import time
-from threading import Lock
+from threading import Event, Lock
 import unittest
 from pathlib import Path
 from typing import Any
@@ -217,6 +218,125 @@ class _SlowSideEffectTaskExecutor:
         }
 
 
+class _LeaseHeartbeatGateTaskExecutor:
+    def __init__(self) -> None:
+        self.call_count = 0
+        self.started_event = Event()
+        self.release_event = Event()
+
+    def execute(
+        self,
+        agent: Agent,
+        user_id: str,
+        session_id: str | None,
+        user_message: str,
+        checkpoint: Any = None,
+        run_deadline_monotonic: float | None = None,  # noqa: ARG002
+        resume_state: dict[str, Any] | None = None,  # noqa: ARG002
+    ) -> dict[str, Any]:
+        self.call_count += 1
+        if callable(checkpoint):
+            checkpoint(
+                {
+                    "stage": "step_completed",
+                    "step": "prepare_context",
+                }
+            )
+        self.started_event.set()
+        self.release_event.wait(timeout=3.0)
+        return {
+            "agent_id": agent.id,
+            "user_id": user_id,
+            "session_id": session_id,
+            "response": f"ok:{user_message}",
+            "metrics": {
+                "model_calls": 1,
+                "tool_calls": 0,
+                "tool_errors": 0,
+                "estimated_tokens": 48,
+                "attempt_count": 1,
+                "duration_ms": 30.0,
+                "total_attempt_duration_ms": 30.0,
+            },
+        }
+
+
+class _LeaseChaosTaskExecutor:
+    def __init__(self) -> None:
+        self.call_count = 0
+        self.side_effect_count = 0
+        self.started_event = Event()
+        self.release_event = Event()
+        self._lock = Lock()
+
+    def execute(
+        self,
+        agent: Agent,
+        user_id: str,
+        session_id: str | None,
+        user_message: str,
+        checkpoint: Any = None,
+        run_deadline_monotonic: float | None = None,  # noqa: ARG002
+        resume_state: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            self.call_count += 1
+            attempt_call = self.call_count
+
+        idempotency_key = "lease-chaos:1"
+        cache = resume_state.get("tool_call_cache") if isinstance(resume_state, dict) else None
+        cached = isinstance(cache, dict) and idempotency_key in cache
+        if not cached:
+            with self._lock:
+                self.side_effect_count += 1
+            if callable(checkpoint):
+                checkpoint(
+                    {
+                        "stage": "tool_call_recorded",
+                        "tool": "demo_tool",
+                        "idempotency_key": idempotency_key,
+                        "status": "succeeded",
+                        "arguments": {"message": user_message},
+                        "result": {"ok": True},
+                        "cached": False,
+                        "executed": True,
+                    }
+                )
+        elif callable(checkpoint):
+            checkpoint(
+                {
+                    "stage": "tool_call_recorded",
+                    "tool": "demo_tool",
+                    "idempotency_key": idempotency_key,
+                    "status": "succeeded",
+                    "arguments": {"message": user_message},
+                    "result": {"ok": True},
+                    "cached": True,
+                    "executed": False,
+                }
+            )
+
+        if attempt_call == 1 and not cached:
+            self.started_event.set()
+            self.release_event.wait(timeout=3.0)
+
+        return {
+            "agent_id": agent.id,
+            "user_id": user_id,
+            "session_id": session_id,
+            "response": f"ok:{user_message}",
+            "metrics": {
+                "model_calls": 1,
+                "tool_calls": 1,
+                "tool_errors": 0,
+                "estimated_tokens": 72,
+                "attempt_count": 1,
+                "duration_ms": 45.0,
+                "total_attempt_duration_ms": 45.0,
+            },
+        }
+
+
 class AgentRunManagerTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="amaryllis-tests-runs-")
@@ -255,7 +375,7 @@ class AgentRunManagerTests(unittest.TestCase):
             max_attempts=2,
         )
 
-        final = self._wait_for_status(run["id"], {"succeeded"})
+        final = self._wait_for_status(run["id"], {"succeeded"}, timeout_sec=8.0)
         self.assertIsNotNone(final)
         assert final is not None
         self.assertEqual(final["status"], "succeeded")
@@ -795,6 +915,118 @@ class AgentRunManagerTests(unittest.TestCase):
         self.assertIsNone(final.get("lease_owner"))
         self.assertIsNone(final.get("lease_token"))
         self.assertIsNone(final.get("lease_expires_at"))
+
+    def test_run_lease_heartbeat_extends_lease_during_execution(self) -> None:
+        gated = _LeaseHeartbeatGateTaskExecutor()
+        self.manager = AgentRunManager(
+            database=self.database,
+            task_executor=gated,  # type: ignore[arg-type]
+            worker_count=1,
+            default_max_attempts=1,
+            attempt_timeout_sec=8.0,
+            retry_backoff_sec=0.0,
+            retry_max_backoff_sec=0.0,
+            retry_jitter_sec=0.0,
+            run_lease_ttl_sec=10.0,
+        )
+        self.manager.run_lease_heartbeat_sec = 0.2
+        self.manager.start()
+
+        run = self.manager.create_run(
+            agent=self.agent,
+            user_id="user-1",
+            session_id="session-heartbeat",
+            user_message="hold",
+            max_attempts=1,
+        )
+        self.assertTrue(gated.started_event.wait(timeout=2.0))
+
+        running = self._wait_for_status(run["id"], {"running"})
+        self.assertIsNotNone(running)
+        assert running is not None
+        first_expiry_raw = str(running.get("lease_expires_at") or "")
+        self.assertTrue(first_expiry_raw)
+        first_expiry = datetime.fromisoformat(first_expiry_raw)
+
+        time.sleep(0.7)
+        running_after = self.manager.get_run(run["id"])
+        self.assertIsNotNone(running_after)
+        assert running_after is not None
+        self.assertEqual(str(running_after.get("status")), "running")
+        second_expiry_raw = str(running_after.get("lease_expires_at") or "")
+        self.assertTrue(second_expiry_raw)
+        second_expiry = datetime.fromisoformat(second_expiry_raw)
+        self.assertGreater(second_expiry, first_expiry)
+
+        stolen = self.database.claim_agent_run_lease(
+            run_id=run["id"],
+            lease_owner="attacker",
+            lease_token="attacker-token",
+            lease_expires_at=self.manager._run_lease_expiry_iso(),  # noqa: SLF001
+            allowed_statuses=("running",),
+        )
+        self.assertIsNone(stolen)
+
+        gated.release_event.set()
+        final = self._wait_for_status(run["id"], {"succeeded"})
+        self.assertIsNotNone(final)
+        assert final is not None
+        self.assertEqual(final["status"], "succeeded")
+        self.assertIsNone(final.get("lease_owner"))
+        self.assertIsNone(final.get("lease_token"))
+        self.assertIsNone(final.get("lease_expires_at"))
+
+    def test_lease_loss_retry_avoids_duplicate_side_effects(self) -> None:
+        chaos = _LeaseChaosTaskExecutor()
+        self.manager = AgentRunManager(
+            database=self.database,
+            task_executor=chaos,  # type: ignore[arg-type]
+            worker_count=1,
+            default_max_attempts=2,
+            attempt_timeout_sec=8.0,
+            retry_backoff_sec=0.0,
+            retry_max_backoff_sec=0.0,
+            retry_jitter_sec=0.0,
+            run_lease_ttl_sec=10.0,
+        )
+        self.manager.run_lease_heartbeat_sec = 0.2
+        self.manager.start()
+
+        run = self.manager.create_run(
+            agent=self.agent,
+            user_id="user-1",
+            session_id="session-lease-chaos",
+            user_message="single side effect",
+            max_attempts=2,
+        )
+        self.assertTrue(chaos.started_event.wait(timeout=2.0))
+
+        self.database.update_agent_run_fields(
+            run["id"],
+            lease_owner="attacker-owner",
+            lease_token="attacker-token",
+            lease_expires_at=self.manager._utc_now(),  # noqa: SLF001
+        )
+        chaos.release_event.set()
+
+        final = self._wait_for_status(run["id"], {"succeeded"})
+        self.assertIsNotNone(final)
+        assert final is not None
+        self.assertEqual(final["status"], "succeeded")
+        self.assertEqual(int(final.get("attempts", 0)), 2)
+        self.assertEqual(chaos.call_count, 2)
+        self.assertEqual(chaos.side_effect_count, 1)
+
+        stages = [str(item.get("stage")) for item in final.get("checkpoints", [])]
+        self.assertIn("retry_scheduled", stages)
+        error_events = [item for item in final.get("checkpoints", []) if item.get("stage") == "error"]
+        self.assertGreaterEqual(len(error_events), 1)
+        self.assertEqual(str(error_events[0].get("failure_class")), "lease_lost")
+        self.assertEqual(str(error_events[0].get("stop_reason")), "lease_lost")
+
+        tool_calls = self.manager.list_run_tool_calls(run["id"], limit=20)
+        self.assertEqual(len(tool_calls), 1)
+        self.assertEqual(str(tool_calls[0].get("idempotency_key")), "lease-chaos:1")
 
     @staticmethod
     def _provider_error(

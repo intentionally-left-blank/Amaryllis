@@ -1085,6 +1085,56 @@ class Database:
             self._commit_locked()
         return int(cursor.rowcount or 0) > 0
 
+    def refresh_agent_run_lease(
+        self,
+        *,
+        run_id: str,
+        lease_owner: str,
+        lease_token: str,
+        lease_expires_at: str,
+        now_iso: str | None = None,
+        allowed_statuses: tuple[str, ...] = ("running",),
+    ) -> bool:
+        normalized_run_id = str(run_id or "").strip()
+        normalized_owner = str(lease_owner or "").strip()
+        normalized_token = str(lease_token or "").strip()
+        normalized_statuses = tuple(
+            str(item or "").strip().lower()
+            for item in allowed_statuses
+            if str(item or "").strip()
+        )
+        if not normalized_run_id or not normalized_owner or not normalized_token or not normalized_statuses:
+            return False
+        now = str(now_iso or self._utc_now())
+        placeholders = ", ".join(["?"] * len(normalized_statuses))
+        with self._lock:
+            cursor = self._conn.execute(
+                f"""
+                UPDATE agent_runs
+                SET lease_expires_at = ?, updated_at = ?
+                WHERE
+                    id = ?
+                    AND lease_owner = ?
+                    AND lease_token = ?
+                    AND status IN ({placeholders})
+                    AND (
+                        lease_expires_at IS NULL
+                        OR lease_expires_at >= ?
+                    )
+                """,
+                (
+                    lease_expires_at,
+                    self._utc_now(),
+                    normalized_run_id,
+                    normalized_owner,
+                    normalized_token,
+                    *normalized_statuses,
+                    now,
+                ),
+            )
+            self._commit_locked()
+        return int(cursor.rowcount or 0) > 0
+
     def upsert_agent_run_issue(
         self,
         *,
