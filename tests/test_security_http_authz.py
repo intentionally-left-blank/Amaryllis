@@ -29,6 +29,10 @@ class SecurityHTTPAuthzTests(unittest.TestCase):
                 "user_id": "user-1",
                 "scopes": ["user"],
             },
+            "user2-token": {
+                "user_id": "user-2",
+                "scopes": ["user"],
+            },
             "service-token": {
                 "user_id": "svc-runtime",
                 "scopes": ["service"],
@@ -140,6 +144,80 @@ class SecurityHTTPAuthzTests(unittest.TestCase):
         event_types = {str(item.get("event_type")) for item in payload["items"]}
         self.assertIn("authn_fail", event_types)
         self.assertIn("authz_deny", event_types)
+
+    def test_cross_tenant_endpoints_are_blocked(self) -> None:
+        create_agent = self.client.post(
+            "/agents/create",
+            headers=self._auth("user-token"),
+            json={
+                "name": "Tenant1 Agent",
+                "system_prompt": "assist",
+                "user_id": "user-1",
+                "tools": [],
+            },
+        )
+        self.assertEqual(create_agent.status_code, 200)
+        agent_id = str(create_agent.json()["id"])
+
+        cross_chat = self.client.post(
+            f"/agents/{agent_id}/chat",
+            headers=self._auth("user2-token"),
+            json={
+                "user_id": "user-2",
+                "message": "hi",
+            },
+        )
+        self.assertEqual(cross_chat.status_code, 403)
+        self.assertEqual(cross_chat.json()["error"]["type"], "permission_denied")
+
+        cross_run = self.client.post(
+            f"/agents/{agent_id}/runs",
+            headers=self._auth("user2-token"),
+            json={
+                "user_id": "user-2",
+                "message": "run",
+            },
+        )
+        self.assertEqual(cross_run.status_code, 403)
+        self.assertEqual(cross_run.json()["error"]["type"], "permission_denied")
+
+        cross_automation = self.client.post(
+            "/automations/create",
+            headers=self._auth("user2-token"),
+            json={
+                "agent_id": agent_id,
+                "user_id": "user-2",
+                "message": "auto",
+                "interval_sec": 60,
+            },
+        )
+        self.assertEqual(cross_automation.status_code, 403)
+        self.assertEqual(cross_automation.json()["error"]["type"], "permission_denied")
+
+        own_run = self.client.post(
+            f"/agents/{agent_id}/runs",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "message": "my run",
+            },
+        )
+        self.assertEqual(own_run.status_code, 200)
+        run_id = str(own_run.json()["run"]["id"])
+
+        foreign_get = self.client.get(
+            f"/agents/runs/{run_id}",
+            headers=self._auth("user2-token"),
+        )
+        self.assertEqual(foreign_get.status_code, 403)
+        self.assertEqual(foreign_get.json()["error"]["type"], "permission_denied")
+
+        foreign_cancel = self.client.post(
+            f"/agents/runs/{run_id}/cancel",
+            headers=self._auth("user2-token"),
+        )
+        self.assertEqual(foreign_cancel.status_code, 403)
+        self.assertEqual(foreign_cancel.json()["error"]["type"], "permission_denied")
 
 
 if __name__ == "__main__":

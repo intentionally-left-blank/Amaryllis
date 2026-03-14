@@ -25,6 +25,8 @@ class ConfigSecurityDefaultsTests(unittest.TestCase):
 
         self.assertEqual(config.tool_approval_enforcement, "strict")
         self.assertEqual(config.plugin_signing_mode, "strict")
+        self.assertTrue(config.tool_sandbox_enabled)
+        self.assertEqual(config.plugin_runtime_mode, "sandboxed")
         self.assertTrue(config.auth_enabled)
         self.assertGreaterEqual(config.run_lease_ttl_sec, config.run_attempt_timeout_sec + 5.0)
 
@@ -38,6 +40,7 @@ class ConfigSecurityDefaultsTests(unittest.TestCase):
                     "AMARYLLIS_AUTH_TOKENS": "token-1:user-1:user",
                     "AMARYLLIS_TOOL_APPROVAL_ENFORCEMENT": "invalid",
                     "AMARYLLIS_PLUGIN_SIGNING_MODE": "invalid",
+                    "AMARYLLIS_PLUGIN_RUNTIME_MODE": "invalid",
                 },
                 clear=True,
             ):
@@ -45,6 +48,7 @@ class ConfigSecurityDefaultsTests(unittest.TestCase):
 
         self.assertEqual(config.tool_approval_enforcement, "strict")
         self.assertEqual(config.plugin_signing_mode, "strict")
+        self.assertEqual(config.plugin_runtime_mode, "sandboxed")
 
     def test_production_profile_rejects_non_strict_security_modes(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-config-tests-") as tmp:
@@ -112,6 +116,44 @@ class ConfigSecurityDefaultsTests(unittest.TestCase):
                 with self.assertRaisesRegex(
                     AppConfigError,
                     "AMARYLLIS_ALLOW_INSECURE_SECURITY_MODES must be false",
+                ):
+                    AppConfig.from_env()
+
+    def test_production_profile_rejects_disabled_tool_sandbox(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="amaryllis-config-tests-") as tmp:
+            support_dir = Path(tmp) / "support"
+            with patch.dict(
+                os.environ,
+                {
+                    "AMARYLLIS_SUPPORT_DIR": str(support_dir),
+                    "AMARYLLIS_SECURITY_PROFILE": "production",
+                    "AMARYLLIS_AUTH_TOKENS": "token-1:user-1:user",
+                    "AMARYLLIS_TOOL_SANDBOX_ENABLED": "false",
+                },
+                clear=True,
+            ):
+                with self.assertRaisesRegex(
+                    AppConfigError,
+                    "AMARYLLIS_TOOL_SANDBOX_ENABLED must be true",
+                ):
+                    AppConfig.from_env()
+
+    def test_production_profile_rejects_legacy_plugin_runtime(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="amaryllis-config-tests-") as tmp:
+            support_dir = Path(tmp) / "support"
+            with patch.dict(
+                os.environ,
+                {
+                    "AMARYLLIS_SUPPORT_DIR": str(support_dir),
+                    "AMARYLLIS_SECURITY_PROFILE": "production",
+                    "AMARYLLIS_AUTH_TOKENS": "token-1:user-1:user",
+                    "AMARYLLIS_PLUGIN_RUNTIME_MODE": "legacy",
+                },
+                clear=True,
+            ):
+                with self.assertRaisesRegex(
+                    AppConfigError,
+                    "AMARYLLIS_PLUGIN_RUNTIME_MODE must be sandboxed",
                 ):
                     AppConfig.from_env()
 

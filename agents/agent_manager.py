@@ -56,6 +56,7 @@ class AgentManager:
         agent = self.get_agent(agent_id)
         if agent is None:
             raise ValueError(f"Agent not found: {agent_id}")
+        self._assert_agent_owner(agent=agent, user_id=user_id)
 
         return self.task_executor.execute(
             agent=agent,
@@ -79,6 +80,7 @@ class AgentManager:
         agent = self.get_agent(agent_id)
         if agent is None:
             raise ValueError(f"Agent not found: {agent_id}")
+        self._assert_agent_owner(agent=agent, user_id=user_id)
 
         return self.run_manager.create_run(
             agent=agent,
@@ -168,3 +170,10 @@ class AgentManager:
             agent_id=agent_id,
             limit=limit,
         )
+
+    @staticmethod
+    def _assert_agent_owner(*, agent: Agent, user_id: str) -> None:
+        owner = str(agent.user_id or "").strip()
+        actor = str(user_id or "").strip()
+        if not owner or not actor or owner != actor:
+            raise ValueError(f"Agent ownership mismatch for agent: {agent.id}")

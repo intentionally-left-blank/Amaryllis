@@ -21,7 +21,9 @@ def _base_env(*, support_dir: Path) -> dict[str, str]:
         "AMARYLLIS_AUTH_ENABLED": "true",
         "AMARYLLIS_AUTH_TOKENS": "token-admin:admin:admin|user",
         "AMARYLLIS_TOOL_APPROVAL_ENFORCEMENT": "strict",
+        "AMARYLLIS_TOOL_SANDBOX_ENABLED": "true",
         "AMARYLLIS_PLUGIN_SIGNING_MODE": "strict",
+        "AMARYLLIS_PLUGIN_RUNTIME_MODE": "sandboxed",
         "AMARYLLIS_ALLOW_INSECURE_SECURITY_MODES": "false",
     }
 
@@ -102,6 +104,24 @@ def main() -> int:
             name="non_strict_plugin_signing",
             env=env,
             expected_substring="AMARYLLIS_PLUGIN_SIGNING_MODE must be strict",
+            failures=failures,
+        )
+
+        env = dict(base)
+        env["AMARYLLIS_TOOL_SANDBOX_ENABLED"] = "false"
+        _expect_invalid(
+            name="disabled_tool_sandbox",
+            env=env,
+            expected_substring="AMARYLLIS_TOOL_SANDBOX_ENABLED must be true",
+            failures=failures,
+        )
+
+        env = dict(base)
+        env["AMARYLLIS_PLUGIN_RUNTIME_MODE"] = "legacy"
+        _expect_invalid(
+            name="legacy_plugin_runtime",
+            env=env,
+            expected_substring="AMARYLLIS_PLUGIN_RUNTIME_MODE must be sandboxed",
             failures=failures,
         )
 

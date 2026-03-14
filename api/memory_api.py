@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from memory.eval_suite import MemoryQualityEvaluator
 from memory.models import ExtractionResult, MemoryContext
+from runtime.auth import auth_context_from_request, resolve_user_id
 
 router = APIRouter(tags=["memory"])
 
@@ -142,8 +143,10 @@ def debug_memory_context(
     semantic_top_k: int = Query(default=8, ge=0, le=64),
 ) -> MemoryContextResponse:
     services = request.app.state.services
+    auth = auth_context_from_request(request)
+    effective_user_id = resolve_user_id(request_user_id=user_id, auth=auth)
     context = services.memory_manager.build_context(
-        user_id=user_id,
+        user_id=effective_user_id,
         agent_id=agent_id,
         query=query,
         session_id=session_id,
@@ -154,7 +157,7 @@ def debug_memory_context(
     request_id = str(getattr(request.state, "request_id", ""))
     return MemoryContextResponse(
         request_id=request_id,
-        user_id=user_id,
+        user_id=effective_user_id,
         agent_id=agent_id,
         session_id=session_id,
         query=query,
@@ -170,8 +173,10 @@ def debug_memory_retrieval(
     top_k: int = Query(default=8, ge=1, le=64),
 ) -> RetrievalDebugResponse:
     services = request.app.state.services
+    auth = auth_context_from_request(request)
+    effective_user_id = resolve_user_id(request_user_id=user_id, auth=auth)
     items = services.memory_manager.debug_retrieval(
-        user_id=user_id,
+        user_id=effective_user_id,
         query=query,
         top_k=top_k,
     )
@@ -179,7 +184,7 @@ def debug_memory_retrieval(
     typed_items = [RetrievalDebugItem(**item) for item in items]
     return RetrievalDebugResponse(
         request_id=request_id,
-        user_id=user_id,
+        user_id=effective_user_id,
         query=query,
         top_k=top_k,
         items=typed_items,
@@ -193,12 +198,14 @@ def debug_memory_extractions(
     limit: int = Query(default=50, ge=1, le=200),
 ) -> MemoryExtractionsResponse:
     services = request.app.state.services
+    auth = auth_context_from_request(request)
+    effective_user_id = resolve_user_id(request_user_id=user_id, auth=auth)
     request_id = str(getattr(request.state, "request_id", ""))
-    items = services.memory_manager.list_extractions(user_id=user_id, limit=limit)
+    items = services.memory_manager.list_extractions(user_id=effective_user_id, limit=limit)
     typed_items = [MemoryExtractionRecord(**item) for item in items]
     return MemoryExtractionsResponse(
         request_id=request_id,
-        user_id=user_id,
+        user_id=effective_user_id,
         count=len(typed_items),
         items=typed_items,
     )
@@ -211,12 +218,14 @@ def debug_memory_conflicts(
     limit: int = Query(default=50, ge=1, le=200),
 ) -> MemoryConflictsResponse:
     services = request.app.state.services
+    auth = auth_context_from_request(request)
+    effective_user_id = resolve_user_id(request_user_id=user_id, auth=auth)
     request_id = str(getattr(request.state, "request_id", ""))
-    items = services.memory_manager.list_conflicts(user_id=user_id, limit=limit)
+    items = services.memory_manager.list_conflicts(user_id=effective_user_id, limit=limit)
     typed_items = [MemoryConflictRecord(**item) for item in items]
     return MemoryConflictsResponse(
         request_id=request_id,
-        user_id=user_id,
+        user_id=effective_user_id,
         count=len(typed_items),
         items=typed_items,
     )
@@ -229,12 +238,14 @@ def debug_memory_profile_decay(
     limit: int = Query(default=100, ge=1, le=500),
 ) -> ProfileDecayDebugResponse:
     services = request.app.state.services
+    auth = auth_context_from_request(request)
+    effective_user_id = resolve_user_id(request_user_id=user_id, auth=auth)
     request_id = str(getattr(request.state, "request_id", ""))
-    items = services.memory_manager.debug_profile_decay(user_id=user_id, limit=limit)
+    items = services.memory_manager.debug_profile_decay(user_id=effective_user_id, limit=limit)
     typed_items = [ProfileDecayDebugItem(**item) for item in items]
     return ProfileDecayDebugResponse(
         request_id=request_id,
-        user_id=user_id,
+        user_id=effective_user_id,
         count=len(typed_items),
         items=typed_items,
     )
@@ -246,9 +257,11 @@ def debug_memory_consolidate(
     request: Request,
 ) -> MemoryConsolidateResponse:
     services = request.app.state.services
+    auth = auth_context_from_request(request)
+    effective_user_id = resolve_user_id(request_user_id=payload.user_id, auth=auth)
     request_id = str(getattr(request.state, "request_id", ""))
     summary = services.memory_manager.consolidate_user_memory(
-        user_id=payload.user_id,
+        user_id=effective_user_id,
         session_id=payload.session_id,
         semantic_limit=payload.semantic_limit,
     )

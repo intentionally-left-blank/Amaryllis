@@ -6,7 +6,7 @@ from fastapi import APIRouter, Path, Query, Request
 from pydantic import BaseModel, Field
 
 from runtime.auth import assert_owner, auth_context_from_request, resolve_user_id
-from runtime.errors import NotFoundError, PermissionDeniedError, ProviderError, ValidationError
+from runtime.errors import AmaryllisError, NotFoundError, PermissionDeniedError, ProviderError, ValidationError
 from tools.tool_executor import PermissionRequiredError, ToolBudgetLimitError
 
 router = APIRouter(tags=["tools"])
@@ -54,6 +54,7 @@ class ToolGuardrailsDebugResponse(BaseModel):
     request_id: str
     approval_enforcement_mode: str
     isolation_policy: dict[str, Any]
+    sandbox: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any]
     plugin_signing: dict[str, Any] = Field(default_factory=dict)
 
@@ -156,6 +157,8 @@ def approve_permission_prompt(
             details={"error": str(exc)},
         )
         raise NotFoundError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         _sign_action(
             request,
@@ -226,6 +229,8 @@ def deny_permission_prompt(
             details={"error": str(exc)},
         )
         raise NotFoundError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         _sign_action(
             request,
@@ -284,6 +289,7 @@ def debug_tool_guardrails(
         request_id=_request_id(request),
         approval_enforcement_mode=str(snapshot.get("approval_enforcement_mode", "prompt_and_allow")),
         isolation_policy=dict(snapshot.get("isolation_policy", {})),
+        sandbox=dict(snapshot.get("sandbox", {})),
         budget=dict(snapshot.get("budget", {})),
         plugin_signing=dict(snapshot.get("plugin_signing", {})),
     )
@@ -392,6 +398,8 @@ def invoke_mcp_tool(
             details={"error": str(exc), "session_id": payload.session_id},
         )
         raise ValidationError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         _sign_action(
             request,

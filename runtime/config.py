@@ -109,8 +109,15 @@ class AppConfig:
     tool_python_exec_max_timeout_sec: int
     tool_python_exec_max_code_chars: int
     tool_filesystem_allow_write: bool
+    tool_sandbox_enabled: bool
+    tool_sandbox_timeout_sec: int
+    tool_sandbox_max_cpu_sec: int
+    tool_sandbox_max_memory_mb: int
+    tool_sandbox_allow_network_tools: tuple[str, ...]
+    tool_sandbox_allowed_roots: tuple[str, ...]
     plugin_signing_key: str | None
     plugin_signing_mode: str
+    plugin_runtime_mode: str
     mcp_endpoints: tuple[str, ...]
     mcp_timeout_sec: float
     mcp_failure_threshold: int
@@ -209,6 +216,24 @@ class AppConfig:
         ).strip().lower()
         if plugin_signing_mode not in {"off", "warn", "strict"}:
             plugin_signing_mode = "strict"
+        plugin_runtime_mode = os.getenv(
+            "AMARYLLIS_PLUGIN_RUNTIME_MODE",
+            "sandboxed",
+        ).strip().lower()
+        if plugin_runtime_mode not in {"sandboxed", "legacy"}:
+            plugin_runtime_mode = "sandboxed"
+        tool_sandbox_enabled = _parse_bool(os.getenv("AMARYLLIS_TOOL_SANDBOX_ENABLED", "true"))
+        tool_sandbox_allow_network_tools = tuple(
+            _csv_items(os.getenv("AMARYLLIS_TOOL_SANDBOX_ALLOW_NETWORK_TOOLS", "web_search"))
+        )
+        tool_sandbox_allowed_roots = tuple(
+            _csv_items(
+                os.getenv(
+                    "AMARYLLIS_TOOL_SANDBOX_ALLOWED_ROOTS",
+                    str(Path.cwd()),
+                )
+            )
+        )
         auth_enabled = _parse_bool(os.getenv("AMARYLLIS_AUTH_ENABLED", "true"))
         auth_tokens = tuple(
             _parse_auth_tokens(
@@ -388,8 +413,21 @@ class AppConfig:
             tool_filesystem_allow_write=_parse_bool(
                 os.getenv("AMARYLLIS_TOOL_FILESYSTEM_ALLOW_WRITE", "true")
             ),
+            tool_sandbox_enabled=tool_sandbox_enabled,
+            tool_sandbox_timeout_sec=max(
+                1, int(os.getenv("AMARYLLIS_TOOL_SANDBOX_TIMEOUT_SEC", "12"))
+            ),
+            tool_sandbox_max_cpu_sec=max(
+                1, int(os.getenv("AMARYLLIS_TOOL_SANDBOX_MAX_CPU_SEC", "6"))
+            ),
+            tool_sandbox_max_memory_mb=max(
+                64, int(os.getenv("AMARYLLIS_TOOL_SANDBOX_MAX_MEMORY_MB", "512"))
+            ),
+            tool_sandbox_allow_network_tools=tool_sandbox_allow_network_tools,
+            tool_sandbox_allowed_roots=tool_sandbox_allowed_roots,
             plugin_signing_key=(os.getenv("AMARYLLIS_PLUGIN_SIGNING_KEY") or "").strip() or None,
             plugin_signing_mode=plugin_signing_mode,
+            plugin_runtime_mode=plugin_runtime_mode,
             mcp_endpoints=mcp_endpoints,
             mcp_timeout_sec=max(1.0, float(os.getenv("AMARYLLIS_MCP_TIMEOUT_SEC", "10"))),
             mcp_failure_threshold=max(1, int(os.getenv("AMARYLLIS_MCP_FAILURE_THRESHOLD", "2"))),
@@ -418,8 +456,12 @@ class AppConfig:
             errors.append("At least one auth token must be configured in production")
         if self.tool_approval_enforcement != "strict":
             errors.append("AMARYLLIS_TOOL_APPROVAL_ENFORCEMENT must be strict in production")
+        if not self.tool_sandbox_enabled:
+            errors.append("AMARYLLIS_TOOL_SANDBOX_ENABLED must be true in production")
         if self.plugin_signing_mode != "strict":
             errors.append("AMARYLLIS_PLUGIN_SIGNING_MODE must be strict in production")
+        if self.plugin_runtime_mode != "sandboxed":
+            errors.append("AMARYLLIS_PLUGIN_RUNTIME_MODE must be sandboxed in production")
         if errors:
             raise AppConfigError("Invalid production security configuration: " + "; ".join(errors))
 

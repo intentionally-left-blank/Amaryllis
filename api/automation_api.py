@@ -6,7 +6,7 @@ from fastapi import APIRouter, Path, Query, Request
 from pydantic import BaseModel, Field
 
 from runtime.auth import assert_owner, auth_context_from_request, resolve_user_id
-from runtime.errors import NotFoundError, ProviderError, ValidationError
+from runtime.errors import AmaryllisError, NotFoundError, ProviderError, ValidationError
 
 router = APIRouter(tags=["automations"])
 
@@ -59,6 +59,15 @@ def create_automation(payload: CreateAutomationRequest, request: Request) -> dic
     auth = auth_context_from_request(request)
     effective_user_id = resolve_user_id(request_user_id=payload.user_id, auth=auth)
     try:
+        agent = services.agent_manager.get_agent(payload.agent_id)
+        if agent is None:
+            raise NotFoundError(f"Agent not found: {payload.agent_id}")
+        assert_owner(
+            owner_user_id=agent.user_id,
+            auth=auth,
+            resource_name="agent",
+            resource_id=payload.agent_id,
+        )
         automation = services.automation_scheduler.create_automation(
             agent_id=payload.agent_id,
             user_id=effective_user_id,
@@ -91,7 +100,11 @@ def create_automation(payload: CreateAutomationRequest, request: Request) -> dic
             status="failed",
             details={"error": str(exc)},
         )
+        if "not found" in str(exc).lower():
+            raise NotFoundError(str(exc)) from exc
         raise ValidationError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         _sign_action(
             request,
@@ -174,6 +187,8 @@ def update_automation(
         if "not found" in str(exc).lower():
             raise NotFoundError(str(exc)) from exc
         raise ValidationError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         _sign_action(
             request,
@@ -209,6 +224,8 @@ def list_automations(
             "count": len(items),
             "request_id": _request_id(request),
         }
+    except AmaryllisError:
+        raise
     except Exception as exc:
         raise ProviderError(str(exc)) from exc
 
@@ -220,9 +237,11 @@ def debug_automations_health(
     limit: int = Query(default=500, ge=1, le=5000),
 ) -> dict[str, Any]:
     services = request.app.state.services
+    auth = auth_context_from_request(request)
+    effective_user_id = resolve_user_id(request_user_id=user_id, auth=auth)
     try:
         snapshot = services.automation_scheduler.health_snapshot(
-            user_id=user_id,
+            user_id=effective_user_id,
             limit=limit,
         )
         return {
@@ -231,6 +250,8 @@ def debug_automations_health(
         }
     except ValueError as exc:
         raise ValidationError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         raise ProviderError(str(exc)) from exc
 
@@ -307,6 +328,8 @@ def pause_automation(
             details={"error": str(exc)},
         )
         raise NotFoundError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         _sign_action(
             request,
@@ -369,6 +392,8 @@ def resume_automation(
             details={"error": str(exc)},
         )
         raise NotFoundError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         _sign_action(
             request,
@@ -431,6 +456,8 @@ def run_automation_now(
             details={"error": str(exc)},
         )
         raise NotFoundError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         _sign_action(
             request,
@@ -485,6 +512,8 @@ def delete_automation(
             details={"error": f"Automation not found: {automation_id}"},
         )
         raise
+    except AmaryllisError:
+        raise
     except Exception as exc:
         _sign_action(
             request,
@@ -521,5 +550,7 @@ def list_automation_events(
             "count": len(items),
             "request_id": _request_id(request),
         }
+    except AmaryllisError:
+        raise
     except Exception as exc:
         raise ProviderError(str(exc)) from exc

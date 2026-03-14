@@ -41,6 +41,7 @@ from tasks.task_executor import TaskExecutor
 from tools.mcp_client_registry import MCPClientRegistry
 from tools.permission_manager import ToolPermissionManager
 from tools.policy import ToolIsolationPolicy
+from tools.sandbox_runner import ToolSandboxConfig, ToolSandboxRunner
 from tools.tool_budget import ToolBudgetGuard
 from tools.tool_executor import ToolExecutor
 from tools.tool_registry import ToolRegistry
@@ -113,6 +114,7 @@ def create_services() -> ServiceContainer:
     tool_registry = ToolRegistry(
         plugin_signing_key=config.plugin_signing_key,
         plugin_signing_mode=config.plugin_signing_mode,
+        plugin_runtime_mode=config.plugin_runtime_mode,
     )
     tool_registry.load_builtin_tools()
     tool_registry.discover_plugins(config.plugins_dir)
@@ -148,6 +150,21 @@ def create_services() -> ServiceContainer:
         permission_manager=tool_permission_manager,
         budget_guard=tool_budget_guard,
         approval_enforcement_mode=config.tool_approval_enforcement,
+        sandbox_runner=(
+            ToolSandboxRunner(
+                config=ToolSandboxConfig(
+                    timeout_sec=config.tool_sandbox_timeout_sec,
+                    max_cpu_sec=config.tool_sandbox_max_cpu_sec,
+                    max_memory_mb=config.tool_sandbox_max_memory_mb,
+                    allow_network_tools=config.tool_sandbox_allow_network_tools,
+                    allowed_roots=config.tool_sandbox_allowed_roots,
+                    filesystem_allow_write=config.tool_filesystem_allow_write,
+                    max_python_code_chars=config.tool_python_exec_max_code_chars,
+                )
+            )
+            if config.tool_sandbox_enabled
+            else None
+        ),
         telemetry_emitter=telemetry.emit,
     )
 

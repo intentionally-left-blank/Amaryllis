@@ -115,6 +115,8 @@ class AutomationScheduler:
         timezone_name: str = "UTC",
         start_immediately: bool = False,
     ) -> dict[str, Any]:
+        self._assert_agent_owner(agent_id=agent_id, user_id=user_id)
+
         automation_id = str(uuid4())
         raw_schedule = schedule if isinstance(schedule, dict) else {}
         normalized_type, normalized_schedule, normalized_interval = normalize_schedule(
@@ -565,6 +567,9 @@ class AutomationScheduler:
             agent_record = self.database.get_agent(str(automation["agent_id"]))
             if agent_record is None:
                 raise ValueError(f"Agent not found: {automation['agent_id']}")
+            owner = str(agent_record.get("user_id") or "").strip()
+            if not owner or owner != user_id:
+                raise ValueError(f"Agent ownership mismatch for agent: {automation['agent_id']}")
 
             stale_before_iso = (
                 now - timedelta(seconds=max(float(self.lease_ttl_sec) * 2.0, 30.0))
@@ -754,6 +759,15 @@ class AutomationScheduler:
         exponent = max(0, int(failures) - 1)
         value = float(self.backoff_base_sec) * float(2**exponent)
         return float(min(self.backoff_max_sec, value))
+
+    def _assert_agent_owner(self, *, agent_id: str, user_id: str) -> None:
+        agent = self.database.get_agent(agent_id)
+        if agent is None:
+            raise ValueError(f"Agent not found: {agent_id}")
+        owner = str(agent.get("user_id") or "").strip()
+        actor = str(user_id or "").strip()
+        if not owner or not actor or owner != actor:
+            raise ValueError(f"Agent ownership mismatch for agent: {agent_id}")
 
     @staticmethod
     def _build_dispatch_key(*, source: str, schedule_type: str, slot_iso: str) -> str:

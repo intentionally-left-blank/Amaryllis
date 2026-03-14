@@ -91,6 +91,17 @@ class AutomationSchedulerTests(unittest.TestCase):
         events = self.scheduler.list_events(automation["id"], limit=20)
         self.assertTrue(any(item["event_type"] == "run_queued" for item in events))
 
+    def test_create_automation_rejects_cross_user_agent_access(self) -> None:
+        with self.assertRaisesRegex(ValueError, "ownership mismatch"):
+            self.scheduler.create_automation(
+                agent_id=self.agent.id,
+                user_id="user-2",
+                session_id=None,
+                message="cross-user automation",
+                interval_sec=60,
+                start_immediately=False,
+            )
+
     def test_tick_processes_due_automation(self) -> None:
         automation = self.scheduler.create_automation(
             agent_id=self.agent.id,
@@ -155,13 +166,14 @@ class AutomationSchedulerTests(unittest.TestCase):
 
     def test_escalation_policy_creates_inbox_and_disables(self) -> None:
         automation = self.scheduler.create_automation(
-            agent_id="missing-agent",
+            agent_id=self.agent.id,
             user_id="user-1",
             session_id=None,
             message="will fail",
             interval_sec=60,
             start_immediately=False,
         )
+        self.database.delete_agent(self.agent.id)
 
         for _ in range(3):
             with self.assertRaises(ValueError):
@@ -268,13 +280,14 @@ class AutomationSchedulerTests(unittest.TestCase):
         self.scheduler.circuit_open_sec = 120.0
 
         automation = self.scheduler.create_automation(
-            agent_id="missing-agent",
+            agent_id=self.agent.id,
             user_id="user-1",
             session_id=None,
             message="broken",
             interval_sec=30,
             start_immediately=True,
         )
+        self.database.delete_agent(self.agent.id)
         self.database.update_automation_fields(
             automation["id"],
             next_run_at="1970-01-01T00:00:00+00:00",
@@ -312,7 +325,7 @@ class AutomationSchedulerTests(unittest.TestCase):
         self.assertEqual(int(row_after_open["consecutive_failures"]), 2)
 
     def test_health_snapshot_contains_reliability_fields(self) -> None:
-        self.scheduler.create_automation(
+        ok_automation = self.scheduler.create_automation(
             agent_id=self.agent.id,
             user_id="user-1",
             session_id="session-ok",
@@ -320,13 +333,30 @@ class AutomationSchedulerTests(unittest.TestCase):
             interval_sec=30,
             start_immediately=True,
         )
-        self.scheduler.create_automation(
-            agent_id="missing-agent",
+        fail_agent = Agent.create(
+            name="Automation Fail Agent",
+            system_prompt="automation fail",
+            model=None,
+            tools=[],
+            user_id="user-1",
+        )
+        self.database.upsert_agent(fail_agent.to_record())
+        failed_automation = self.scheduler.create_automation(
+            agent_id=fail_agent.id,
             user_id="user-1",
             session_id="session-fail",
             message="fail run",
             interval_sec=30,
             start_immediately=True,
+        )
+        self.database.delete_agent(fail_agent.id)
+        self.database.update_automation_fields(
+            ok_automation["id"],
+            next_run_at="1970-01-01T00:00:00+00:00",
+        )
+        self.database.update_automation_fields(
+            failed_automation["id"],
+            next_run_at="1970-01-01T00:00:00+00:00",
         )
 
         self.scheduler._tick()  # noqa: SLF001

@@ -21,6 +21,7 @@ class ToolDefinition:
     approval_mode: str = "none"
     approval_predicate: Callable[[dict[str, Any]], bool] | None = None
     isolation: str = "restricted"
+    execution_target: dict[str, Any] | None = None
 
 
 class ToolRegistry:
@@ -28,6 +29,7 @@ class ToolRegistry:
         self,
         plugin_signing_key: str | None = None,
         plugin_signing_mode: str = "warn",
+        plugin_runtime_mode: str = "sandboxed",
     ) -> None:
         self._tools: dict[str, ToolDefinition] = {}
         self.logger = logging.getLogger("amaryllis.tools.registry")
@@ -36,6 +38,10 @@ class ToolRegistry:
         if normalized_mode not in {"off", "warn", "strict"}:
             normalized_mode = "warn"
         self.plugin_signing_mode = normalized_mode
+        normalized_runtime = str(plugin_runtime_mode or "sandboxed").strip().lower()
+        if normalized_runtime not in {"sandboxed", "legacy"}:
+            normalized_runtime = "sandboxed"
+        self.plugin_runtime_mode = normalized_runtime
         self._plugin_events: list[dict[str, Any]] = []
 
     def register(
@@ -49,7 +55,10 @@ class ToolRegistry:
         approval_mode: str = "none",
         approval_predicate: Callable[[dict[str, Any]], bool] | None = None,
         isolation: str = "restricted",
+        execution_target: dict[str, Any] | None = None,
     ) -> None:
+        if execution_target is None and source == "builtin":
+            execution_target = {"kind": "builtin", "name": name}
         self._tools[name] = ToolDefinition(
             name=name,
             description=description,
@@ -60,6 +69,7 @@ class ToolRegistry:
             approval_mode=approval_mode,
             approval_predicate=approval_predicate,
             isolation=isolation,
+            execution_target=execution_target,
         )
 
     def get(self, name: str) -> ToolDefinition | None:
@@ -145,6 +155,30 @@ class ToolRegistry:
                 )
                 continue
 
+            if self.plugin_runtime_mode == "sandboxed":
+                try:
+                    self._register_sandboxed_plugin(
+                        plugin_name=item.name,
+                        plugin_dir=item,
+                        manifest=manifest,
+                    )
+                    self.logger.info("plugin_loaded plugin=%s mode=sandboxed", item.name)
+                    self._record_plugin_event(
+                        plugin=item.name,
+                        status="loaded",
+                        reason="ok",
+                        signature_state=signature_state,
+                    )
+                except Exception as exc:
+                    self.logger.error("plugin_register_failed plugin=%s mode=sandboxed error=%s", item.name, exc)
+                    self._record_plugin_event(
+                        plugin=item.name,
+                        status="failed",
+                        reason=f"register_failed:{exc}",
+                        signature_state=signature_state,
+                    )
+                continue
+
             try:
                 spec = importlib.util.spec_from_file_location(f"amaryllis_plugin_{item.name}", tool_path)
                 if spec is None or spec.loader is None:
@@ -168,7 +202,7 @@ class ToolRegistry:
                     module.register_tool(self, manifest)
                 else:
                     raise RuntimeError("Plugin must expose register(registry, manifest)")
-                self.logger.info("plugin_loaded plugin=%s", item.name)
+                self.logger.info("plugin_loaded plugin=%s mode=legacy", item.name)
                 self._record_plugin_event(
                     plugin=item.name,
                     status="loaded",
@@ -198,10 +232,62 @@ class ToolRegistry:
                 summary[status] += 1
         return {
             "signing_mode": self.plugin_signing_mode,
+            "runtime_mode": self.plugin_runtime_mode,
             "signing_key_configured": self.plugin_signing_key is not None,
             "events": rows,
             "summary": summary,
         }
+
+    def _register_sandboxed_plugin(
+        self,
+        *,
+        plugin_name: str,
+        plugin_dir: Path,
+        manifest: dict[str, Any],
+    ) -> None:
+        tool_descriptor = manifest.get("tool")
+        if not isinstance(tool_descriptor, dict):
+            raise RuntimeError("Sandboxed plugin manifest must include object field 'tool'")
+
+        tool_name = str(tool_descriptor.get("name") or manifest.get("name") or "").strip()
+        description = str(tool_descriptor.get("description") or "").strip()
+        input_schema = tool_descriptor.get("input_schema")
+        if not tool_name:
+            raise RuntimeError("Sandboxed plugin tool.name is required")
+        if not description:
+            raise RuntimeError("Sandboxed plugin tool.description is required")
+        if not isinstance(input_schema, dict):
+            raise RuntimeError("Sandboxed plugin tool.input_schema must be an object")
+
+        entrypoint = str(tool_descriptor.get("entrypoint") or "execute").strip() or "execute"
+        risk_level = str(tool_descriptor.get("risk_level") or "medium").strip().lower() or "medium"
+        approval_mode = str(tool_descriptor.get("approval_mode") or "required").strip().lower() or "required"
+        isolation = str(tool_descriptor.get("isolation") or "sandboxed_plugin").strip() or "sandboxed_plugin"
+
+        tool_path = (plugin_dir / "tool.py").resolve()
+        if not tool_path.is_file():
+            raise RuntimeError("Sandboxed plugin tool.py is missing")
+
+        def _sandbox_proxy_handler(_: dict[str, Any]) -> dict[str, Any]:
+            raise RuntimeError("Sandboxed plugin cannot execute in-process")
+
+        self.register(
+            name=tool_name,
+            description=description,
+            input_schema=input_schema,
+            handler=_sandbox_proxy_handler,
+            source=f"plugin:{plugin_name}",
+            risk_level=risk_level,
+            approval_mode=approval_mode,
+            isolation=isolation,
+            execution_target={
+                "kind": "plugin",
+                "plugin_name": plugin_name,
+                "plugin_dir": str(plugin_dir.resolve()),
+                "tool_path": str(tool_path),
+                "entrypoint": entrypoint,
+            },
+        )
 
     def _verify_manifest_signature(
         self,

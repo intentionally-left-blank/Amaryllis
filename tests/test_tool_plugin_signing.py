@@ -6,26 +6,19 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 from tools.tool_registry import ToolRegistry
 
 
 PLUGIN_TOOL_CODE = """
-def register(registry, manifest):
-    name = str(manifest.get('name') or 'plugin_tool')
-    registry.register(
-        name=name,
-        description='plugin test tool',
-        input_schema={
-            'type': 'object',
-            'properties': {},
-            'additionalProperties': True,
-        },
-        handler=lambda arguments: {'ok': True, 'arguments': arguments},
-        source='plugin:test',
-        risk_level='low',
-        approval_mode='none',
-    )
+def execute(arguments, context=None):
+    ctx = context or {}
+    return {
+        'ok': True,
+        'arguments': arguments,
+        'user_id': ctx.get('user_id'),
+    }
 """.strip()
 
 
@@ -36,7 +29,7 @@ class ToolPluginSigningTests(unittest.TestCase):
             self._write_plugin(
                 plugins_dir=plugins_dir,
                 plugin_dir_name="unsigned",
-                manifest={"name": "unsigned_tool", "version": "1.0.0"},
+                manifest=self._manifest("unsigned_tool"),
             )
 
             registry = ToolRegistry(plugin_signing_key="secret", plugin_signing_mode="strict")
@@ -53,7 +46,7 @@ class ToolPluginSigningTests(unittest.TestCase):
             self._write_plugin(
                 plugins_dir=plugins_dir,
                 plugin_dir_name="unsigned_warn",
-                manifest={"name": "warn_tool", "version": "1.0.0"},
+                manifest=self._manifest("warn_tool"),
             )
 
             registry = ToolRegistry(plugin_signing_key="secret", plugin_signing_mode="warn")
@@ -69,7 +62,7 @@ class ToolPluginSigningTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="amaryllis-plugin-signing-") as tmp:
             plugins_dir = Path(tmp)
             secret = "super-secret"
-            manifest = {"name": "signed_tool", "version": "1.0.0"}
+            manifest = self._manifest("signed_tool")
             signed_manifest = self._sign_manifest(manifest=manifest, key=secret)
             self._write_plugin(
                 plugins_dir=plugins_dir,
@@ -96,6 +89,25 @@ class ToolPluginSigningTests(unittest.TestCase):
         target.mkdir(parents=True, exist_ok=True)
         (target / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
         (target / "tool.py").write_text(PLUGIN_TOOL_CODE + "\n", encoding="utf-8")
+
+    @staticmethod
+    def _manifest(name: str) -> dict[str, Any]:
+        return {
+            "name": name,
+            "version": "1.0.0",
+            "tool": {
+                "name": name,
+                "description": "plugin test tool",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": True,
+                },
+                "risk_level": "low",
+                "approval_mode": "none",
+                "entrypoint": "execute",
+            },
+        }
 
     @staticmethod
     def _sign_manifest(*, manifest: dict, key: str) -> dict:

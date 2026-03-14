@@ -40,6 +40,7 @@ Implemented in this version:
 - persistent local chat history (multi-chat sessions) in macOS app
 - Agents tab automation UI with `watch_fs` + inbox read/unread controls
 - centralized structured API errors (`error.type`, `error.message`, `error.request_id`)
+- strict owner checks across API + background flows (anti-IDOR/BOLA for multi-tenant access)
 - provider diagnostics endpoint: `GET /health/providers`
 - SQLite migration framework (`schema_migrations`)
 - local structured telemetry (`telemetry.jsonl`)
@@ -142,6 +143,7 @@ Local telemetry log:
 │   ├── test_model_routing.py
 │   ├── test_security_manager.py
 │   ├── test_task_executor.py
+│   ├── test_tool_sandbox.py
 │   └── test_tools_mcp.py
 ├── tools
 │   ├── builtin_tools
@@ -151,6 +153,9 @@ Local telemetry log:
 │   ├── mcp_client_registry.py
 │   ├── permission_manager.py
 │   ├── policy.py
+│   ├── sandbox_runner.py
+│   ├── sandbox_worker.py
+│   ├── sandboxed_tools.py
 │   ├── tool_executor.py
 │   └── tool_registry.py
 ├── LICENSE
@@ -710,7 +715,9 @@ Implemented now:
   - `AMARYLLIS_AUTH_ENABLED=false`
   - auth tokens are empty
   - `AMARYLLIS_TOOL_APPROVAL_ENFORCEMENT!=strict`
-  - `AMARYLLIS_PLUGIN_SIGNING_MODE!=strict`)
+  - `AMARYLLIS_TOOL_SANDBOX_ENABLED!=true`
+  - `AMARYLLIS_PLUGIN_SIGNING_MODE!=strict`
+  - `AMARYLLIS_PLUGIN_RUNTIME_MODE!=sandboxed`)
 - request scope enforcement:
   - `/security/*` and `/debug/*` -> `admin`
   - `/service/*` -> `service` or `admin`
@@ -727,6 +734,7 @@ Implemented now:
 
 Implemented now:
 - tool isolation policy with explicit risk tiers and sandbox presets
+- real subprocess sandbox for builtin/plugin tools with CPU/RAM/time limits, env sanitization, and strict JSON contract
 - tool budget guardrails (window, per-tool, total, high-risk caps with session/user/request scoping)
 - scoped + expiring permission prompts for risky tools (`pending -> approved/denied -> consumed|expired`)
 - batch permission handoff in chat API via `permission_ids`
@@ -948,9 +956,29 @@ Plugins are auto-discovered from:
 - `plugins/<plugin_name>/manifest.json`
 - `plugins/<plugin_name>/tool.py`
 
-`tool.py` must expose either:
-- `register(registry, manifest)`
-- or `register_tool(registry, manifest)`
+Default runtime mode is sandboxed (`AMARYLLIS_PLUGIN_RUNTIME_MODE=sandboxed`).
+In sandboxed mode, plugin manifest must include `tool` descriptor:
+
+```json
+{
+  "name": "example_plugin",
+  "version": "1.0.0",
+  "tool": {
+    "name": "example_tool",
+    "description": "Example plugin tool",
+    "input_schema": {"type": "object", "properties": {}, "additionalProperties": true},
+    "risk_level": "medium",
+    "approval_mode": "required",
+    "entrypoint": "execute"
+  }
+}
+```
+
+`tool.py` must expose:
+- `execute(arguments, context)` (or `execute(arguments)` fallback)
+
+Legacy in-process registration mode is available only for development via:
+- `AMARYLLIS_PLUGIN_RUNTIME_MODE=legacy`
 
 ## Tests
 
@@ -1015,9 +1043,16 @@ Release/pull-request gate is blocking and includes:
   - `AMARYLLIS_MEMORY_PROFILE_DECAY_FLOOR=0.35`
   - `AMARYLLIS_MEMORY_PROFILE_DECAY_MIN_DELTA=0.05`
   - `AMARYLLIS_TOOL_APPROVAL_ENFORCEMENT=strict|prompt_and_allow`
+  - `AMARYLLIS_TOOL_SANDBOX_ENABLED=true|false`
+  - `AMARYLLIS_TOOL_SANDBOX_TIMEOUT_SEC=12`
+  - `AMARYLLIS_TOOL_SANDBOX_MAX_CPU_SEC=6`
+  - `AMARYLLIS_TOOL_SANDBOX_MAX_MEMORY_MB=512`
+  - `AMARYLLIS_TOOL_SANDBOX_ALLOW_NETWORK_TOOLS=web_search`
+  - `AMARYLLIS_TOOL_SANDBOX_ALLOWED_ROOTS=/path/to/workspace,/path/to/data`
   - `AMARYLLIS_BLOCKED_TOOLS=python_exec,filesystem`
   - `AMARYLLIS_PLUGIN_SIGNING_KEY=<hmac_secret>`
   - `AMARYLLIS_PLUGIN_SIGNING_MODE=off|warn|strict`
+  - `AMARYLLIS_PLUGIN_RUNTIME_MODE=sandboxed|legacy`
   - `AMARYLLIS_MCP_ENDPOINTS=http://localhost:9001,http://localhost:9002`
   - `AMARYLLIS_MCP_TIMEOUT_SEC=10`
   - `AMARYLLIS_MCP_FAILURE_THRESHOLD=2`

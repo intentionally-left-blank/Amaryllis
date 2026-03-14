@@ -6,7 +6,7 @@ from fastapi import APIRouter, Path, Query, Request
 from pydantic import BaseModel, Field
 
 from runtime.auth import assert_owner, auth_context_from_request, resolve_user_id
-from runtime.errors import NotFoundError, ProviderError, ValidationError
+from runtime.errors import AmaryllisError, NotFoundError, ProviderError, ValidationError
 
 router = APIRouter(tags=["agents"])
 RUN_STATUSES: set[str] = {"queued", "running", "succeeded", "failed", "canceled"}
@@ -108,6 +108,8 @@ def create_agent(payload: CreateAgentRequest, request: Request) -> dict[str, Any
             details={"error": str(exc)},
         )
         raise ValidationError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         _sign_action(
             request,
@@ -144,6 +146,15 @@ def create_agent_run(
     auth = auth_context_from_request(request)
     effective_user_id = resolve_user_id(request_user_id=payload.user_id, auth=auth)
     try:
+        agent = services.agent_manager.get_agent(agent_id)
+        if agent is None:
+            raise NotFoundError(f"Agent not found: {agent_id}")
+        assert_owner(
+            owner_user_id=agent.user_id,
+            auth=auth,
+            resource_name="agent",
+            resource_id=agent_id,
+        )
         run = services.agent_manager.create_run(
             agent_id=agent_id,
             user_message=payload.message,
@@ -176,7 +187,11 @@ def create_agent_run(
             details={"agent_id": agent_id, "error": str(exc)},
             status="failed",
         )
+        if "not found" in str(exc).lower():
+            raise NotFoundError(str(exc)) from exc
         raise ValidationError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         _sign_action(
             request,
@@ -221,6 +236,8 @@ def list_agent_runs(
         }
     except ValueError as exc:
         raise ValidationError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         raise ProviderError(str(exc)) from exc
 
@@ -246,6 +263,8 @@ def get_agent_run(
         }
     except ValueError as exc:
         raise NotFoundError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         raise ProviderError(str(exc)) from exc
 
@@ -272,6 +291,8 @@ def replay_agent_run(
         }
     except ValueError as exc:
         raise NotFoundError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         raise ProviderError(str(exc)) from exc
 
@@ -300,6 +321,8 @@ def list_agent_run_issues(
         }
     except ValueError as exc:
         raise NotFoundError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         raise ProviderError(str(exc)) from exc
 
@@ -333,6 +356,8 @@ def list_agent_run_artifacts(
         }
     except ValueError as exc:
         raise NotFoundError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         raise ProviderError(str(exc)) from exc
 
@@ -379,6 +404,8 @@ def cancel_agent_run(
         if "not found" in str(exc).lower():
             raise NotFoundError(str(exc)) from exc
         raise ValidationError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         _sign_action(
             request,
@@ -434,6 +461,8 @@ def resume_agent_run(
         if "not found" in str(exc).lower():
             raise NotFoundError(str(exc)) from exc
         raise ValidationError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         _sign_action(
             request,
@@ -455,9 +484,11 @@ def debug_agent_runs_health(
     limit: int = Query(default=200, ge=1, le=2000),
 ) -> dict[str, Any]:
     services = request.app.state.services
+    auth = auth_context_from_request(request)
+    effective_user_id = resolve_user_id(request_user_id=user_id, auth=auth)
     try:
         snapshot = services.agent_manager.run_health(
-            user_id=user_id,
+            user_id=effective_user_id,
             agent_id=agent_id,
             limit=limit,
         )
@@ -467,6 +498,8 @@ def debug_agent_runs_health(
         }
     except ValueError as exc:
         raise ValidationError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         raise ProviderError(str(exc)) from exc
 
@@ -538,6 +571,8 @@ def chat_agent(
             details={"error": str(exc)},
         )
         raise NotFoundError(str(exc)) from exc
+    except AmaryllisError:
+        raise
     except Exception as exc:
         _sign_action(
             request,

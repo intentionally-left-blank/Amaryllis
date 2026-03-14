@@ -184,6 +184,11 @@ class AgentRunManager:
         max_attempts: int | None = None,
         budget: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        owner = str(agent.user_id or "").strip()
+        actor = str(user_id or "").strip()
+        if not owner or not actor or owner != actor:
+            raise ValueError(f"Agent ownership mismatch for agent: {agent.id}")
+
         run_id = str(uuid4())
         attempts_limit = max(1, max_attempts or self.default_max_attempts)
         effective_budget = self._normalize_run_budget(budget)

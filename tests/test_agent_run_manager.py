@@ -273,6 +273,15 @@ class AgentRunManagerTests(unittest.TestCase):
         issue_statuses = {str(item.get("status")) for item in issues}
         self.assertEqual(issue_statuses, {"done"})
 
+    def test_create_run_rejects_cross_user_agent_access(self) -> None:
+        with self.assertRaisesRegex(ValueError, "ownership mismatch"):
+            self.manager.create_run(
+                agent=self.agent,
+                user_id="user-2",
+                session_id=None,
+                user_message="cross-user run",
+            )
+
     def test_run_retries_then_succeeds(self) -> None:
         self.executor.fail_first = True
         self.manager.start()

@@ -2307,3 +2307,12 @@ class Database:
             data["tools"] = json.loads(data.pop("tools_json") or "[]")
             result.append(data)
         return result
+
+    def delete_agent(self, agent_id: str) -> bool:
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM agents WHERE id = ?",
+                (agent_id,),
+            )
+            self._commit_locked()
+            return int(cursor.rowcount or 0) > 0

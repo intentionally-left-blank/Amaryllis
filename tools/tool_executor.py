@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from tools.permission_manager import ToolPermissionManager
 from tools.policy import ToolIsolationPolicy
+from tools.sandbox_runner import ToolSandboxRunner
 from tools.tool_budget import ToolBudgetExceededError, ToolBudgetGuard
 from tools.tool_registry import ToolRegistry
 
@@ -35,6 +36,7 @@ class ToolExecutor:
         permission_manager: ToolPermissionManager | None = None,
         budget_guard: ToolBudgetGuard | None = None,
         approval_enforcement_mode: str = "prompt_and_allow",
+        sandbox_runner: ToolSandboxRunner | None = None,
         telemetry_emitter: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
         self.registry = registry
@@ -42,6 +44,7 @@ class ToolExecutor:
         self.permission_manager = permission_manager or ToolPermissionManager()
         self.budget_guard = budget_guard or ToolBudgetGuard()
         self.approval_enforcement_mode = approval_enforcement_mode
+        self.sandbox_runner = sandbox_runner
         self.telemetry_emitter = telemetry_emitter
         self.logger = logging.getLogger("amaryllis.tools.executor")
 
@@ -183,7 +186,16 @@ class ToolExecutor:
             raise ToolBudgetLimitError(str(exc)) from exc
 
         try:
-            result = tool.handler(arguments)
+            if self.sandbox_runner is not None and tool.execution_target is not None:
+                result = self.sandbox_runner.execute(
+                    tool=tool,
+                    arguments=arguments,
+                    request_id=request_id,
+                    user_id=user_id,
+                    session_id=session_id,
+                )
+            else:
+                result = tool.handler(arguments)
         except Exception as exc:
             raise ToolExecutionError(f"Tool '{name}' failed: {exc}") from exc
 
@@ -230,6 +242,24 @@ class ToolExecutor:
         return {
             "approval_enforcement_mode": self.approval_enforcement_mode,
             "isolation_policy": self.policy.describe(),
+            "sandbox": {
+                "enabled": self.sandbox_runner is not None,
+                "timeout_sec": (
+                    int(self.sandbox_runner.config.timeout_sec)
+                    if self.sandbox_runner is not None
+                    else None
+                ),
+                "max_cpu_sec": (
+                    int(self.sandbox_runner.config.max_cpu_sec)
+                    if self.sandbox_runner is not None
+                    else None
+                ),
+                "max_memory_mb": (
+                    int(self.sandbox_runner.config.max_memory_mb)
+                    if self.sandbox_runner is not None
+                    else None
+                ),
+            },
             "budget": self.budget_guard.debug_snapshot(
                 request_id=request_id,
                 user_id=user_id,
