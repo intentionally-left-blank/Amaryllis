@@ -260,6 +260,9 @@ struct ModelsView: View {
                 Button {
                     Task {
                         quickSearch = ""
+                        appState.lastError = installed
+                            ? "Activating \(suggestion.model.id)..."
+                            : "Installing \(suggestion.model.id)..."
                         if installed {
                             await appState.loadModel(modelId: suggestion.model.id, provider: suggestion.provider)
                         } else {
@@ -276,7 +279,6 @@ struct ModelsView: View {
                     }
                 }
                 .buttonStyle(AmaryllisPrimaryButtonStyle())
-                .disabled(isDownloading)
             }
 
             if let job, isDownloading {
@@ -315,7 +317,10 @@ struct ModelsView: View {
                 Button {
                     let trimmed = modelToDownload.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { return }
-                    Task { await startDownload(modelId: trimmed, provider: providerForDownload) }
+                    Task {
+                        appState.lastError = "Installing \(trimmed)..."
+                        await startDownload(modelId: trimmed, provider: providerForDownload)
+                    }
                 } label: {
                     if manualIsDownloading {
                         Text("Downloading").frame(width: 92)
@@ -324,7 +329,6 @@ struct ModelsView: View {
                     }
                 }
                 .buttonStyle(AmaryllisPrimaryButtonStyle())
-                .disabled(manualIsDownloading)
             }
 
             if let manualJob, manualIsDownloading {
@@ -387,6 +391,9 @@ struct ModelsView: View {
 
                                             Button {
                                                 Task {
+                                                    appState.lastError = installed
+                                                        ? "Activating \(item.id)..."
+                                                        : "Installing \(item.id)..."
                                                     if installed {
                                                         await appState.loadModel(modelId: item.id, provider: provider)
                                                     } else {
@@ -403,7 +410,6 @@ struct ModelsView: View {
                                                 }
                                             }
                                             .buttonStyle(AmaryllisPrimaryButtonStyle())
-                                            .disabled(downloading)
                                         }
                                         .padding(.vertical, 2)
                                         .contentShape(Rectangle())
