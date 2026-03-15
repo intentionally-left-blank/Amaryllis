@@ -30,6 +30,7 @@ final class AppState: ObservableObject {
     @Published var mcpTimeoutSec: String
     @Published var availableTools: [APIToolItem] = []
     @Published var permissionPrompts: [APIPermissionPrompt] = []
+    @Published var modelDownloadJobs: [String: APIModelDownloadJob] = [:]
     @Published var chatSessions: [LocalChatSession] = []
     @Published var selectedChatID: UUID?
     @Published var isBusy: Bool = false
@@ -219,6 +220,17 @@ final class AppState: ObservableObject {
         }
     }
 
+    func isModelInstalled(modelId: String, provider: String) -> Bool {
+        guard let catalog = modelCatalog else { return false }
+        guard let payload = catalog.providers[provider] else { return false }
+        return payload.items.contains(where: { $0.id == modelId })
+    }
+
+    func modelDownloadJob(modelId: String, provider: String?) -> APIModelDownloadJob? {
+        let key = modelDownloadKey(modelId: modelId, provider: provider)
+        return modelDownloadJobs[key]
+    }
+
     func loadModel(modelId: String, provider: String?) async {
         isBusy = true
         defer { isBusy = false }
@@ -237,33 +249,54 @@ final class AppState: ObservableObject {
     }
 
     func downloadModel(modelId: String, provider: String?) async {
-        isBusy = true
-        defer { isBusy = false }
-
         guard await ensureRuntimeOnline() else {
             return
         }
 
+        let resolvedProvider = resolveProviderForModelAction(provider)
+        let key = modelDownloadKey(modelId: modelId, provider: resolvedProvider)
         do {
-            _ = try await apiClient.downloadModel(modelId: modelId, provider: provider)
-            await refreshModels()
-            lastError = nil
+            let started = try await apiClient.startModelDownload(modelId: modelId, provider: resolvedProvider)
+            modelDownloadJobs[key] = started.job
+            var job = started.job
+            while !job.isTerminal {
+                try await Task.sleep(nanoseconds: 700_000_000)
+                let refreshed = try await apiClient.getModelDownload(jobId: job.id)
+                job = refreshed.job
+                modelDownloadJobs[key] = job
+            }
+
+            if job.status.lowercased() == "succeeded" {
+                await refreshModels()
+                lastError = nil
+            } else {
+                let message = job.error ?? job.message ?? "Model download failed."
+                lastError = message
+            }
         } catch {
             lastError = error.localizedDescription
         }
     }
 
     func installAndActivateModel(modelId: String, provider: String?) async {
-        isBusy = true
-        defer { isBusy = false }
-
         guard await ensureRuntimeOnline() else {
             return
         }
 
+        let resolvedProvider = resolveProviderForModelAction(provider)
+        if !isModelInstalled(modelId: modelId, provider: resolvedProvider) {
+            await downloadModel(modelId: modelId, provider: resolvedProvider)
+            let finalJob = modelDownloadJob(modelId: modelId, provider: resolvedProvider)
+            if let finalJob, finalJob.status.lowercased() != "succeeded" {
+                return
+            }
+            if finalJob == nil && !isModelInstalled(modelId: modelId, provider: resolvedProvider) {
+                return
+            }
+        }
+
         do {
-            _ = try await apiClient.downloadModel(modelId: modelId, provider: provider)
-            _ = try await apiClient.loadModel(modelId: modelId, provider: provider)
+            _ = try await apiClient.loadModel(modelId: modelId, provider: resolvedProvider)
             let catalog = try await apiClient.listModels()
             modelCatalog = catalog
             selectedModel = catalog.active.model
@@ -639,6 +672,26 @@ final class AppState: ObservableObject {
         env["AMARYLLIS_AUTH_ENABLED"] = "true"
         env["AMARYLLIS_AUTH_TOKENS"] = "\(normalizedAuthToken):user-001:admin|user"
         return env
+    }
+
+    private func resolveProviderForModelAction(_ provider: String?) -> String {
+        let normalized = provider?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !normalized.isEmpty {
+            return normalized
+        }
+        if let selectedProvider, !selectedProvider.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return selectedProvider
+        }
+        if let activeProvider = modelCatalog?.active.provider,
+           !activeProvider.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return activeProvider
+        }
+        return "mlx"
+    }
+
+    private func modelDownloadKey(modelId: String, provider: String?) -> String {
+        let providerName = resolveProviderForModelAction(provider)
+        return "\(providerName)::\(modelId)"
     }
 
     private func normalizedApprovalMode() -> String {

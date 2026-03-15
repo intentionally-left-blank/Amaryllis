@@ -54,6 +54,16 @@ final class AmaryllisAPIClient {
         return try await request(path: "/models/download", method: "POST", body: body)
     }
 
+    func startModelDownload(modelId: String, provider: String?) async throws -> APIModelDownloadJobResponse {
+        let payload = APIDownloadModelRequest(modelId: modelId, provider: provider)
+        let body = try jsonEncoder.encode(payload)
+        return try await request(path: "/models/download/start", method: "POST", body: body)
+    }
+
+    func getModelDownload(jobId: String) async throws -> APIModelDownloadJobResponse {
+        try await request(path: "/models/download/\(jobId)", method: "GET", body: Optional<Data>.none)
+    }
+
     func loadModel(modelId: String, provider: String?) async throws -> APIModelActionResponse {
         let payload = APILoadModelRequest(modelId: modelId, provider: provider)
         let body = try jsonEncoder.encode(payload)

@@ -3,11 +3,13 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import inspect
 import logging
 import random
-from threading import Lock
+from threading import Lock, Thread
 import time
 from typing import Any, Iterator
+from uuid import uuid4
 
 from models.provider_errors import (
     ProviderErrorInfo,
@@ -39,6 +41,40 @@ class _ProviderRuntimeState:
     failure_count: int = 0
     circuit_until_monotonic: float | None = None
     latest_failure_started_at: float = 0.0
+
+
+@dataclass
+class _ModelDownloadJob:
+    id: str
+    provider: str
+    model: str
+    status: str
+    progress: float
+    completed_bytes: int | None
+    total_bytes: int | None
+    message: str | None
+    error: str | None
+    result: dict[str, Any] | None
+    created_at: str
+    updated_at: str
+    finished_at: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "provider": self.provider,
+            "model": self.model,
+            "status": self.status,
+            "progress": self.progress,
+            "completed_bytes": self.completed_bytes,
+            "total_bytes": self.total_bytes,
+            "message": self.message,
+            "error": self.error,
+            "result": self.result,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "finished_at": self.finished_at,
+        }
 
 
 class ModelManager:
@@ -77,7 +113,7 @@ class ModelManager:
             if self.active_model:
                 self.database.set_setting("active_model", self.active_model)
 
-        self._suggested_cache: dict[str, list[dict[str, str]]] = {}
+        self._suggested_cache: dict[str, list[dict[str, Any]]] = {}
         self._suggested_cache_until: float = 0.0
         self._suggested_cache_ttl_seconds = 6 * 60 * 60
         self._suggested_cache_lock = Lock()
@@ -89,6 +125,9 @@ class ModelManager:
         self._session_route_pins: dict[str, dict[str, Any]] = {}
         self._recent_failover_events: deque[dict[str, Any]] = deque(maxlen=500)
         self._route_lock = Lock()
+        self._download_lock = Lock()
+        self._download_jobs: dict[str, _ModelDownloadJob] = {}
+        self._download_job_order: deque[str] = deque(maxlen=800)
 
     def list_models(self) -> dict[str, Any]:
         active_provider, active_model = self._active_target()
@@ -366,9 +405,73 @@ class ModelManager:
         if selected is None:
             raise ValueError(f"Unknown provider: {provider_name}")
 
-        result = selected.download_model(model_id)
+        result = self._download_via_provider(
+            provider_name=provider_name,
+            provider=selected,
+            model_id=model_id,
+            progress_callback=None,
+        )
         self._invalidate_suggested_cache()
         return result
+
+    def start_model_download(self, model_id: str, provider: str | None = None) -> dict[str, Any]:
+        active_provider, _ = self._active_target()
+        provider_name = provider or active_provider
+        selected = self.providers.get(provider_name)
+        if selected is None:
+            raise ValueError(f"Unknown provider: {provider_name}")
+
+        with self._download_lock:
+            running = self._find_running_download_unlocked(provider_name=provider_name, model_id=model_id)
+            if running is not None:
+                return {"job": running.to_dict(), "already_running": True}
+
+            created_at = self._utc_now_iso()
+            job_id = str(uuid4())
+            job = _ModelDownloadJob(
+                id=job_id,
+                provider=provider_name,
+                model=model_id,
+                status="queued",
+                progress=0.0,
+                completed_bytes=0,
+                total_bytes=None,
+                message="Queued",
+                error=None,
+                result=None,
+                created_at=created_at,
+                updated_at=created_at,
+                finished_at=None,
+            )
+            self._download_jobs[job_id] = job
+            self._download_job_order.append(job_id)
+
+        worker = Thread(
+            target=self._run_model_download_job,
+            args=(job_id, provider_name, model_id),
+            daemon=True,
+        )
+        worker.start()
+        return {"job": job.to_dict(), "already_running": False}
+
+    def get_model_download_job(self, job_id: str) -> dict[str, Any]:
+        normalized = str(job_id).strip()
+        if not normalized:
+            raise ValueError("job_id is required")
+        with self._download_lock:
+            job = self._download_jobs.get(normalized)
+            if job is None:
+                raise ValueError(f"Unknown download job: {normalized}")
+            return job.to_dict()
+
+    def list_model_download_jobs(self, limit: int = 100) -> dict[str, Any]:
+        with self._download_lock:
+            ordered_ids = list(self._download_job_order)[-max(1, limit) :]
+            items = [self._download_jobs[job_id].to_dict() for job_id in reversed(ordered_ids) if job_id in self._download_jobs]
+        return {
+            "items": items,
+            "count": len(items),
+        }
 
     def load_model(self, model_id: str, provider: str | None = None) -> dict[str, Any]:
         active_provider, _ = self._active_target()
@@ -897,13 +1000,13 @@ class ModelManager:
         with self._route_lock:
             self._session_route_pins[session_id] = row
 
-    def _get_suggested_models(self) -> dict[str, list[dict[str, str]]]:
+    def _get_suggested_models(self) -> dict[str, list[dict[str, Any]]]:
         now = time.time()
         with self._suggested_cache_lock:
             if self._suggested_cache and now < self._suggested_cache_until:
                 return self._clone_suggested_map(self._suggested_cache)
 
-        suggested: dict[str, list[dict[str, str]]] = {}
+        suggested: dict[str, list[dict[str, Any]]] = {}
         for provider_name, provider in self.providers.items():
             items: list[dict[str, str]] = []
             suggested_getter = getattr(provider, "suggested_models", None)
@@ -925,8 +1028,8 @@ class ModelManager:
             return self._clone_suggested_map(self._suggested_cache)
 
     @staticmethod
-    def _normalize_suggested(items: Any) -> list[dict[str, str]]:
-        normalized: list[dict[str, str]] = []
+    def _normalize_suggested(items: Any) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
         seen: set[str] = set()
         if not isinstance(items, list):
             return normalized
@@ -938,8 +1041,16 @@ class ModelManager:
             if not model_id or model_id in seen:
                 continue
             label = str(raw.get("label", model_id)).strip() or model_id
+            size_bytes = ModelManager._to_int_or_none(raw.get("size_bytes"))
             seen.add(model_id)
-            normalized.append({"id": model_id, "label": label})
+            row: dict[str, Any] = {"id": model_id, "label": label}
+            if size_bytes is not None and size_bytes > 0:
+                row["size_bytes"] = size_bytes
+            else:
+                estimated = estimate_model_size_b(model_id)
+                if estimated is not None:
+                    row["size_bytes"] = int(estimated * 1_000_000_000 * 0.56)
+            normalized.append(row)
 
         return normalized
 
@@ -1141,6 +1252,15 @@ class ModelManager:
         except Exception:
             return None
 
+    @staticmethod
+    def _to_int_or_none(value: Any) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except Exception:
+            return None
+
     def _active_target(self) -> tuple[str, str]:
         with self._active_target_lock:
             return self.active_provider, self.active_model
@@ -1151,8 +1271,8 @@ class ModelManager:
             self.active_model = model_name
 
     @staticmethod
-    def _clone_suggested_map(items: dict[str, list[dict[str, str]]]) -> dict[str, list[dict[str, str]]]:
-        result: dict[str, list[dict[str, str]]] = {}
+    def _clone_suggested_map(items: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
+        result: dict[str, list[dict[str, Any]]] = {}
         for provider_name, values in items.items():
             normalized_provider = str(provider_name)
             if not isinstance(values, list):
@@ -1165,6 +1285,153 @@ class ModelManager:
         with self._suggested_cache_lock:
             self._suggested_cache = {}
             self._suggested_cache_until = 0.0
+
+    def _find_running_download_unlocked(
+        self,
+        *,
+        provider_name: str,
+        model_id: str,
+    ) -> _ModelDownloadJob | None:
+        for job in self._download_jobs.values():
+            if job.provider != provider_name or job.model != model_id:
+                continue
+            if job.status in {"queued", "running"}:
+                return job
+        return None
+
+    def _run_model_download_job(self, job_id: str, provider_name: str, model_id: str) -> None:
+        selected = self.providers.get(provider_name)
+        if selected is None:
+            self._set_download_job_failed(job_id=job_id, message=f"Unknown provider: {provider_name}")
+            return
+
+        self._update_download_job(
+            job_id=job_id,
+            status="running",
+            progress=0.0,
+            message="Starting download",
+        )
+
+        def progress_callback(payload: dict[str, Any]) -> None:
+            completed = self._to_int_or_none(payload.get("completed_bytes"))
+            total = self._to_int_or_none(payload.get("total_bytes"))
+            progress = self._to_float_or_none(payload.get("progress"))
+            if progress is None and completed is not None and total and total > 0:
+                progress = float(completed) / float(total)
+            normalized_progress = max(0.0, min(1.0, progress if progress is not None else 0.0))
+            status = str(payload.get("status", "running")).strip().lower() or "running"
+            message = str(payload.get("message", "")).strip() or None
+            self._update_download_job(
+                job_id=job_id,
+                status="running" if status not in {"failed", "succeeded"} else status,
+                progress=normalized_progress,
+                completed_bytes=completed,
+                total_bytes=total,
+                message=message,
+            )
+
+        try:
+            result = self._download_via_provider(
+                provider_name=provider_name,
+                provider=selected,
+                model_id=model_id,
+                progress_callback=progress_callback,
+            )
+            self._invalidate_suggested_cache()
+            completed = self._to_int_or_none(result.get("size_bytes"))
+            self._update_download_job(
+                job_id=job_id,
+                status="succeeded",
+                progress=1.0,
+                completed_bytes=completed,
+                total_bytes=completed,
+                message="Download completed",
+                result=dict(result),
+                finished=True,
+            )
+            self.logger.info(
+                "model_download_job_succeeded job_id=%s provider=%s model=%s",
+                job_id,
+                provider_name,
+                model_id,
+            )
+        except Exception as exc:
+            self._set_download_job_failed(job_id=job_id, message=str(exc))
+            self.logger.error(
+                "model_download_job_failed job_id=%s provider=%s model=%s error=%s",
+                job_id,
+                provider_name,
+                model_id,
+                exc,
+            )
+
+    def _download_via_provider(
+        self,
+        *,
+        provider_name: str,
+        provider: ModelProvider,
+        model_id: str,
+        progress_callback: Any | None,
+    ) -> dict[str, Any]:
+        method = provider.download_model
+        kwargs: dict[str, Any] = {}
+        if callable(progress_callback):
+            try:
+                signature = inspect.signature(method)
+                if "progress_callback" in signature.parameters:
+                    kwargs["progress_callback"] = progress_callback
+            except Exception:
+                kwargs = {}
+        result = method(model_id, **kwargs) if kwargs else method(model_id)
+        if not isinstance(result, dict):
+            raise ValueError(f"Invalid download result from provider '{provider_name}'")
+        return result
+
+    def _set_download_job_failed(self, *, job_id: str, message: str) -> None:
+        self._update_download_job(
+            job_id=job_id,
+            status="failed",
+            progress=0.0,
+            message=message,
+            error=message,
+            finished=True,
+        )
+
+    def _update_download_job(
+        self,
+        *,
+        job_id: str,
+        status: str | None = None,
+        progress: float | None = None,
+        completed_bytes: int | None = None,
+        total_bytes: int | None = None,
+        message: str | None = None,
+        error: str | None = None,
+        result: dict[str, Any] | None = None,
+        finished: bool = False,
+    ) -> None:
+        with self._download_lock:
+            job = self._download_jobs.get(job_id)
+            if job is None:
+                return
+            if status is not None:
+                job.status = status
+            if progress is not None:
+                job.progress = max(0.0, min(1.0, float(progress)))
+            if completed_bytes is not None:
+                job.completed_bytes = max(0, int(completed_bytes))
+            if total_bytes is not None:
+                job.total_bytes = max(0, int(total_bytes))
+            if message is not None:
+                job.message = message
+            if error is not None:
+                job.error = error
+            if result is not None:
+                job.result = result
+            now = self._utc_now_iso()
+            job.updated_at = now
+            if finished:
+                job.finished_at = now
 
     def _resolve_target(self, model: str | None, provider: str | None) -> tuple[str, str]:
         active_provider, active_model = self._active_target()

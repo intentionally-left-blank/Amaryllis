@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 import httpx
 
@@ -62,7 +62,12 @@ class OpenRouterProvider:
     def suggested_models(self, limit: int = 20) -> list[dict[str, str]]:
         return []
 
-    def download_model(self, model_id: str) -> dict[str, Any]:
+    def download_model(
+        self,
+        model_id: str,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        _ = progress_callback
         raise RuntimeError(
             "OpenRouter provider does not support local downloads. Use load with a remote model id."
         )

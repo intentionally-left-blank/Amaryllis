@@ -40,11 +40,34 @@ struct APIModelCatalog: Decodable {
     struct SuggestedModel: Decodable, Identifiable {
         let id: String
         let label: String
+        let sizeBytes: Int?
+
+        init(id: String, label: String, sizeBytes: Int? = nil) {
+            self.id = id
+            self.label = label
+            self.sizeBytes = sizeBytes
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case label
+            case sizeBytes = "size_bytes"
+        }
     }
 
     struct Active: Decodable {
         let provider: String
         let model: String
+    }
+
+    struct ProviderCapability: Decodable {
+        let supportsDownload: Bool
+        let supportsLoad: Bool
+
+        private enum CodingKeys: String, CodingKey {
+            case supportsDownload = "supports_download"
+            case supportsLoad = "supports_load"
+        }
     }
 
     struct ProviderPayload: Decodable {
@@ -55,12 +78,14 @@ struct APIModelCatalog: Decodable {
 
     let active: Active
     let providers: [String: ProviderPayload]
+    let capabilities: [String: ProviderCapability]?
     let suggested: [String: [SuggestedModel]]?
     let routingModes: [String]?
 
     private enum CodingKeys: String, CodingKey {
         case active
         case providers
+        case capabilities
         case suggested
         case routingModes = "routing_modes"
     }
@@ -98,6 +123,47 @@ struct APIModelActionResponse: Decodable {
     let status: String
     let provider: String
     let model: String
+}
+
+struct APIModelDownloadJob: Decodable, Identifiable {
+    let id: String
+    let provider: String
+    let model: String
+    let status: String
+    let progress: Double
+    let completedBytes: Int?
+    let totalBytes: Int?
+    let message: String?
+    let error: String?
+
+    var isTerminal: Bool {
+        let normalized = status.lowercased()
+        return normalized == "succeeded" || normalized == "failed"
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case provider
+        case model
+        case status
+        case progress
+        case completedBytes = "completed_bytes"
+        case totalBytes = "total_bytes"
+        case message
+        case error
+    }
+}
+
+struct APIModelDownloadJobResponse: Decodable {
+    let requestId: String?
+    let job: APIModelDownloadJob
+    let alreadyRunning: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case requestId = "request_id"
+        case job
+        case alreadyRunning = "already_running"
+    }
 }
 
 struct APIToolItem: Decodable, Identifiable {

@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct ModelsView: View {
@@ -8,7 +9,6 @@ struct ModelsView: View {
     @State private var quickSearch: String = ""
     @State private var showAdvancedModelManagement: Bool = false
     @State private var loadingModelID: String?
-    @State private var downloadingModelID: String?
 
     private let fallbackSuggested: [String: [APIModelCatalog.SuggestedModel]] = [
         "mlx": [
@@ -23,7 +23,7 @@ struct ModelsView: View {
             APIModelCatalog.SuggestedModel(id: "mlx-community/phi-4-4bit", label: "Phi 4 4bit"),
             APIModelCatalog.SuggestedModel(id: "mlx-community/gemma-2-9b-it-4bit", label: "Gemma 2 9B IT 4bit"),
             APIModelCatalog.SuggestedModel(id: "mlx-community/DeepSeek-R1-Distill-Qwen-7B-4bit", label: "DeepSeek R1 Distill Qwen 7B 4bit"),
-            APIModelCatalog.SuggestedModel(id: "mlx-community/DeepSeek-R1-Distill-Llama-8B-4bit", label: "DeepSeek R1 Distill Llama 8B 4bit"),
+            APIModelCatalog.SuggestedModel(id: "mlx-community/DeepSeek-R1-Distill-Llama-8B-4bit", label: "DeepSeek R1 Distill Llama 8B 4bit")
         ],
         "ollama": [
             APIModelCatalog.SuggestedModel(id: "llama3.3", label: "Llama 3.3"),
@@ -37,14 +37,15 @@ struct ModelsView: View {
             APIModelCatalog.SuggestedModel(id: "gemma2", label: "Gemma 2"),
             APIModelCatalog.SuggestedModel(id: "command-r", label: "Command R"),
             APIModelCatalog.SuggestedModel(id: "codellama", label: "CodeLlama"),
-            APIModelCatalog.SuggestedModel(id: "starcoder2", label: "StarCoder2"),
-        ],
+            APIModelCatalog.SuggestedModel(id: "starcoder2", label: "StarCoder2")
+        ]
     ]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
             activeCard
+            installedCard
             simpleLibraryCard
 
             DisclosureGroup(isExpanded: $showAdvancedModelManagement) {
@@ -127,13 +128,81 @@ struct ModelsView: View {
         .amaryllisCard()
     }
 
+    private var installedCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Installed")
+                    .font(AmaryllisTheme.sectionFont(size: 17))
+                    .foregroundStyle(AmaryllisTheme.textPrimary)
+                Spacer()
+                Text("\(installedModels.count)")
+                    .font(AmaryllisTheme.monoFont(size: 11, weight: .semibold))
+                    .foregroundStyle(AmaryllisTheme.textSecondary)
+            }
+
+            if installedModels.isEmpty {
+                Text("No installed local models yet.")
+                    .font(AmaryllisTheme.bodyFont(size: 12, weight: .medium))
+                    .foregroundStyle(AmaryllisTheme.textSecondary)
+            } else {
+                ForEach(installedModels.prefix(8)) { item in
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.itemID)
+                                .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
+                                .foregroundStyle(AmaryllisTheme.textPrimary)
+                            HStack(spacing: 6) {
+                                Text(item.provider.uppercased())
+                                    .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                    .foregroundStyle(AmaryllisTheme.textSecondary)
+                                if let sizeText = item.sizeText {
+                                    Text("•")
+                                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                                    Text(sizeText)
+                                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                                }
+                            }
+                        }
+                        Spacer()
+
+                        if item.active {
+                            Text("active")
+                                .font(AmaryllisTheme.bodyFont(size: 10, weight: .bold))
+                                .foregroundStyle(AmaryllisTheme.accent)
+                        } else {
+                            Button {
+                                loadingModelID = item.itemID
+                                Task {
+                                    await appState.loadModel(modelId: item.itemID, provider: item.provider)
+                                    loadingModelID = nil
+                                }
+                            } label: {
+                                if loadingModelID == item.itemID, appState.isBusy {
+                                    ProgressView().controlSize(.small).frame(width: 56)
+                                } else {
+                                    Text("Load").frame(width: 56)
+                                }
+                            }
+                            .buttonStyle(AmaryllisSecondaryButtonStyle())
+                            .disabled(appState.isBusy)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+        .amaryllisCard()
+    }
+
     private var simpleLibraryCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Simple Library")
                 .font(AmaryllisTheme.sectionFont(size: 17))
                 .foregroundStyle(AmaryllisTheme.textPrimary)
 
-            Text("Pick one model and press Install & Use. Amaryllis will download it and activate it automatically.")
+            Text("Choose a model. If it's already installed, Amaryllis will activate it instantly; otherwise it will download with progress and then activate.")
                 .font(AmaryllisTheme.bodyFont(size: 12, weight: .medium))
                 .foregroundStyle(AmaryllisTheme.textSecondary)
 
@@ -145,43 +214,88 @@ struct ModelsView: View {
                     .font(AmaryllisTheme.bodyFont(size: 12, weight: .medium))
                     .foregroundStyle(AmaryllisTheme.textSecondary)
             } else {
-                ForEach(filteredQuickSuggestions.prefix(8)) { suggestion in
-                    HStack(spacing: 8) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(suggestion.model.label)
-                                .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
-                                .foregroundStyle(AmaryllisTheme.textPrimary)
-                            Text("\(suggestion.provider)/\(suggestion.model.id)")
-                                .font(AmaryllisTheme.monoFont(size: 11, weight: .regular))
-                                .foregroundStyle(AmaryllisTheme.textSecondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                        Spacer()
-                        Button {
-                            Task {
-                                quickSearch = ""
-                                await installAndActivate(modelID: suggestion.model.id, provider: suggestion.provider)
-                            }
-                        } label: {
-                            if appState.isBusy, downloadingModelID == suggestion.model.id {
-                                ProgressView().controlSize(.small).frame(width: 110)
-                            } else {
-                                Text("Install & Use").frame(width: 110)
-                            }
-                        }
-                        .buttonStyle(AmaryllisPrimaryButtonStyle())
-                        .disabled(appState.isBusy)
-                    }
-                    .padding(.vertical, 2)
+                ForEach(filteredQuickSuggestions.prefix(12)) { suggestion in
+                    quickLibraryRow(for: suggestion)
                 }
             }
         }
         .amaryllisCard()
     }
 
+    private func quickLibraryRow(for suggestion: QuickSuggestion) -> some View {
+        let installed = isInstalled(provider: suggestion.provider, modelID: suggestion.model.id)
+        let job = appState.modelDownloadJob(modelId: suggestion.model.id, provider: suggestion.provider)
+        let isDownloading = job != nil && !(job?.isTerminal ?? true)
+
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(suggestion.model.label)
+                        .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
+                        .foregroundStyle(AmaryllisTheme.textPrimary)
+                    HStack(spacing: 6) {
+                        Text("\(suggestion.provider)/\(suggestion.model.id)")
+                            .font(AmaryllisTheme.monoFont(size: 11, weight: .regular))
+                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if let sizeText = modelSizeText(for: suggestion.model) {
+                            Text("•")
+                                .font(AmaryllisTheme.monoFont(size: 11, weight: .regular))
+                                .foregroundStyle(AmaryllisTheme.textSecondary)
+                            Text(sizeText)
+                                .font(AmaryllisTheme.monoFont(size: 11, weight: .regular))
+                                .foregroundStyle(AmaryllisTheme.textSecondary)
+                        }
+                    }
+                }
+                Spacer()
+
+                if installed {
+                    Text("installed")
+                        .font(AmaryllisTheme.bodyFont(size: 10, weight: .bold))
+                        .foregroundStyle(AmaryllisTheme.okGreen)
+                }
+
+                Button {
+                    Task {
+                        quickSearch = ""
+                        if installed {
+                            await appState.loadModel(modelId: suggestion.model.id, provider: suggestion.provider)
+                        } else {
+                            await installAndActivate(modelID: suggestion.model.id, provider: suggestion.provider)
+                        }
+                    }
+                } label: {
+                    if isDownloading {
+                        Text("Downloading").frame(width: 110)
+                    } else if installed {
+                        Text("Use").frame(width: 110)
+                    } else {
+                        Text("Install & Use").frame(width: 110)
+                    }
+                }
+                .buttonStyle(AmaryllisPrimaryButtonStyle())
+                .disabled(isDownloading || appState.isBusy)
+            }
+
+            if let job, isDownloading {
+                modelDownloadProgress(job: job)
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(installed ? AmaryllisTheme.border.opacity(0.14) : Color.clear)
+        )
+    }
+
     private var downloadCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let manualJob = appState.modelDownloadJob(modelId: modelToDownload, provider: providerForDownload)
+        let manualIsDownloading = manualJob != nil && !(manualJob?.isTerminal ?? true)
+
+        return VStack(alignment: .leading, spacing: 8) {
             Text("Install model")
                 .font(AmaryllisTheme.sectionFont(size: 17))
                 .foregroundStyle(AmaryllisTheme.textPrimary)
@@ -203,14 +317,18 @@ struct ModelsView: View {
                     guard !trimmed.isEmpty else { return }
                     Task { await startDownload(modelId: trimmed, provider: providerForDownload) }
                 } label: {
-                    if appState.isBusy, downloadingModelID == modelToDownload {
-                        ProgressView().controlSize(.small).frame(width: 74)
+                    if manualIsDownloading {
+                        Text("Downloading").frame(width: 92)
                     } else {
-                        Text("Install").frame(width: 74)
+                        Text("Install").frame(width: 92)
                     }
                 }
                 .buttonStyle(AmaryllisPrimaryButtonStyle())
-                .disabled(appState.isBusy)
+                .disabled(manualIsDownloading || appState.isBusy)
+            }
+
+            if let manualJob, manualIsDownloading {
+                modelDownloadProgress(job: manualJob)
             }
         }
         .amaryllisCard()
@@ -237,33 +355,65 @@ struct ModelsView: View {
                                         .foregroundStyle(AmaryllisTheme.textSecondary)
 
                                     ForEach(items) { item in
+                                        let installed = isInstalled(provider: provider, modelID: item.id)
+                                        let job = appState.modelDownloadJob(modelId: item.id, provider: provider)
+                                        let downloading = job != nil && !(job?.isTerminal ?? true)
                                         HStack(spacing: 8) {
                                             VStack(alignment: .leading, spacing: 2) {
                                                 Text(item.label)
                                                     .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
                                                     .foregroundStyle(AmaryllisTheme.textPrimary)
-                                                Text(item.id)
-                                                    .font(AmaryllisTheme.monoFont(size: 11, weight: .regular))
-                                                    .foregroundStyle(AmaryllisTheme.textSecondary)
+                                                HStack(spacing: 6) {
+                                                    Text(item.id)
+                                                        .font(AmaryllisTheme.monoFont(size: 11, weight: .regular))
+                                                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                                                    if let sizeText = modelSizeText(for: item) {
+                                                        Text("•")
+                                                            .font(AmaryllisTheme.monoFont(size: 11, weight: .regular))
+                                                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                                                        Text(sizeText)
+                                                            .font(AmaryllisTheme.monoFont(size: 11, weight: .regular))
+                                                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                                                    }
+                                                }
                                             }
                                             Spacer()
+
+                                            if installed {
+                                                Text("installed")
+                                                    .font(AmaryllisTheme.bodyFont(size: 10, weight: .bold))
+                                                    .foregroundStyle(AmaryllisTheme.okGreen)
+                                            }
+
                                             Button {
-                                                Task { await startDownload(modelId: item.id, provider: provider) }
+                                                Task {
+                                                    if installed {
+                                                        await appState.loadModel(modelId: item.id, provider: provider)
+                                                    } else {
+                                                        await startDownload(modelId: item.id, provider: provider)
+                                                    }
+                                                }
                                             } label: {
-                                                if appState.isBusy, downloadingModelID == item.id {
-                                                    ProgressView().controlSize(.small).frame(width: 66)
+                                                if downloading {
+                                                    Text("Downloading").frame(width: 92)
+                                                } else if installed {
+                                                    Text("Use").frame(width: 92)
                                                 } else {
-                                                    Text("Install").frame(width: 66)
+                                                    Text("Install").frame(width: 92)
                                                 }
                                             }
                                             .buttonStyle(AmaryllisPrimaryButtonStyle())
-                                            .disabled(appState.isBusy)
+                                            .disabled(downloading || appState.isBusy)
                                         }
                                         .padding(.vertical, 2)
                                         .contentShape(Rectangle())
                                         .onTapGesture {
                                             providerForDownload = provider
                                             modelToDownload = item.id
+                                        }
+
+                                        if let job, downloading {
+                                            modelDownloadProgress(job: job)
                                         }
                                     }
                                 }
@@ -272,7 +422,7 @@ struct ModelsView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 280)
+                .frame(maxHeight: 340)
             }
         }
         .amaryllisCard()
@@ -307,12 +457,19 @@ struct ModelsView: View {
                             Text(item.id)
                                 .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
                                 .foregroundStyle(AmaryllisTheme.textPrimary)
-                            if let path = item.path {
-                                Text(path)
-                                    .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
-                                    .foregroundStyle(AmaryllisTheme.textSecondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
+                            HStack(spacing: 6) {
+                                if let sizeText = modelSizeText(fromMetadata: item.metadata) {
+                                    Text(sizeText)
+                                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                                }
+                                if let path = item.path {
+                                    Text(path)
+                                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                }
                             }
                         }
                         Spacer()
@@ -362,7 +519,39 @@ struct ModelsView: View {
                 }
             }
         }
-        .frame(maxHeight: 260)
+        .frame(maxHeight: 280)
+    }
+
+    private func modelDownloadProgress(job: APIModelDownloadJob) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if job.progress > 0 {
+                ProgressView(value: max(0.0, min(1.0, job.progress)))
+                    .progressViewStyle(.linear)
+                    .tint(AmaryllisTheme.accent)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            HStack(spacing: 6) {
+                if let message = job.message, !message.isEmpty {
+                    Text(message)
+                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                if let completed = job.completedBytes, let total = job.totalBytes, total > 0 {
+                    Text("\(byteCountFormatter.string(fromByteCount: Int64(completed))) / \(byteCountFormatter.string(fromByteCount: Int64(total)))")
+                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                } else if job.progress > 0 {
+                    Text("\(Int((job.progress * 100).rounded()))%")
+                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                }
+            }
+        }
+        .padding(.leading, 2)
     }
 
     private var suggestedForDisplay: [String: [APIModelCatalog.SuggestedModel]] {
@@ -380,8 +569,20 @@ struct ModelsView: View {
     }
 
     private var providerOptions: [String] {
+        if let capabilities = appState.modelCatalog?.capabilities {
+            let downloadable = capabilities
+                .filter { $0.value.supportsDownload }
+                .map(\.key)
+                .sorted()
+            if !downloadable.isEmpty {
+                return downloadable
+            }
+        }
+
         if let catalog = appState.modelCatalog {
-            let keys = catalog.providers.keys.sorted()
+            let keys = catalog.providers.keys.sorted().filter { provider in
+                provider == "mlx" || provider == "ollama"
+            }
             if !keys.isEmpty {
                 return keys
             }
@@ -392,19 +593,13 @@ struct ModelsView: View {
     private func startDownload(modelId: String, provider: String) async {
         providerForDownload = provider
         modelToDownload = modelId
-        downloadingModelID = modelId
         await appState.downloadModel(modelId: modelId, provider: provider)
-        downloadingModelID = nil
     }
 
     private func installAndActivate(modelID: String, provider: String) async {
         providerForDownload = provider
         modelToDownload = modelID
-        downloadingModelID = modelID
         await appState.installAndActivateModel(modelId: modelID, provider: provider)
-        loadingModelID = modelID
-        downloadingModelID = nil
-        loadingModelID = nil
     }
 
     private var filteredQuickSuggestions: [QuickSuggestion] {
@@ -425,12 +620,135 @@ struct ModelsView: View {
                 }
             }
         }
-        return items
+
+        return items.sorted { lhs, rhs in
+            let lhsInstalled = isInstalled(provider: lhs.provider, modelID: lhs.model.id)
+            let rhsInstalled = isInstalled(provider: rhs.provider, modelID: rhs.model.id)
+            if lhsInstalled != rhsInstalled {
+                return lhsInstalled && !rhsInstalled
+            }
+            return lhs.model.label.localizedCaseInsensitiveCompare(rhs.model.label) == .orderedAscending
+        }
+    }
+
+    private var installedModels: [InstalledModel] {
+        guard let catalog = appState.modelCatalog else { return [] }
+        var rows: [InstalledModel] = []
+        for provider in catalog.providers.keys.sorted() {
+            guard let payload = catalog.providers[provider] else { continue }
+            for item in payload.items {
+                let size = modelSizeBytes(fromMetadata: item.metadata)
+                rows.append(
+                    InstalledModel(
+                        id: "\(provider)::\(item.id)",
+                        provider: provider,
+                        itemID: item.id,
+                        active: item.active || (catalog.active.provider == provider && catalog.active.model == item.id),
+                        sizeText: size.map { byteCountFormatter.string(fromByteCount: Int64($0)) }
+                    )
+                )
+            }
+        }
+
+        return rows.sorted { lhs, rhs in
+            if lhs.active != rhs.active {
+                return lhs.active && !rhs.active
+            }
+            if lhs.provider != rhs.provider {
+                return lhs.provider < rhs.provider
+            }
+            return lhs.itemID < rhs.itemID
+        }
+    }
+
+    private func isInstalled(provider: String, modelID: String) -> Bool {
+        appState.isModelInstalled(modelId: modelID, provider: provider)
+    }
+
+    private func modelSizeText(for model: APIModelCatalog.SuggestedModel) -> String? {
+        if let exact = model.sizeBytes, exact > 0 {
+            return byteCountFormatter.string(fromByteCount: Int64(exact))
+        }
+        if let inferred = inferredSizeBytes(fromModelID: model.id), inferred > 0 {
+            return "~" + byteCountFormatter.string(fromByteCount: Int64(inferred))
+        }
+        return nil
+    }
+
+    private func modelSizeText(fromMetadata metadata: [String: JSONValue]?) -> String? {
+        guard let bytes = modelSizeBytes(fromMetadata: metadata), bytes > 0 else {
+            return nil
+        }
+        return byteCountFormatter.string(fromByteCount: Int64(bytes))
+    }
+
+    private func modelSizeBytes(fromMetadata metadata: [String: JSONValue]?) -> Int? {
+        guard let metadata else { return nil }
+        if let bytes = metadata["size_bytes"]?.intValue {
+            return bytes
+        }
+        if let bytes = metadata["size"]?.intValue {
+            return bytes
+        }
+        return nil
+    }
+
+    private func inferredSizeBytes(fromModelID modelID: String) -> Int? {
+        let text = modelID.lowercased()
+        let pattern = #"(\d+(?:\.\d+)?)\s*b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+            return nil
+        }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let match = regex.firstMatch(in: text, options: [], range: range) else {
+            return nil
+        }
+        guard let valueRange = Range(match.range(at: 1), in: text) else {
+            return nil
+        }
+        guard let paramsB = Double(text[valueRange]) else {
+            return nil
+        }
+
+        var bytesPerParam = 0.58
+        if text.contains("8bit") || text.contains("q8") {
+            bytesPerParam = 1.05
+        } else if text.contains("6bit") || text.contains("q6") {
+            bytesPerParam = 0.78
+        } else if text.contains("5bit") || text.contains("q5") {
+            bytesPerParam = 0.64
+        } else if text.contains("4bit") || text.contains("q4") {
+            bytesPerParam = 0.56
+        }
+
+        let estimated = Int(paramsB * 1_000_000_000 * bytesPerParam)
+        return estimated > 0 ? estimated : nil
     }
 
     private struct QuickSuggestion: Identifiable {
         let id: String
         let provider: String
         let model: APIModelCatalog.SuggestedModel
+    }
+
+    private struct InstalledModel: Identifiable {
+        let id: String
+        let provider: String
+        let itemID: String
+        let active: Bool
+        let sizeText: String?
+    }
+
+    private static let _byteCountFormatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        formatter.allowedUnits = [.useGB, .useMB, .useKB]
+        formatter.includesUnit = true
+        formatter.isAdaptive = true
+        return formatter
+    }()
+
+    private var byteCountFormatter: ByteCountFormatter {
+        Self._byteCountFormatter
     }
 }

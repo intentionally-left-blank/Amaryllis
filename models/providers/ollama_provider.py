@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Iterator
+import re
+from typing import Any, Callable, Iterator
 
 import httpx
 
@@ -68,12 +69,16 @@ class OllamaProvider:
             model_name = item.get("name")
             if not model_name:
                 continue
+            size_bytes = _to_int(item.get("size"))
+            metadata = dict(item) if isinstance(item, dict) else {}
+            if size_bytes is not None:
+                metadata["size_bytes"] = size_bytes
             result.append(
                 {
                     "id": model_name,
                     "provider": "ollama",
                     "active": model_name == self.active_model,
-                    "metadata": item,
+                    "metadata": metadata,
                 }
             )
         return result
@@ -99,8 +104,8 @@ class OllamaProvider:
             "requires_api_key": False,
         }
 
-    def suggested_models(self, limit: int = 200) -> list[dict[str, str]]:
-        suggestions: list[dict[str, str]] = []
+    def suggested_models(self, limit: int = 200) -> list[dict[str, Any]]:
+        suggestions: list[dict[str, Any]] = []
         seen: set[str] = set()
 
         def add(model_id: str) -> None:
@@ -108,10 +113,12 @@ class OllamaProvider:
             if not normalized or normalized in seen:
                 return
             seen.add(normalized)
+            size_bytes = self._estimate_download_size_bytes(normalized)
             suggestions.append(
                 {
                     "id": normalized,
                     "label": self._label_from_model_id(normalized),
+                    "size_bytes": size_bytes,
                 }
             )
 
@@ -128,18 +135,64 @@ class OllamaProvider:
 
         return suggestions[:limit]
 
-    def download_model(self, model_id: str) -> dict[str, Any]:
-        with httpx.Client(base_url=self.base_url, timeout=120.0) as client:
-            response = client.post(
-                "/api/pull",
-                json={"name": model_id, "stream": False},
+    def download_model(
+        self,
+        model_id: str,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        if callable(progress_callback):
+            progress_callback(
+                {
+                    "status": "queued",
+                    "message": "Waiting for Ollama pull to start",
+                    "progress": 0.0,
+                }
             )
-            response.raise_for_status()
+
+        final_completed: int | None = None
+        final_total: int | None = None
+        with httpx.Client(base_url=self.base_url, timeout=240.0) as client:
+            with client.stream(
+                "POST",
+                "/api/pull",
+                json={"name": model_id, "stream": True},
+            ) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    completed = _to_int(chunk.get("completed"))
+                    total = _to_int(chunk.get("total"))
+                    if completed is not None:
+                        final_completed = completed
+                    if total is not None and total > 0:
+                        final_total = total
+
+                    progress: float | None = None
+                    if completed is not None and total and total > 0:
+                        progress = max(0.0, min(1.0, float(completed) / float(total)))
+
+                    if callable(progress_callback):
+                        progress_callback(
+                            {
+                                "status": "running",
+                                "message": str(chunk.get("status", "downloading")),
+                                "completed_bytes": completed,
+                                "total_bytes": total,
+                                "progress": progress,
+                            }
+                        )
 
         return {
             "status": "downloaded",
             "provider": "ollama",
             "model": model_id,
+            "size_bytes": final_total or final_completed,
         }
 
     def load_model(self, model_id: str) -> dict[str, Any]:
@@ -221,3 +274,34 @@ class OllamaProvider:
         normalized = model_id.replace(":", " ").replace("-", " ").strip()
         pretty = " ".join(segment for segment in normalized.split() if segment)
         return pretty or model_id
+
+    @staticmethod
+    def _estimate_download_size_bytes(model_id: str) -> int | None:
+        text = model_id.lower()
+        billions = re.search(r"(\d+(?:\.\d+)?)\s*b\b", text)
+        if not billions:
+            return None
+        try:
+            params_b = float(billions.group(1))
+        except Exception:
+            return None
+        bytes_per_param = 0.58
+        if "q8" in text:
+            bytes_per_param = 1.05
+        elif "q6" in text:
+            bytes_per_param = 0.78
+        elif "q5" in text:
+            bytes_per_param = 0.64
+        elif "q4" in text:
+            bytes_per_param = 0.53
+        estimated = int(params_b * 1_000_000_000 * bytes_per_param)
+        return estimated if estimated > 0 else None
+
+
+def _to_int(value: Any) -> int | None:
+    try:
+        if value is None:
+            return None
+        return int(value)
+    except Exception:
+        return None

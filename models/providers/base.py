@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Iterator, Protocol
+from typing import Any, Callable, Iterator, Protocol
 
 
 class ModelProvider(Protocol):
@@ -9,7 +9,7 @@ class ModelProvider(Protocol):
     def list_models(self) -> list[dict[str, Any]]:
         ...
 
-    def suggested_models(self, limit: int = 100) -> list[dict[str, str]]:
+    def suggested_models(self, limit: int = 100) -> list[dict[str, Any]]:
         ...
 
     def capabilities(self) -> dict[str, Any]:
@@ -18,7 +18,11 @@ class ModelProvider(Protocol):
     def health_check(self) -> dict[str, Any]:
         ...
 
-    def download_model(self, model_id: str) -> dict[str, Any]:
+    def download_model(
+        self,
+        model_id: str,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
         ...
 
     def load_model(self, model_id: str) -> dict[str, Any]:

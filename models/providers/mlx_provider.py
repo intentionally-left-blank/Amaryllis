@@ -5,8 +5,9 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
+from models.routing import estimate_model_size_b
 FALLBACK_MLX_SUGGESTED_MODELS: list[str] = [
     "mlx-community/Qwen2.5-0.5B-Instruct-4bit",
     "mlx-community/Qwen2.5-1.5B-Instruct-4bit",
@@ -107,6 +108,11 @@ class MLXProvider:
                 except Exception:
                     metadata = {}
 
+            size_bytes = _to_int(metadata.get("size_bytes"))
+            if size_bytes is None:
+                size_bytes = self._folder_size_bytes(item)
+                metadata["size_bytes"] = size_bytes
+
             model_id = metadata.get("model_id") or self._folder_to_model(item.name)
             models.append(
                 {
@@ -137,8 +143,8 @@ class MLXProvider:
             "requires_api_key": False,
         }
 
-    def suggested_models(self, limit: int = 300) -> list[dict[str, str]]:
-        suggestions: list[dict[str, str]] = []
+    def suggested_models(self, limit: int = 300) -> list[dict[str, Any]]:
+        suggestions: list[dict[str, Any]] = []
         seen: set[str] = set()
 
         def add(model_id: str) -> None:
@@ -146,10 +152,12 @@ class MLXProvider:
             if not normalized or normalized in seen:
                 return
             seen.add(normalized)
+            size_bytes = self._estimate_download_size_bytes(normalized)
             suggestions.append(
                 {
                     "id": normalized,
                     "label": self._label_from_model_id(normalized),
+                    "size_bytes": size_bytes,
                 }
             )
 
@@ -176,7 +184,11 @@ class MLXProvider:
 
         return suggestions[:limit]
 
-    def download_model(self, model_id: str) -> dict[str, Any]:
+    def download_model(
+        self,
+        model_id: str,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
         folder = self.models_dir / self._model_to_folder(model_id)
         folder.mkdir(parents=True, exist_ok=True)
 
@@ -187,26 +199,102 @@ class MLXProvider:
             "source": "local-placeholder",
         }
 
+        self._emit_progress(
+            progress_callback,
+            {
+                "status": "queued",
+                "message": "Preparing model download",
+                "progress": 0.0,
+            },
+        )
+
         try:
-            from huggingface_hub import snapshot_download  # type: ignore
+            from huggingface_hub import HfApi, hf_hub_download, snapshot_download  # type: ignore
 
-            kwargs: dict[str, Any] = {
-                "repo_id": model_id,
-                "local_dir": str(folder),
-                "resume_download": True,
-            }
+            api = HfApi()
+            repo_files = self._list_repo_files(api=api, model_id=model_id)
+            total_bytes = sum(size for _, size in repo_files if size and size > 0)
+            if total_bytes > 0:
+                metadata["estimated_total_bytes"] = total_bytes
 
-            signature = inspect.signature(snapshot_download)
-            if "local_dir_use_symlinks" in signature.parameters:
-                kwargs["local_dir_use_symlinks"] = False
+            self._emit_progress(
+                progress_callback,
+                {
+                    "status": "running",
+                    "message": "Starting file transfer",
+                    "completed_bytes": 0,
+                    "total_bytes": total_bytes if total_bytes > 0 else None,
+                    "progress": 0.0,
+                },
+            )
 
-            snapshot_download(**kwargs)
+            downloaded_bytes = 0
+            if repo_files:
+                for index, (filename, expected_size) in enumerate(repo_files, start=1):
+                    kwargs: dict[str, Any] = {
+                        "repo_id": model_id,
+                        "filename": filename,
+                        "local_dir": str(folder),
+                        "resume_download": True,
+                    }
+                    signature = inspect.signature(hf_hub_download)
+                    if "local_dir_use_symlinks" in signature.parameters:
+                        kwargs["local_dir_use_symlinks"] = False
+                    local_path = Path(hf_hub_download(**kwargs))
+                    file_size = expected_size if expected_size and expected_size > 0 else int(local_path.stat().st_size)
+                    downloaded_bytes += max(0, int(file_size))
+
+                    progress: float | None = None
+                    if total_bytes > 0:
+                        progress = max(0.0, min(1.0, float(downloaded_bytes) / float(total_bytes)))
+                    self._emit_progress(
+                        progress_callback,
+                        {
+                            "status": "running",
+                            "message": f"Downloading file {index}/{len(repo_files)}",
+                            "current_file": filename,
+                            "completed_bytes": downloaded_bytes,
+                            "total_bytes": total_bytes if total_bytes > 0 else None,
+                            "progress": progress,
+                        },
+                    )
+            else:
+                kwargs = {
+                    "repo_id": model_id,
+                    "local_dir": str(folder),
+                    "resume_download": True,
+                }
+                signature = inspect.signature(snapshot_download)
+                if "local_dir_use_symlinks" in signature.parameters:
+                    kwargs["local_dir_use_symlinks"] = False
+                snapshot_download(**kwargs)
+
+            size_bytes = self._folder_size_bytes(folder)
+            metadata["size_bytes"] = size_bytes
             metadata["source"] = "huggingface_hub"
             metadata["status"] = "ok"
+            self._emit_progress(
+                progress_callback,
+                {
+                    "status": "succeeded",
+                    "message": "Download completed",
+                    "completed_bytes": size_bytes,
+                    "total_bytes": size_bytes,
+                    "progress": 1.0,
+                },
+            )
         except Exception as exc:  # pragma: no cover - runtime dependency/network
             metadata["status"] = "failed"
             metadata["error"] = str(exc)
             self.logger.error("mlx_download_failed model=%s error=%s", model_id, exc)
+            self._emit_progress(
+                progress_callback,
+                {
+                    "status": "failed",
+                    "message": str(exc),
+                    "progress": 0.0,
+                },
+            )
 
             (folder / "model.json").write_text(
                 json.dumps(metadata, ensure_ascii=False, indent=2),
@@ -226,6 +314,7 @@ class MLXProvider:
             "provider": "mlx",
             "model": model_id,
             "path": str(folder),
+            "size_bytes": _to_int(metadata.get("size_bytes")),
             "metadata": metadata,
         }
 
@@ -318,6 +407,67 @@ class MLXProvider:
         return pretty or model_id
 
     @staticmethod
+    def _emit_progress(
+        progress_callback: Callable[[dict[str, Any]], None] | None,
+        payload: dict[str, Any],
+    ) -> None:
+        if not callable(progress_callback):
+            return
+        try:
+            progress_callback(payload)
+        except Exception:
+            return
+
+    @staticmethod
+    def _list_repo_files(api: Any, model_id: str) -> list[tuple[str, int]]:
+        try:
+            info = api.model_info(repo_id=model_id, files_metadata=True)
+        except Exception:
+            return []
+
+        siblings = getattr(info, "siblings", None)
+        if not isinstance(siblings, list):
+            return []
+
+        rows: list[tuple[str, int]] = []
+        for sibling in siblings:
+            filename = str(getattr(sibling, "rfilename", "")).strip()
+            if not filename:
+                continue
+            size = _to_int(getattr(sibling, "size", None)) or 0
+            rows.append((filename, max(0, size)))
+        return rows
+
+    @staticmethod
+    def _estimate_download_size_bytes(model_id: str) -> int | None:
+        estimated_params_b = estimate_model_size_b(model_id)
+        if estimated_params_b is None:
+            return None
+        normalized = model_id.lower()
+        bytes_per_param = 2.0
+        if "8bit" in normalized or "q8" in normalized:
+            bytes_per_param = 1.1
+        elif "6bit" in normalized or "q6" in normalized:
+            bytes_per_param = 0.82
+        elif "5bit" in normalized or "q5" in normalized:
+            bytes_per_param = 0.67
+        elif "4bit" in normalized or "q4" in normalized:
+            bytes_per_param = 0.56
+        estimated = int(estimated_params_b * 1_000_000_000 * bytes_per_param)
+        return estimated if estimated > 0 else None
+
+    @staticmethod
+    def _folder_size_bytes(path: Path) -> int:
+        total = 0
+        try:
+            for item in path.rglob("*"):
+                if item.is_file():
+                    total += int(item.stat().st_size)
+        except Exception:
+            return 0
+        return max(0, total)
+
+    @staticmethod
     def _messages_to_prompt(messages: list[dict[str, Any]]) -> str:
         lines: list[str] = []
         for message in messages:
@@ -326,3 +476,12 @@ class MLXProvider:
             lines.append(f"{role}: {content}")
         lines.append("ASSISTANT:")
         return "\n".join(lines)
+
+
+def _to_int(value: Any) -> int | None:
+    try:
+        if value is None:
+            return None
+        return int(value)
+    except Exception:
+        return None

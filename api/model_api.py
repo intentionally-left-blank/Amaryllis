@@ -69,6 +69,34 @@ class ModelFailoverDebugResponse(BaseModel):
     diagnostics: dict[str, Any]
 
 
+class ModelDownloadJob(BaseModel):
+    id: str
+    provider: str
+    model: str
+    status: str
+    progress: float = Field(default=0.0, ge=0.0, le=1.0)
+    completed_bytes: int | None = None
+    total_bytes: int | None = None
+    message: str | None = None
+    error: str | None = None
+    result: dict[str, Any] | None = None
+    created_at: str
+    updated_at: str
+    finished_at: str | None = None
+
+
+class ModelDownloadJobResponse(BaseModel):
+    request_id: str
+    job: ModelDownloadJob
+    already_running: bool = False
+
+
+class ModelDownloadJobsListResponse(BaseModel):
+    request_id: str
+    items: list[ModelDownloadJob]
+    count: int
+
+
 @router.get("/models")
 def list_models(request: Request) -> dict[str, Any]:
     services = request.app.state.services
@@ -185,6 +213,87 @@ def download_model(payload: DownloadModelRequest, request: Request) -> dict[str,
             status="failed",
             details={"error": str(exc)},
         )
+        raise ProviderError(str(exc)) from exc
+
+
+@router.post("/models/download/start", response_model=ModelDownloadJobResponse)
+def start_model_download(payload: DownloadModelRequest, request: Request) -> ModelDownloadJobResponse:
+    services = request.app.state.services
+    auth = auth_context_from_request(request)
+    try:
+        result = services.model_manager.start_model_download(
+            model_id=payload.model_id,
+            provider=payload.provider,
+        )
+        _sign_action(
+            request,
+            action="model_download_start",
+            payload=payload.model_dump(),
+            actor=auth.user_id,
+            target_id=payload.model_id,
+        )
+        return ModelDownloadJobResponse(
+            request_id=_request_id(request),
+            job=ModelDownloadJob(**result["job"]),
+            already_running=bool(result.get("already_running", False)),
+        )
+    except ValueError as exc:
+        _sign_action(
+            request,
+            action="model_download_start",
+            payload=payload.model_dump(),
+            actor=auth.user_id,
+            target_id=payload.model_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
+        raise ValidationError(str(exc)) from exc
+    except Exception as exc:
+        _sign_action(
+            request,
+            action="model_download_start",
+            payload=payload.model_dump(),
+            actor=auth.user_id,
+            target_id=payload.model_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
+        raise ProviderError(str(exc)) from exc
+
+
+@router.get("/models/download/{job_id}", response_model=ModelDownloadJobResponse)
+def get_model_download(job_id: str, request: Request) -> ModelDownloadJobResponse:
+    services = request.app.state.services
+    try:
+        job = services.model_manager.get_model_download_job(job_id=job_id)
+        return ModelDownloadJobResponse(
+            request_id=_request_id(request),
+            job=ModelDownloadJob(**job),
+            already_running=False,
+        )
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
+    except Exception as exc:
+        raise ProviderError(str(exc)) from exc
+
+
+@router.get("/models/downloads", response_model=ModelDownloadJobsListResponse)
+def list_model_downloads(
+    request: Request,
+    limit: int = 100,
+) -> ModelDownloadJobsListResponse:
+    services = request.app.state.services
+    try:
+        payload = services.model_manager.list_model_download_jobs(limit=max(1, min(limit, 500)))
+        rows = [ModelDownloadJob(**item) for item in payload.get("items", [])]
+        return ModelDownloadJobsListResponse(
+            request_id=_request_id(request),
+            items=rows,
+            count=int(payload.get("count", len(rows))),
+        )
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
+    except Exception as exc:
         raise ProviderError(str(exc)) from exc
 
 
