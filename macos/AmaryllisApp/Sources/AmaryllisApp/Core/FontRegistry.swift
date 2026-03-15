@@ -40,10 +40,7 @@ enum AmaryllisFontRegistry {
     }
 
     private static func discoverBundledFontURLs() -> [URL] {
-        var bundles: [Bundle] = [Bundle.main]
-        #if SWIFT_PACKAGE
-        bundles.insert(Bundle.module, at: 0)
-        #endif
+        let bundles: [Bundle] = [Bundle.main]
 
         var found: [URL] = []
         var seen: Set<String> = []
