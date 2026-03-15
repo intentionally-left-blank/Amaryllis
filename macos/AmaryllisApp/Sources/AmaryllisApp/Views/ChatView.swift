@@ -103,7 +103,6 @@ struct ChatView: View {
             if selectedProvider.isEmpty {
                 selectedProvider = appState.selectedProvider ?? ""
             }
-            Task { await appState.refreshToolingState() }
         }
         .onChange(of: appState.selectedModel ?? "") { _ in
             if selectedModelID.isEmpty {
@@ -399,6 +398,9 @@ struct ChatView: View {
         let chatSessionID = appState.selectedChatID?.uuidString
 
         Task {
+            if toolsEnabled && appState.availableTools.isEmpty {
+                await appState.refreshToolingState()
+            }
             let runtimeReady = await appState.ensureChatReady()
             if !runtimeReady {
                 await MainActor.run {

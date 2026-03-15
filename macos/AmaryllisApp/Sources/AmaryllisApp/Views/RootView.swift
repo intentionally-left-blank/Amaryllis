@@ -21,10 +21,6 @@ struct RootView: View {
             .navigationSplitViewStyle(.balanced)
             .background(Color.clear)
         }
-        .task {
-            await appState.refreshHealth()
-            await appState.refreshModels(includeSuggested: false)
-        }
     }
 
     private var sidebar: some View {

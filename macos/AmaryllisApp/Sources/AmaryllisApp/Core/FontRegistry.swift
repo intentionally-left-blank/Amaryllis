@@ -6,7 +6,7 @@ enum AmaryllisFontRegistry {
     static let preferredPostScriptName = "Mx437_OlivettiThin_9x14"
 
     private static var didRegister = false
-    private static let bundledFileNames: Set<String> = [
+    private static let bundledFileNames: [String] = [
         "Mx437_OlivettiThin_9x14.ttf",
         "Ac437_OlivettiThin_9x14.ttf",
         "Px437_OlivettiThin_9x14.ttf",
@@ -40,49 +40,32 @@ enum AmaryllisFontRegistry {
     }
 
     private static func discoverBundledFontURLs() -> [URL] {
-        let fileManager = FileManager.default
-        var roots: [URL] = []
-        if let url = Bundle.main.resourceURL {
-            roots.append(url)
-        }
-        roots.append(Bundle.main.bundleURL)
-        if let url = Bundle.main.executableURL?.deletingLastPathComponent() {
-            roots.append(url)
-        }
-        for bundle in Bundle.allBundles + Bundle.allFrameworks {
-            if let url = bundle.resourceURL {
-                roots.append(url)
-            }
-        }
+        var bundles: [Bundle] = [Bundle.main]
+        #if SWIFT_PACKAGE
+        bundles.insert(Bundle.module, at: 0)
+        #endif
 
         var found: [URL] = []
         var seen: Set<String> = []
+        for fileName in bundledFileNames {
+            let nsName = fileName as NSString
+            let stem = nsName.deletingPathExtension
+            let ext = nsName.pathExtension
 
-        for root in roots {
-            guard let enumerator = fileManager.enumerator(
-                at: root,
-                includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles],
-                errorHandler: nil
-            ) else {
-                continue
-            }
-
-            for case let fileURL as URL in enumerator {
-                guard fileURL.pathExtension.lowercased() == "ttf" else {
-                    continue
+            for bundle in bundles {
+                let candidates = [
+                    bundle.url(forResource: stem, withExtension: ext, subdirectory: "Fonts"),
+                    bundle.url(forResource: stem, withExtension: ext, subdirectory: "Resources/Fonts"),
+                    bundle.url(forResource: stem, withExtension: ext),
+                ]
+                for maybeURL in candidates {
+                    guard let url = maybeURL else { continue }
+                    let normalized = url.standardizedFileURL.path
+                    guard seen.insert(normalized).inserted else { continue }
+                    found.append(url)
                 }
-                guard bundledFileNames.contains(fileURL.lastPathComponent) else {
-                    continue
-                }
-                let normalized = fileURL.standardizedFileURL.path
-                guard seen.insert(normalized).inserted else {
-                    continue
-                }
-                found.append(fileURL)
             }
         }
-
         return found
     }
 }
