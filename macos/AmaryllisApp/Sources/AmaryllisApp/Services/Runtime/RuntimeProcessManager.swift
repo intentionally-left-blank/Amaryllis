@@ -18,6 +18,7 @@ final class RuntimeProcessManager: ObservableObject {
     @Published var processState: ProcessState = .stopped
     @Published var connectionState: ConnectionState = .unknown
     @Published var logs: [String] = []
+    @Published var logCaptureEnabled: Bool = false
 
     private var process: Process?
     private var outputPipe: Pipe?
@@ -45,7 +46,7 @@ final class RuntimeProcessManager: ObservableObject {
         let runtimeURL = URL(fileURLWithPath: runtimeDirectory, isDirectory: true)
         let runtimeServerPath = runtimeURL.appendingPathComponent("runtime/server.py").path
         guard FileManager.default.fileExists(atPath: runtimeServerPath) else {
-            appendLog("Runtime not found at \(runtimeDirectory). Expected runtime/server.py")
+            appendLog("Runtime not found at \(runtimeDirectory). Expected runtime/server.py", force: true)
             processState = .failed
             connectionState = .offline
             return
@@ -87,7 +88,7 @@ final class RuntimeProcessManager: ObservableObject {
 
         proc.terminationHandler = { [weak self] process in
             Task { @MainActor in
-                self?.appendLog("Runtime terminated with code \(process.terminationStatus)")
+                self?.appendLog("Runtime terminated with code \(process.terminationStatus)", force: true)
                 self?.processState = .stopped
                 self?.connectionState = .offline
                 self?.cleanup()
@@ -98,9 +99,9 @@ final class RuntimeProcessManager: ObservableObject {
             try proc.run()
             process = proc
             processState = .running
-            appendLog("Runtime started at http://\(host):\(port) using \(pythonCommand)")
+            appendLog("Runtime started at http://\(host):\(port) using \(pythonCommand)", force: true)
         } catch {
-            appendLog("Failed to start runtime: \(error.localizedDescription)")
+            appendLog("Failed to start runtime: \(error.localizedDescription)", force: true)
             processState = .failed
             connectionState = .offline
             cleanup()
@@ -109,11 +110,15 @@ final class RuntimeProcessManager: ObservableObject {
 
     func stop() {
         guard let process else { return }
-        appendLog("Stopping runtime...")
+        appendLog("Stopping runtime...", force: true)
         process.terminate()
         processState = .stopped
         connectionState = .offline
         cleanup()
+    }
+
+    func setLogCaptureEnabled(_ enabled: Bool) {
+        logCaptureEnabled = enabled
     }
 
     private func cleanup() {
@@ -126,14 +131,14 @@ final class RuntimeProcessManager: ObservableObject {
         process = nil
     }
 
-    private func appendLog(_ text: String) {
-        let lines = normalizedLogLines(from: text)
+    private func appendLog(_ text: String, force: Bool = false) {
+        let lines = normalizedLogLines(from: text, force: force)
         guard !lines.isEmpty else { return }
         pendingLogs.append(contentsOf: lines)
         scheduleLogFlushIfNeeded()
     }
 
-    private func normalizedLogLines(from text: String) -> [String] {
+    private func normalizedLogLines(from text: String, force: Bool) -> [String] {
         var combined = text
         if !trailingPartialLine.isEmpty {
             combined = trailingPartialLine + combined
@@ -147,7 +152,7 @@ final class RuntimeProcessManager: ObservableObject {
             trailingPartialLine = last
         }
 
-        return parts
+        let normalized = parts
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .filter { line in
@@ -163,6 +168,26 @@ final class RuntimeProcessManager: ObservableObject {
                 }
                 return true
             }
+        if force || logCaptureEnabled {
+            return normalized
+        }
+        return normalized.filter { isCriticalRuntimeLine($0) }
+    }
+
+    private func isCriticalRuntimeLine(_ line: String) -> Bool {
+        let lower = line.lowercased()
+        if lower.contains("error")
+            || lower.contains("failed")
+            || lower.contains("exception")
+            || lower.contains("traceback")
+            || lower.contains("terminated")
+            || lower.contains("shutdown")
+            || lower.contains("critical")
+            || lower.contains("runtime started")
+            || lower.contains("runtime not found") {
+            return true
+        }
+        return false
     }
 
     private func scheduleLogFlushIfNeeded() {

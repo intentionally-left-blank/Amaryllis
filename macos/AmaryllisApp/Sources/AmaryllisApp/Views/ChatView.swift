@@ -389,17 +389,54 @@ struct ChatView: View {
             do {
                 if shouldUseStreaming {
                     var combined = ""
-                    let stream = appState.apiClient.streamChatCompletions(
-                        model: modelTarget,
-                        provider: providerTarget,
-                        sessionId: chatSessionID,
-                        messages: payload,
-                        tools: nil,
-                        routing: route
-                    )
+                    var rendered = ""
+                    var lastRender = Date.distantPast
+                    do {
+                        let stream = appState.apiClient.streamChatCompletions(
+                            model: modelTarget,
+                            provider: providerTarget,
+                            sessionId: chatSessionID,
+                            messages: payload,
+                            tools: nil,
+                            routing: route
+                        )
 
-                    for try await chunk in stream {
-                        combined += chunk
+                        for try await chunk in stream {
+                            guard !chunk.isEmpty else { continue }
+                            combined += chunk
+                            let now = Date()
+                            let deltaCount = combined.count - rendered.count
+                            let shouldRender = rendered.isEmpty
+                                || now.timeIntervalSince(lastRender) >= 0.08
+                                || deltaCount >= 48
+                            if shouldRender {
+                                rendered = combined
+                                lastRender = now
+                                await MainActor.run {
+                                    appState.updateCurrentChatMessage(id: assistantID, content: rendered)
+                                }
+                            }
+                        }
+                    } catch {
+                        if isTransientStreamingError(error) {
+                            let fallback = try await appState.apiClient.chatCompletions(
+                                model: modelTarget,
+                                provider: providerTarget,
+                                sessionId: chatSessionID,
+                                messages: payload,
+                                tools: nil,
+                                routing: route
+                            )
+                            combined = fallback.choices.first?.message.content ?? combined
+                            if combined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                throw error
+                            }
+                        } else {
+                            throw error
+                        }
+                    }
+
+                    if rendered != combined {
                         await MainActor.run {
                             appState.updateCurrentChatMessage(id: assistantID, content: combined)
                         }
@@ -664,5 +701,17 @@ struct ChatView: View {
             return "Error: \(raw)"
         }
         return "Error: \(raw)\n\n\(warning)"
+    }
+
+    private func isTransientStreamingError(_ error: Error) -> Bool {
+        let message = error.localizedDescription.lowercased()
+        if message.contains("network connection was lost")
+            || message.contains("cancelled")
+            || message.contains("timed out")
+            || message.contains("streaming request failed")
+            || message.contains("connection reset") {
+            return true
+        }
+        return false
     }
 }

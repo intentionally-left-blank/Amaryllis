@@ -40,6 +40,8 @@ final class AppState: ObservableObject {
     let runtimeManager = RuntimeProcessManager()
     private var modelsRefreshInFlight: Bool = false
     private var pendingModelsRefreshWithSuggested: Bool = false
+    private var pendingChatPersistTask: Task<Void, Never>?
+    private let chatPersistDebounceNanos: UInt64 = 350_000_000
 
     private let endpointKey = "amaryllis.endpoint"
     private let runtimeDirKey = "amaryllis.runtimeDirectory"
@@ -550,6 +552,7 @@ final class AppState: ObservableObject {
 
         chatSessions.insert(session, at: 0)
         selectedChatID = session.id
+        cancelPendingChatPersistence()
         persistChats()
         persistSelectedChatID()
         return session.id
@@ -580,6 +583,7 @@ final class AppState: ObservableObject {
             self.selectedChatID = chatSessions.first?.id
         }
 
+        cancelPendingChatPersistence()
         persistChats()
         persistSelectedChatID()
     }
@@ -589,7 +593,10 @@ final class AppState: ObservableObject {
         ensureChatExists()
         let message = LocalChatMessage(id: UUID(), role: "user", content: text, createdAt: Date())
 
-        mutateSelectedChat { session in
+        mutateSelectedChat(
+            reorderToTop: true,
+            persistMode: .debounced
+        ) { session in
             session.messages.append(message)
             if session.title == "New chat" || session.title.isEmpty {
                 session.title = Self.chatTitle(from: text)
@@ -602,32 +609,57 @@ final class AppState: ObservableObject {
     func appendAssistantPlaceholderToCurrentChat() -> UUID {
         ensureChatExists()
         let message = LocalChatMessage(id: UUID(), role: "assistant", content: "", createdAt: Date())
-        mutateSelectedChat { session in
+        mutateSelectedChat(
+            reorderToTop: false,
+            persistMode: .debounced
+        ) { session in
             session.messages.append(message)
         }
         return message.id
     }
 
     func updateCurrentChatMessage(id: UUID, content: String) {
-        mutateSelectedChat { session in
+        mutateSelectedChat(
+            reorderToTop: false,
+            persistMode: .debounced
+        ) { session in
             guard let index = session.messages.firstIndex(where: { $0.id == id }) else { return }
             session.messages[index].content = content
         }
     }
 
-    private func mutateSelectedChat(_ update: (inout LocalChatSession) -> Void) {
+    private enum ChatPersistMode {
+        case immediate
+        case debounced
+    }
+
+    private func mutateSelectedChat(
+        reorderToTop: Bool,
+        persistMode: ChatPersistMode,
+        _ update: (inout LocalChatSession) -> Void
+    ) {
         ensureChatExists()
         guard let selectedChatID else { return }
         guard let index = chatSessions.firstIndex(where: { $0.id == selectedChatID }) else { return }
 
-        var session = chatSessions.remove(at: index)
+        var session = chatSessions[index]
         update(&session)
         session.updatedAt = Date()
 
-        chatSessions.insert(session, at: 0)
+        if reorderToTop, index != 0 {
+            chatSessions.remove(at: index)
+            chatSessions.insert(session, at: 0)
+        } else {
+            chatSessions[index] = session
+        }
         self.selectedChatID = session.id
-        persistChats()
-        persistSelectedChatID()
+        switch persistMode {
+        case .immediate:
+            cancelPendingChatPersistence()
+            persistChats()
+        case .debounced:
+            schedulePersistChatsDebounced()
+        }
     }
 
     private static func chatTitle(from text: String) -> String {
@@ -677,7 +709,6 @@ final class AppState: ObservableObject {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
             let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             encoder.dateEncodingStrategy = .iso8601
 
             let data = try encoder.encode(chatSessions)
@@ -685,6 +716,29 @@ final class AppState: ObservableObject {
         } catch {
             lastError = "Failed to save chats: \(error.localizedDescription)"
         }
+    }
+
+    private func schedulePersistChatsDebounced() {
+        pendingChatPersistTask?.cancel()
+        let delay = chatPersistDebounceNanos
+        pendingChatPersistTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: delay)
+            } catch {
+                return
+            }
+            guard let self else { return }
+            if Task.isCancelled {
+                return
+            }
+            self.persistChats()
+            self.pendingChatPersistTask = nil
+        }
+    }
+
+    private func cancelPendingChatPersistence() {
+        pendingChatPersistTask?.cancel()
+        pendingChatPersistTask = nil
     }
 
     private func persistSelectedChatID() {

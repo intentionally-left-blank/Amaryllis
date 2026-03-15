@@ -527,7 +527,11 @@ struct SettingsView: View {
             }
         }
         .onAppear {
+            appState.runtimeManager.setLogCaptureEnabled(true)
             Task { await refreshToolingState() }
+        }
+        .onDisappear {
+            appState.runtimeManager.setLogCaptureEnabled(false)
         }
     }
 
