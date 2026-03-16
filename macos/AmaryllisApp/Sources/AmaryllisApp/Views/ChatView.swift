@@ -107,6 +107,13 @@ struct ChatView: View {
                 selectedModelID = appState.selectedModel ?? ""
             }
         }
+        .onChange(of: selectedModelID) { modelID in
+            let normalized = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalized.isEmpty else { return }
+            if let inferred = providerForModel(normalized) {
+                selectedProvider = inferred
+            }
+        }
         .onChange(of: appState.selectedChatID) { _ in
             showFullHistory = false
             streamingAssistantID = nil
@@ -378,8 +385,11 @@ struct ChatView: View {
 
         let provider = selectedProvider.isEmpty ? nil : selectedProvider
         let model = selectedModelID.isEmpty ? nil : selectedModelID
+        let inferredProvider = model.flatMap(providerForModel)
+        let resolvedProvider = inferredProvider ?? provider
         let tools = toolsEnabled ? chatTools : []
-        let route = autoRoutingEnabled ? APIChatRoutingOptions(
+        let useAutoRouting = autoRoutingEnabled && model == nil
+        let route = useAutoRouting ? APIChatRoutingOptions(
             mode: routingMode,
             requireStream: isStreaming && tools.isEmpty,
             requireTools: false,
@@ -388,8 +398,8 @@ struct ChatView: View {
             maxParamsB: nil,
             includeSuggested: false
         ) : nil
-        let providerTarget = autoRoutingEnabled ? nil : provider
-        let modelTarget = autoRoutingEnabled ? nil : model
+        let providerTarget = useAutoRouting ? nil : resolvedProvider
+        let modelTarget = useAutoRouting ? nil : model
         let shouldUseStreaming = isStreaming && tools.isEmpty
         let chatSessionID = appState.selectedChatID?.uuidString
 
@@ -742,6 +752,19 @@ struct ChatView: View {
             return true
         }
         return false
+    }
+
+    private func providerForModel(_ modelID: String) -> String? {
+        guard let catalog = appState.modelCatalog else {
+            return nil
+        }
+        for providerName in catalog.providers.keys.sorted() {
+            guard let payload = catalog.providers[providerName] else { continue }
+            if payload.items.contains(where: { $0.id == modelID }) {
+                return providerName
+            }
+        }
+        return nil
     }
 }
 
