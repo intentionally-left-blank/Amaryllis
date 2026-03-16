@@ -836,14 +836,12 @@ class AutomationScheduler:
         max_changed_files = max(1, int(schedule.get("max_changed_files", 20)))
         last_seen_mtime_ns = max(0, int(schedule.get("last_seen_mtime_ns", 0)))
 
-        candidates: list[Path]
         if watch_path.is_file():
-            candidates = [watch_path]
+            candidates = (watch_path,)
+        elif recursive:
+            candidates = watch_path.rglob(pattern)
         else:
-            if recursive:
-                candidates = [item for item in watch_path.rglob(pattern)]
-            else:
-                candidates = [item for item in watch_path.glob(pattern)]
+            candidates = watch_path.glob(pattern)
 
         changed_rows: list[tuple[int, str]] = []
         max_seen = last_seen_mtime_ns

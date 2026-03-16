@@ -239,6 +239,7 @@ def create_services() -> ServiceContainer:
         database=database,
         task_executor=task_executor,
         worker_count=config.run_workers,
+        recover_pending_on_start=config.run_recover_pending_on_start,
         default_max_attempts=config.run_max_attempts,
         attempt_timeout_sec=config.run_attempt_timeout_sec,
         run_lease_ttl_sec=config.run_lease_ttl_sec,
@@ -272,7 +273,10 @@ def create_services() -> ServiceContainer:
         circuit_open_sec=config.automation_circuit_open_sec,
         telemetry=telemetry,
     )
-    automation_scheduler.start()
+    if config.automation_enabled:
+        automation_scheduler.start()
+    else:
+        logger.info("automation_scheduler_disabled")
 
     memory_consolidation_worker: MemoryConsolidationWorker | None = None
     if config.memory_consolidation_enabled:

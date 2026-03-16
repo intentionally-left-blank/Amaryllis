@@ -48,6 +48,7 @@ class AppConfig:
     backup_verify_on_create: bool
     backup_restore_drill_enabled: bool
     backup_restore_drill_interval_sec: float
+    automation_enabled: bool
     api_version: str
     api_release_channel: str
     api_deprecation_sunset_days: int
@@ -69,6 +70,7 @@ class AppConfig:
     openrouter_api_key_rotated_at: str | None
     openrouter_api_key_expires_at: str | None
     run_workers: int
+    run_recover_pending_on_start: bool
     run_max_attempts: int
     run_attempt_timeout_sec: float
     run_lease_ttl_sec: float
@@ -367,6 +369,7 @@ class AppConfig:
                     )
                 ),
             ),
+            automation_enabled=_parse_bool(os.getenv("AMARYLLIS_AUTOMATION_ENABLED", "true")),
             api_version=os.getenv("AMARYLLIS_API_VERSION", "v1").strip() or "v1",
             api_release_channel=api_release_channel,
             api_deprecation_sunset_days=max(
@@ -395,6 +398,9 @@ class AppConfig:
             openrouter_api_key_rotated_at=(os.getenv("AMARYLLIS_OPENROUTER_API_KEY_ROTATED_AT") or "").strip() or None,
             openrouter_api_key_expires_at=(os.getenv("AMARYLLIS_OPENROUTER_API_KEY_EXPIRES_AT") or "").strip() or None,
             run_workers=max(1, int(os.getenv("AMARYLLIS_RUN_WORKERS", "2"))),
+            run_recover_pending_on_start=_parse_bool(
+                os.getenv("AMARYLLIS_RUN_RECOVER_PENDING_ON_START", "true")
+            ),
             run_max_attempts=max(1, int(os.getenv("AMARYLLIS_RUN_MAX_ATTEMPTS", "2"))),
             run_attempt_timeout_sec=max(5.0, float(os.getenv("AMARYLLIS_RUN_ATTEMPT_TIMEOUT_SEC", "180"))),
             run_lease_ttl_sec=max(

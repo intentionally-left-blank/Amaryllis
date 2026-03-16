@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import gc
 import inspect
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import RLock
 from typing import Any, Callable, Iterator
 
 from models.routing import estimate_model_size_b
+
+MLX_MEMORY_BUDGET_RATIO = 0.72
+MLX_MEMORY_OVERHEAD_FACTOR = 1.35
 FALLBACK_MLX_SUGGESTED_MODELS: list[str] = [
     "mlx-community/Qwen2.5-0.5B-Instruct-4bit",
     "mlx-community/Qwen2.5-1.5B-Instruct-4bit",
@@ -84,6 +90,7 @@ class MLXProvider:
         self._model = None
         self._tokenizer = None
         self._generate_fn = None
+        self._inference_lock = RLock()
 
     @staticmethod
     def _model_to_folder(model_id: str) -> str:
@@ -337,29 +344,51 @@ class MLXProvider:
         }
 
     def load_model(self, model_id: str) -> dict[str, Any]:
-        try:
-            from mlx_lm import generate as mlx_generate  # type: ignore
-            from mlx_lm import load as mlx_load  # type: ignore
-        except Exception as exc:  # pragma: no cover - runtime dependency
-            raise RuntimeError(
-                "mlx_lm is required for MLX inference. Install with: pip install mlx-lm"
-            ) from exc
+        with self._inference_lock:
+            if (
+                self.active_model == model_id
+                and self._model is not None
+                and self._tokenizer is not None
+                and self._generate_fn is not None
+            ):
+                return {
+                    "status": "loaded",
+                    "provider": "mlx",
+                    "model": model_id,
+                    "source": "cached",
+                }
 
-        local_path = self.models_dir / self._model_to_folder(model_id)
-        model_source = str(local_path) if local_path.exists() else model_id
+            self._guard_memory_budget(model_id=model_id)
 
-        self.logger.info("mlx_load_start model=%s source=%s", model_id, model_source)
-        self._model, self._tokenizer = mlx_load(model_source)
-        self._generate_fn = mlx_generate
-        self.active_model = model_id
-        self.logger.info("mlx_load_done model=%s", model_id)
+            if self._model is not None or self._tokenizer is not None:
+                self._model = None
+                self._tokenizer = None
+                self._generate_fn = None
+                gc.collect()
 
-        return {
-            "status": "loaded",
-            "provider": "mlx",
-            "model": model_id,
-            "source": model_source,
-        }
+            try:
+                from mlx_lm import generate as mlx_generate  # type: ignore
+                from mlx_lm import load as mlx_load  # type: ignore
+            except Exception as exc:  # pragma: no cover - runtime dependency
+                raise RuntimeError(
+                    "mlx_lm is required for MLX inference. Install with: pip install mlx-lm"
+                ) from exc
+
+            local_path = self.models_dir / self._model_to_folder(model_id)
+            model_source = str(local_path) if local_path.exists() else model_id
+
+            self.logger.info("mlx_load_start model=%s source=%s", model_id, model_source)
+            self._model, self._tokenizer = mlx_load(model_source)
+            self._generate_fn = mlx_generate
+            self.active_model = model_id
+            self.logger.info("mlx_load_done model=%s", model_id)
+
+            return {
+                "status": "loaded",
+                "provider": "mlx",
+                "model": model_id,
+                "source": model_source,
+            }
 
     def chat(
         self,
@@ -368,34 +397,35 @@ class MLXProvider:
         temperature: float = 0.7,
         max_tokens: int = 512,
     ) -> str:
-        if self.active_model != model or self._model is None or self._tokenizer is None:
-            self.load_model(model)
+        with self._inference_lock:
+            if self.active_model != model or self._model is None or self._tokenizer is None:
+                self.load_model(model)
 
-        prompt = self._messages_to_prompt(messages)
-        generate_fn = self._generate_fn
-        if generate_fn is None or self._model is None or self._tokenizer is None:
-            raise RuntimeError("MLX model is not loaded")
+            prompt = self._messages_to_prompt(messages)
+            generate_fn = self._generate_fn
+            if generate_fn is None or self._model is None or self._tokenizer is None:
+                raise RuntimeError("MLX model is not loaded")
 
-        attempts = [
-            {"max_tokens": max_tokens, "temp": temperature, "verbose": False},
-            {"max_tokens": max_tokens, "temperature": temperature, "verbose": False},
-            {"max_tokens": max_tokens, "verbose": False},
-        ]
+            attempts = [
+                {"max_tokens": max_tokens, "temp": temperature, "verbose": False},
+                {"max_tokens": max_tokens, "temperature": temperature, "verbose": False},
+                {"max_tokens": max_tokens, "verbose": False},
+            ]
 
-        last_exc: Exception | None = None
-        for kwargs in attempts:
-            try:
-                output = generate_fn(self._model, self._tokenizer, prompt=prompt, **kwargs)
-                if output is None:
-                    return ""
-                if isinstance(output, str):
-                    return output.strip()
-                return str(output).strip()
-            except TypeError as exc:
-                last_exc = exc
-                continue
+            last_exc: Exception | None = None
+            for kwargs in attempts:
+                try:
+                    output = generate_fn(self._model, self._tokenizer, prompt=prompt, **kwargs)
+                    if output is None:
+                        return ""
+                    if isinstance(output, str):
+                        return output.strip()
+                    return str(output).strip()
+                except TypeError as exc:
+                    last_exc = exc
+                    continue
 
-        raise RuntimeError(f"Failed to call mlx_lm.generate: {last_exc}")
+            raise RuntimeError(f"Failed to call mlx_lm.generate: {last_exc}")
 
     def stream_chat(
         self,
@@ -473,6 +503,39 @@ class MLXProvider:
             bytes_per_param = 0.56
         estimated = int(estimated_params_b * 1_000_000_000 * bytes_per_param)
         return estimated if estimated > 0 else None
+
+    @staticmethod
+    def _physical_memory_bytes() -> int | None:
+        try:
+            page_size = int(os.sysconf("SC_PAGE_SIZE"))
+            page_count = int(os.sysconf("SC_PHYS_PAGES"))
+        except Exception:
+            return None
+        total = page_size * page_count
+        if total <= 0:
+            return None
+        return total
+
+    def _guard_memory_budget(self, *, model_id: str) -> None:
+        estimated_download_bytes = self._estimate_download_size_bytes(model_id)
+        physical_memory_bytes = self._physical_memory_bytes()
+        if estimated_download_bytes is None or physical_memory_bytes is None:
+            return
+
+        estimated_runtime_bytes = int(estimated_download_bytes * MLX_MEMORY_OVERHEAD_FACTOR)
+        budget_bytes = int(float(physical_memory_bytes) * MLX_MEMORY_BUDGET_RATIO)
+        if estimated_runtime_bytes <= budget_bytes:
+            return
+
+        required_gb = float(estimated_runtime_bytes) / float(1024**3)
+        budget_gb = float(budget_bytes) / float(1024**3)
+        raise RuntimeError(
+            (
+                f"Model '{model_id}' is too large for this Mac. "
+                f"Estimated runtime memory ~{required_gb:.1f} GiB, safe budget ~{budget_gb:.1f} GiB. "
+                f"Choose a smaller model (for example 1.5B/3B/7B 4-bit)."
+            )
+        )
 
     @staticmethod
     def _folder_size_bytes(path: Path) -> int:

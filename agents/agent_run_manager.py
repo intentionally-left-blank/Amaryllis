@@ -57,6 +57,7 @@ class AgentRunManager:
         database: Database,
         task_executor: TaskExecutor,
         worker_count: int = 2,
+        recover_pending_on_start: bool = True,
         default_max_attempts: int = 2,
         attempt_timeout_sec: float = 180.0,
         retry_backoff_sec: float = 0.3,
@@ -73,6 +74,7 @@ class AgentRunManager:
         self.database = database
         self.task_executor = task_executor
         self.worker_count = max(1, worker_count)
+        self.recover_pending_on_start = bool(recover_pending_on_start)
         self.default_max_attempts = max(1, default_max_attempts)
         self.attempt_timeout_sec = max(5.0, float(attempt_timeout_sec))
         self.retry_backoff_sec = max(0.0, float(retry_backoff_sec))
@@ -104,7 +106,8 @@ class AgentRunManager:
             return
         self._started = True
         self._stop.clear()
-        self._recover_pending_runs()
+        if self.recover_pending_on_start:
+            self._recover_pending_runs()
         for index in range(self.worker_count):
             worker = Thread(
                 target=self._worker_loop,

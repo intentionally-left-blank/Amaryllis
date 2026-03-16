@@ -922,6 +922,12 @@ final class AppState: ObservableObject {
         env["AMARYLLIS_MCP_ENDPOINTS"] = trimmedMCPEndpoints
         env["AMARYLLIS_REQUEST_TRACE_LOGS_ENABLED"] = "false"
         env["AMARYLLIS_OTEL_ENABLED"] = "false"
+        env["AMARYLLIS_RUN_WORKERS"] = "1"
+        env["AMARYLLIS_RUN_RECOVER_PENDING_ON_START"] = "false"
+        env["AMARYLLIS_AUTOMATION_ENABLED"] = "false"
+        env["AMARYLLIS_MEMORY_CONSOLIDATION_ENABLED"] = "false"
+        env["AMARYLLIS_BACKUP_ENABLED"] = "false"
+        env["AMARYLLIS_BACKUP_RESTORE_DRILL_ENABLED"] = "false"
         env["AMARYLLIS_AUTH_ENABLED"] = "true"
         env["AMARYLLIS_AUTH_TOKENS"] = "\(normalizedAuthToken):user-001:admin|user"
         return env
