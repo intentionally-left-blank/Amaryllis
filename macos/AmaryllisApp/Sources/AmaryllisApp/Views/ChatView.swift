@@ -17,7 +17,7 @@ struct ChatView: View {
     @State private var streamingAssistantText: String = ""
     @State private var showFullHistory: Bool = false
 
-    private let systemPrompt = "You are Amaryllis, a concise and practical local AI assistant."
+    private let baseSystemPrompt = "You are Amaryllis, a concise and practical local AI assistant."
     private let maxHistoryMessages: Int = 48
     private let maxVisibleMessages: Int = 80
     private let streamingRenderInterval: TimeInterval = 0.22
@@ -372,6 +372,7 @@ struct ChatView: View {
         isSending = true
         appState.clearError()
 
+        let systemPrompt = buildSystemPrompt(for: text)
         var payload: [APIChatMessage] = [
             APIChatMessage(role: "system", content: systemPrompt, name: nil)
         ]
@@ -834,6 +835,41 @@ struct ChatView: View {
             return true
         }
         return false
+    }
+
+    private func buildSystemPrompt(for userText: String) -> String {
+        let languageRule = languageDirective(for: userText)
+        return """
+\(baseSystemPrompt)
+
+Language policy:
+\(languageRule)
+- Do not mix Russian and English in the same answer unless the user explicitly asks for mixed output.
+- If previous assistant messages used another language, ignore that drift and follow this policy now.
+"""
+    }
+
+    private func languageDirective(for userText: String) -> String {
+        let text = userText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if containsCyrillic(text) {
+            return "- Reply strictly in Russian."
+        }
+        if containsLatin(text) {
+            return "- Reply strictly in English."
+        }
+        return "- Reply in the same language as the latest user message."
+    }
+
+    private func containsCyrillic(_ text: String) -> Bool {
+        text.unicodeScalars.contains { scalar in
+            (0x0400...0x04FF).contains(scalar.value) || (0x0500...0x052F).contains(scalar.value)
+        }
+    }
+
+    private func containsLatin(_ text: String) -> Bool {
+        text.unicodeScalars.contains { scalar in
+            (0x0041...0x005A).contains(scalar.value) || (0x0061...0x007A).contains(scalar.value)
+        }
     }
 }
 
