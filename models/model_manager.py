@@ -834,6 +834,8 @@ class ModelManager:
         route_payload: dict[str, Any] | None = None
         routed_fallbacks: list[tuple[str, str]] = []
         explicit_target = provider is not None or model is not None
+        explicit_model_without_provider = provider is None and model is not None
+        explicit_local_model_target = provider in {"mlx", "ollama"} and model is not None
         primary_reason = "default_target"
 
         if explicit_target:
@@ -886,12 +888,20 @@ class ModelManager:
                 },
             }
 
-        targets = fallback_targets if fallback_targets is not None else (
-            routed_fallbacks if routed_fallbacks else self._fallback_targets(
+        if fallback_targets is not None:
+            targets = fallback_targets
+        elif routed_fallbacks:
+            targets = routed_fallbacks
+        elif explicit_model_without_provider or explicit_local_model_target:
+            # Respect explicit user target. Automatic cross-provider fallback here
+            # can hide the real root cause (e.g. selected MLX model error turning
+            # into an unrelated Ollama error).
+            targets = []
+        else:
+            targets = self._fallback_targets(
                 provider_name=provider_name,
                 model_name=model_name,
             )
-        )
         if isinstance(route_payload, dict) and "fallbacks" not in route_payload:
             route_payload["fallbacks"] = [
                 {"provider": item_provider, "model": item_model}
@@ -1687,7 +1697,8 @@ class ModelManager:
 
     def _resolve_target(self, model: str | None, provider: str | None) -> tuple[str, str]:
         active_provider, active_model = self._active_target()
-        provider_name = provider or active_provider or self.config.default_provider
+        inferred_provider = self._infer_provider_for_model(model)
+        provider_name = provider or inferred_provider or active_provider or self.config.default_provider
         if model:
             model_name = model
         elif provider and provider != active_provider:
@@ -1697,6 +1708,23 @@ class ModelManager:
         if provider_name not in self.providers:
             raise ValueError(f"Unknown provider: {provider_name}")
         return provider_name, model_name
+
+    def _infer_provider_for_model(self, model: str | None) -> str | None:
+        normalized = str(model or "").strip()
+        if not normalized:
+            return None
+        lowered = normalized.lower()
+        if lowered.startswith("mlx-community/"):
+            return "mlx"
+        if lowered.startswith("claude-"):
+            return "anthropic"
+        if "/" in normalized:
+            # OpenRouter-style model ids usually look like "vendor/model".
+            if lowered.startswith("openai/") or lowered.startswith("anthropic/"):
+                return "openrouter"
+        if lowered.startswith(("gpt-", "o1", "o3", "o4")):
+            return "openai"
+        return None
 
     def _default_model_for_provider(self, provider_name: str) -> str:
         if provider_name == "openai":
@@ -1724,7 +1752,10 @@ class ModelManager:
 
         if provider_name == "mlx":
             if "ollama" in self.providers:
-                ollama_model = self.database.get_setting("ollama_fallback_model", model_name) or model_name
+                ollama_model = (
+                    self.database.get_setting("ollama_fallback_model", "llama3.2")
+                    or "llama3.2"
+                )
                 targets.append(("ollama", ollama_model))
             return self._unique_targets(targets)
 

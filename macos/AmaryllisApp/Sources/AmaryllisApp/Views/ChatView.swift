@@ -385,9 +385,13 @@ struct ChatView: View {
 
         let provider = selectedProvider.isEmpty ? nil : selectedProvider
         let model = selectedModelID.isEmpty ? nil : selectedModelID
+        let modelIsAvailable = model.map { selectedModel in
+            modelOptions.contains(where: { $0.id == selectedModel })
+        } ?? false
+        let effectiveModel = modelIsAvailable ? model : nil
         let inferredProvider = model.flatMap(providerForModel)
         let resolvedProvider = inferredProvider ?? provider
-        let useAutoRouting = autoRoutingEnabled && model == nil
+        let useAutoRouting = autoRoutingEnabled && effectiveModel == nil
         let providerSupportsToolCalls = useAutoRouting ? true : providerSupportsTools(resolvedProvider)
         let effectiveToolsEnabled = toolsEnabled && providerSupportsToolCalls
         let tools = effectiveToolsEnabled ? chatTools : []
@@ -401,11 +405,16 @@ struct ChatView: View {
             includeSuggested: false
         ) : nil
         let providerTarget = useAutoRouting ? nil : resolvedProvider
-        let modelTarget = useAutoRouting ? nil : model
+        let modelTarget = useAutoRouting ? nil : effectiveModel
         let shouldUseStreaming = isStreaming && tools.isEmpty
         let chatSessionID = appState.selectedChatID?.uuidString
 
         Task {
+            if model != nil && !modelIsAvailable {
+                await MainActor.run {
+                    appState.lastError = "Selected model is unavailable. Using active/default model instead."
+                }
+            }
             if toolsEnabled && appState.availableTools.isEmpty {
                 await appState.refreshToolingState()
             }
@@ -776,6 +785,19 @@ struct ChatView: View {
     }
 
     private func providerForModel(_ modelID: String) -> String? {
+        let normalized = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.lowercased().hasPrefix("mlx-community/") {
+            return "mlx"
+        }
+        if normalized.lowercased().hasPrefix("claude-") {
+            return "anthropic"
+        }
+        if normalized.lowercased().hasPrefix("gpt-")
+            || normalized.lowercased().hasPrefix("o1")
+            || normalized.lowercased().hasPrefix("o3")
+            || normalized.lowercased().hasPrefix("o4") {
+            return "openai"
+        }
         guard let catalog = appState.modelCatalog else {
             return nil
         }

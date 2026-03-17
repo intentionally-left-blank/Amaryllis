@@ -106,6 +106,9 @@ class MLXProvider:
         for item in sorted(self.models_dir.iterdir()):
             if not item.is_dir():
                 continue
+            if not (item / "config.json").exists():
+                # Skip incomplete/broken folders left after interrupted downloads.
+                continue
 
             metadata_path = item / "model.json"
             metadata: dict[str, Any] = {}
@@ -295,6 +298,20 @@ class MLXProvider:
                 snapshot_download(**kwargs)
 
             size_bytes = self._folder_size_bytes(folder)
+            if not self._has_mlx_weights(folder):
+                raise RuntimeError(
+                    (
+                        f"Model '{model_id}' is not MLX-chat compatible: "
+                        "no .safetensors weights were found after download."
+                    )
+                )
+            if not (folder / "config.json").exists():
+                raise RuntimeError(
+                    (
+                        f"Model '{model_id}' is incomplete for MLX runtime: "
+                        "config.json is missing after download."
+                    )
+                )
             metadata["size_bytes"] = size_bytes
             metadata["source"] = "huggingface_hub"
             metadata["status"] = "ok"
@@ -375,7 +392,15 @@ class MLXProvider:
                 ) from exc
 
             local_path = self.models_dir / self._model_to_folder(model_id)
-            model_source = str(local_path) if local_path.exists() else model_id
+            local_config = local_path / "config.json"
+            local_ready = local_path.exists() and local_config.exists()
+            if local_path.exists() and not local_ready:
+                self.logger.warning(
+                    "mlx_local_model_incomplete model=%s path=%s reason=missing_config",
+                    model_id,
+                    local_path,
+                )
+            model_source = str(local_path) if local_ready else model_id
 
             self.logger.info("mlx_load_start model=%s source=%s", model_id, model_source)
             self._model, self._tokenizer = mlx_load(model_source)
@@ -547,6 +572,16 @@ class MLXProvider:
         except Exception:
             return 0
         return max(0, total)
+
+    @staticmethod
+    def _has_mlx_weights(path: Path) -> bool:
+        try:
+            for item in path.rglob("*.safetensors"):
+                if item.is_file():
+                    return True
+        except Exception:
+            return False
+        return False
 
     @staticmethod
     def _messages_to_prompt(messages: list[dict[str, Any]]) -> str:
