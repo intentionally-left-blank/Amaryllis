@@ -138,7 +138,10 @@ struct ChatView: View {
 
     private func renderedContent(for message: LocalChatMessage) -> String {
         if message.id == streamingAssistantID {
-            return streamingAssistantText
+            return sanitizeAssistantContent(streamingAssistantText)
+        }
+        if message.role == "assistant" {
+            return sanitizeAssistantContent(message.content)
         }
         return message.content
     }
@@ -381,7 +384,17 @@ struct ChatView: View {
             (row.role == "user" || row.role == "assistant") && !row.content.isEmpty
         }
         for row in chatHistory.suffix(maxHistoryMessages) {
-            payload.append(APIChatMessage(role: row.role, content: row.content, name: nil))
+            let normalizedContent: String
+            if row.role == "assistant" {
+                normalizedContent = sanitizeAssistantContent(row.content)
+            } else {
+                normalizedContent = row.content
+            }
+            let trimmed = normalizedContent.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                continue
+            }
+            payload.append(APIChatMessage(role: row.role, content: trimmed, name: nil))
         }
 
         let provider = selectedProvider.isEmpty ? nil : selectedProvider
@@ -492,14 +505,15 @@ struct ChatView: View {
                     await MainActor.run {
                         streamingAssistantID = nil
                         streamingAssistantText = ""
-                        if combined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        let cleaned = sanitizeAssistantContent(combined)
+                        if cleaned.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             appState.finalizeCurrentChatMessage(
                                 id: assistantID,
                                 content: "Error: Empty response from provider. Check API key, quota, and model access."
                             )
                             appState.lastError = "Empty response from provider."
                         } else {
-                            appState.finalizeCurrentChatMessage(id: assistantID, content: combined)
+                            appState.finalizeCurrentChatMessage(id: assistantID, content: cleaned)
                         }
                     }
                 } else {
@@ -551,7 +565,10 @@ struct ChatView: View {
                     }
 
                     await MainActor.run {
-                        appState.finalizeCurrentChatMessage(id: assistantID, content: content)
+                        appState.finalizeCurrentChatMessage(
+                            id: assistantID,
+                            content: sanitizeAssistantContent(content)
+                        )
                     }
 
                     if !pendingPromptIDs.isEmpty {
@@ -584,7 +601,10 @@ struct ChatView: View {
                                 retriedContent += "\n\n\(retryPolicyWarning)"
                             }
                             await MainActor.run {
-                                appState.finalizeCurrentChatMessage(id: assistantID, content: retriedContent)
+                                appState.finalizeCurrentChatMessage(
+                                    id: assistantID,
+                                    content: sanitizeAssistantContent(retriedContent)
+                                )
                                 appState.lastError = nil
                             }
                         } else if approvalState == .denied {
@@ -870,6 +890,47 @@ Language policy:
         text.unicodeScalars.contains { scalar in
             (0x0041...0x005A).contains(scalar.value) || (0x0061...0x007A).contains(scalar.value)
         }
+    }
+
+    private func sanitizeAssistantContent(_ raw: String) -> String {
+        var text = raw.replacingOccurrences(of: "\r\n", with: "\n")
+        if text.isEmpty {
+            return text
+        }
+
+        var cleanedLines: [String] = []
+        let markerPrefixes = [
+            "USER:", "ASSISTANT:", "SYSTEM:", "HUMAN:",
+            "ПОЛЬЗОВАТЕЛЬ:", "АССИСТЕНТ:", "СИСТЕМА:"
+        ]
+
+        for line in text.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let upper = trimmed.uppercased()
+            let startsWithMarker = markerPrefixes.contains { upper.hasPrefix($0) }
+
+            if cleanedLines.isEmpty {
+                if startsWithMarker {
+                    if let marker = markerPrefixes.first(where: { upper.hasPrefix($0) }) {
+                        let suffix = trimmed.dropFirst(marker.count).trimmingCharacters(in: .whitespaces)
+                        if !suffix.isEmpty {
+                            cleanedLines.append(suffix)
+                        }
+                    }
+                    continue
+                }
+                cleanedLines.append(line)
+                continue
+            }
+
+            if startsWithMarker {
+                break
+            }
+            cleanedLines.append(line)
+        }
+
+        text = cleanedLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return text
     }
 }
 

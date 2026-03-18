@@ -55,6 +55,15 @@ class MLXProviderPromptingTests(unittest.TestCase):
         normalized = MLXProvider._normalize_generation_output(raw, prompt="")
         self.assertEqual(normalized, "There are about 7.5 quintillion grains of sand.")
 
+    def test_normalize_generation_output_cuts_russian_turn_markers(self) -> None:
+        raw = (
+            "Угловой момент - это мера вращения.\n\n"
+            "ПОЛЬЗОВАТЕЛЬ: А что по оси X?\n"
+            "АССИСТЕНТ: По оси X ..."
+        )
+        normalized = MLXProvider._normalize_generation_output(raw, prompt="")
+        self.assertEqual(normalized, "Угловой момент - это мера вращения.")
+
     def test_normalize_generation_output_removes_assistant_prefix(self) -> None:
         raw = "ASSISTANT: Sure, here is the answer."
         normalized = MLXProvider._normalize_generation_output(raw, prompt="")

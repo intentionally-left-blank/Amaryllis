@@ -593,24 +593,25 @@ class MLXProvider:
 
         # Remove common assistant prefixes.
         text = re.sub(r"^\s*(assistant|Assistant|ASSISTANT)\s*:\s*", "", text)
+        text = re.sub(r"^\s*(ассистент|АССИСТЕНТ)\s*:\s*", "", text)
         for prefix in ("<|assistant|>", "<|im_start|>assistant"):
             if text.startswith(prefix):
                 text = text[len(prefix):].lstrip()
 
-        # Keep only the first assistant turn.
-        turn_markers = [
-            "\nUSER:",
-            "\nUser:",
-            "\nuser:",
-            "\n### User",
-            "\nHuman:",
-            "<|user|>",
-            "<|im_start|>user",
-        ]
-        cut_positions = [text.find(marker) for marker in turn_markers]
-        cut_positions = [position for position in cut_positions if position > 0]
-        if cut_positions:
-            text = text[: min(cut_positions)]
+        # Keep only the first assistant turn; drop synthetic conversation tails.
+        line_marker = re.compile(
+            r"(?im)^\s*(user|assistant|system|human|пользователь|ассистент|система)\s*:\s*"
+        )
+        for match in line_marker.finditer(text):
+            if match.start() <= 1:
+                continue
+            text = text[: match.start()]
+            break
+        for marker in ("<|user|>", "<|im_start|>user", "<|start_header_id|>user<|end_header_id|>"):
+            position = text.find(marker)
+            if position > 0:
+                text = text[:position]
+                break
 
         return text.strip()
 
