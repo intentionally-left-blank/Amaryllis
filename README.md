@@ -95,6 +95,7 @@ Service backup/DR endpoints:
 - `POST /service/backup/run`
 - `POST /service/backup/verify`
 - `POST /service/backup/restore-drill`
+- `POST /service/runs/kill-switch`
 
 ## Project Structure
 
@@ -161,6 +162,7 @@ Service backup/DR endpoints:
 ├── scripts
 │   ├── disaster_recovery
 │   │   ├── backup_now.py
+│   │   ├── kill_switch_runs.py
 │   │   ├── restore_drill.py
 │   │   └── restore_from_archive.py
 │   ├── release
@@ -760,6 +762,7 @@ Implemented now:
   - queued/running runs are re-enqueued on runtime start
 - automatic retry until `max_attempts`
 - manual cancel and resume APIs
+- emergency run kill-switch API (`POST /service/runs/kill-switch`)
 - checkpoint replay API (`GET /agents/runs/{run_id}/replay`) with timeline + attempt summary
 - run issues API (`GET /agents/runs/{run_id}/issues`)
 - run artifacts API (`GET /agents/runs/{run_id}/artifacts`)
@@ -1342,10 +1345,12 @@ export AMARYLLIS_API_COMPAT_CONTRACT_PATH=contracts/api_compat_v1.json
   - `POST /service/backup/run`
   - `POST /service/backup/verify`
   - `POST /service/backup/restore-drill`
+  - `POST /service/runs/kill-switch`
 - CLI:
 
 ```bash
 python scripts/disaster_recovery/backup_now.py --trigger manual-cli --verify true
+python scripts/disaster_recovery/kill_switch_runs.py --reason emergency-stop --include-running true --include-queued true
 python scripts/disaster_recovery/restore_drill.py
 python scripts/disaster_recovery/restore_from_archive.py --archive /path/to/backup.tar.gz
 ```

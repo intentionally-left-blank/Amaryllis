@@ -44,7 +44,7 @@ Harden architecture, delivery reproducibility, and quality gates to support futu
 |---|---|---|---|---|
 | D-01 | done | Introduce autonomy level config contract (L0-L5) | config schema + docs | Runtime enforces policy level at action execution boundary |
 | D-02 | done | Add explicit high-risk action receipts | persisted action receipts | Every high-risk action includes actor, policy level, and rollback hint |
-| D-03 | todo | Add kill-switch endpoint and CLI command | service endpoint + script | Ongoing runs can be interrupted immediately and deterministically |
+| D-03 | done | Add kill-switch endpoint and CLI command | service endpoint + script | Ongoing runs can be interrupted immediately and deterministically |
 
 ## Current Sprint (Sprint P0-S1)
 
@@ -61,9 +61,10 @@ Harden architecture, delivery reproducibility, and quality gates to support futu
 | C-04 | done | scheduled nightly reliability suite + trend-delta report artifact |
 | D-01 | done | autonomy level contract + runtime execution-boundary enforcement |
 | D-02 | done | high-risk action receipt contract + API/audit coverage |
+| D-03 | done | emergency run kill-switch endpoint + CLI control path |
 
 ## Next Checkpoint
 - Deliver sprint result with:
   - baseline run report from golden tasks suite,
   - deterministic high-risk action receipt baseline sample (`D-02`),
-  - deterministic kill-switch surface draft (`D-03`).
+  - deterministic kill-switch endpoint + CLI path with tests (`D-03`).

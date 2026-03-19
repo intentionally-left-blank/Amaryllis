@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel, Field
 
 from agents.agent_manager import AgentManager
 from agents.agent_run_manager import AgentRunManager
@@ -38,7 +39,7 @@ from runtime.compliance import ComplianceManager
 from runtime.api_lifecycle import APILifecyclePolicy, canonical_api_path
 from runtime.auth import AuthContext, AuthManager, auth_context_from_request
 from runtime.config import AppConfig
-from runtime.errors import AmaryllisError, InternalError, PermissionDeniedError
+from runtime.errors import AmaryllisError, InternalError, PermissionDeniedError, ProviderError, ValidationError
 from runtime.observability import ObservabilityManager, ObservabilityTelemetry, SLOTargets
 from runtime.security import LocalIdentityManager, SecurityManager
 from runtime.telemetry import LocalTelemetry
@@ -82,6 +83,13 @@ class ServiceContainer:
     security_manager: SecurityManager
     compliance_manager: ComplianceManager
     auth_manager: AuthManager
+
+
+class RunKillSwitchRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=4000)
+    include_running: bool = True
+    include_queued: bool = True
+    limit: int = Field(default=5000, ge=1, le=50000)
 
 
 logging.basicConfig(
@@ -730,6 +738,76 @@ def create_app() -> FastAPI:
             "policy": services.api_lifecycle.describe(),
             "compat_contract_path": str(services.config.api_compat_contract_path),
         }
+
+    @app.post("/service/runs/kill-switch")
+    def service_runs_kill_switch(payload: RunKillSwitchRequest, request: Request) -> dict[str, Any]:
+        auth = auth_context_from_request(request)
+        request_id = request_id_from_request(request)
+        sign_payload = {
+            "reason": payload.reason,
+            "include_running": bool(payload.include_running),
+            "include_queued": bool(payload.include_queued),
+            "limit": int(payload.limit),
+        }
+        try:
+            summary = services.agent_manager.kill_switch_runs(
+                actor=auth.user_id,
+                reason=payload.reason,
+                include_running=bool(payload.include_running),
+                include_queued=bool(payload.include_queued),
+                limit=int(payload.limit),
+            )
+            try:
+                receipt = services.security_manager.signed_action(
+                    action="agent_runs_kill_switch",
+                    payload=sign_payload,
+                    request_id=request_id,
+                    actor=auth.user_id,
+                    target_type="agent_run",
+                    target_id="*",
+                    details=summary,
+                )
+            except Exception:
+                receipt = {}
+            return {
+                "request_id": request_id,
+                "actor": auth.user_id,
+                "scopes": sorted(auth.scopes),
+                "kill_switch": summary,
+                "action_receipt": receipt,
+            }
+        except ValueError as exc:
+            try:
+                services.security_manager.signed_action(
+                    action="agent_runs_kill_switch",
+                    payload=sign_payload,
+                    request_id=request_id,
+                    actor=auth.user_id,
+                    target_type="agent_run",
+                    target_id="*",
+                    status="failed",
+                    details={"error": str(exc)},
+                )
+            except Exception:
+                pass
+            raise ValidationError(str(exc)) from exc
+        except AmaryllisError:
+            raise
+        except Exception as exc:
+            try:
+                services.security_manager.signed_action(
+                    action="agent_runs_kill_switch",
+                    payload=sign_payload,
+                    request_id=request_id,
+                    actor=auth.user_id,
+                    target_type="agent_run",
+                    target_id="*",
+                    status="failed",
+                    details={"error": str(exc)},
+                )
+            except Exception:
+                pass
+            raise ProviderError(str(exc)) from exc
 
     return app
 

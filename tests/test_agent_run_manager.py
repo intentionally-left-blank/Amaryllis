@@ -436,6 +436,47 @@ class AgentRunManagerTests(unittest.TestCase):
         self.assertEqual(canceled.get("stop_reason"), "canceled_by_user")
         self.assertEqual(canceled.get("failure_class"), "canceled")
 
+    def test_kill_switch_requires_target_status(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Kill switch requires include_running and/or include_queued"):
+            self.manager.kill_switch_runs(include_running=False, include_queued=False)
+
+    def test_kill_switch_cancels_queued_run_and_blocks_issues(self) -> None:
+        run = self.manager.create_run(
+            agent=self.agent,
+            user_id="user-1",
+            session_id=None,
+            user_message="kill-switch queued",
+            max_attempts=1,
+        )
+
+        summary = self.manager.kill_switch_runs(
+            actor="svc-runtime",
+            reason="manual-stop",
+            include_running=False,
+            include_queued=True,
+            limit=100,
+        )
+        self.assertGreaterEqual(int(summary.get("targeted_count", 0)), 1)
+        self.assertEqual(int(summary.get("canceled_queued", 0)), 1)
+        self.assertEqual(int(summary.get("canceled_running", 0)), 0)
+
+        canceled = self.manager.get_run(run["id"])
+        self.assertIsNotNone(canceled)
+        assert canceled is not None
+        self.assertEqual(canceled["status"], "canceled")
+        self.assertEqual(canceled["cancel_requested"], 1)
+        self.assertEqual(canceled.get("stop_reason"), "kill_switch_triggered")
+        self.assertEqual(canceled.get("failure_class"), "canceled")
+        canceled_events = [item for item in canceled.get("checkpoints", []) if item.get("stage") == "canceled"]
+        self.assertGreaterEqual(len(canceled_events), 1)
+        latest_canceled = canceled_events[-1]
+        self.assertEqual(str(latest_canceled.get("stop_reason")), "kill_switch_triggered")
+        self.assertEqual(str(latest_canceled.get("actor")), "svc-runtime")
+        self.assertEqual(str(latest_canceled.get("reason")), "manual-stop")
+        issues = canceled.get("issues", [])
+        self.assertGreaterEqual(len(issues), 3)
+        self.assertTrue(all(str(item.get("status")) == "blocked" for item in issues))
+
     def test_resume_failed_run(self) -> None:
         self.executor.always_fail = True
         self.manager.start()
@@ -1027,6 +1068,64 @@ class AgentRunManagerTests(unittest.TestCase):
         tool_calls = self.manager.list_run_tool_calls(run["id"], limit=20)
         self.assertEqual(len(tool_calls), 1)
         self.assertEqual(str(tool_calls[0].get("idempotency_key")), "lease-chaos:1")
+
+    def test_kill_switch_interrupts_running_run_without_retry(self) -> None:
+        gated = _LeaseHeartbeatGateTaskExecutor()
+        self.manager = AgentRunManager(
+            database=self.database,
+            task_executor=gated,  # type: ignore[arg-type]
+            worker_count=1,
+            default_max_attempts=2,
+            attempt_timeout_sec=8.0,
+            retry_backoff_sec=0.0,
+            retry_max_backoff_sec=0.0,
+            retry_jitter_sec=0.0,
+            run_lease_ttl_sec=10.0,
+        )
+        self.manager.run_lease_heartbeat_sec = 0.2
+        self.manager.start()
+
+        run = self.manager.create_run(
+            agent=self.agent,
+            user_id="user-1",
+            session_id="session-kill-switch-running",
+            user_message="interrupt me",
+            max_attempts=2,
+        )
+        self.assertTrue(gated.started_event.wait(timeout=2.0))
+        running = self._wait_for_status(run["id"], {"running"})
+        self.assertIsNotNone(running)
+
+        summary = self.manager.kill_switch_runs(
+            actor="svc-runtime",
+            reason="manual-stop-running",
+            include_running=True,
+            include_queued=False,
+            limit=100,
+        )
+        self.assertEqual(int(summary.get("canceled_running", 0)), 1)
+        self.assertEqual(int(summary.get("canceled_queued", 0)), 0)
+
+        canceled = self._wait_for_status(run["id"], {"canceled"}, timeout_sec=6.0)
+        self.assertIsNotNone(canceled)
+        gated.release_event.set()
+        time.sleep(0.5)
+
+        final = self.manager.get_run(run["id"])
+        self.assertIsNotNone(final)
+        assert final is not None
+        self.assertEqual(final["status"], "canceled")
+        self.assertEqual(str(final.get("stop_reason")), "kill_switch_triggered")
+        self.assertEqual(str(final.get("failure_class")), "canceled")
+        self.assertEqual(int(final.get("attempts", 0)), 1)
+        self.assertEqual(gated.call_count, 1)
+
+        checkpoints = final.get("checkpoints", [])
+        stages = [str(item.get("stage")) for item in checkpoints]
+        self.assertIn("kill_switch_triggered", stages)
+        self.assertIn("error", stages)
+        self.assertIn("canceled", stages)
+        self.assertNotIn("retry_scheduled", stages)
 
     @staticmethod
     def _provider_error(

@@ -125,6 +125,51 @@ class SecurityHTTPAuthzTests(unittest.TestCase):
         self.assertEqual(payload["error"]["type"], "permission_denied")
         self.assertIn("User scope is required", payload["error"]["message"])
 
+    def test_service_kill_switch_requires_service_scope(self) -> None:
+        denied = self.client.post(
+            "/service/runs/kill-switch",
+            headers=self._auth("user-token"),
+            json={"include_running": False, "include_queued": True},
+        )
+        self.assertEqual(denied.status_code, 403)
+        denied_payload = denied.json()
+        self.assertEqual(denied_payload["error"]["type"], "permission_denied")
+
+    def test_service_kill_switch_success_and_validation(self) -> None:
+        invalid = self.client.post(
+            "/service/runs/kill-switch",
+            headers=self._auth("service-token"),
+            json={
+                "include_running": False,
+                "include_queued": False,
+                "reason": "validation-check",
+            },
+        )
+        self.assertEqual(invalid.status_code, 400)
+        invalid_payload = invalid.json()
+        self.assertEqual(invalid_payload["error"]["type"], "validation_error")
+
+        response = self.client.post(
+            "/service/runs/kill-switch",
+            headers=self._auth("service-token"),
+            json={
+                "include_running": False,
+                "include_queued": True,
+                "limit": 1,
+                "reason": "security-http-authz",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(str(payload.get("actor")), "svc-runtime")
+        self.assertIn("service", payload.get("scopes", []))
+        kill_switch = payload.get("kill_switch", {})
+        self.assertEqual(bool(kill_switch.get("include_running")), False)
+        self.assertEqual(bool(kill_switch.get("include_queued")), True)
+        self.assertTrue(isinstance(kill_switch.get("canceled_total"), int))
+        receipt = payload.get("action_receipt", {})
+        self.assertTrue(bool(receipt.get("signature")))
+
     def test_admin_can_rotate_identity(self) -> None:
         first = self.client.get("/security/identity", headers=self._auth("admin-token"))
         self.assertEqual(first.status_code, 200)

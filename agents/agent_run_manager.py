@@ -43,6 +43,7 @@ RUN_RETRYABLE_FAILURE_CLASSES: set[str] = {
     "unavailable",
     "circuit_open",
 }
+KILL_SWITCH_STOP_REASON = "kill_switch_triggered"
 
 CORE_ISSUE_DEFINITIONS: tuple[tuple[str, str, int, list[str]], ...] = (
     (STEP_PREPARE_CONTEXT, "Prepare context", 10, []),
@@ -340,6 +341,127 @@ class AgentRunManager:
             },
         )
         return updated
+
+    def kill_switch_runs(
+        self,
+        *,
+        actor: str | None = None,
+        reason: str | None = None,
+        include_running: bool = True,
+        include_queued: bool = True,
+        limit: int = 5000,
+    ) -> dict[str, Any]:
+        if not include_running and not include_queued:
+            raise ValueError("Kill switch requires include_running and/or include_queued.")
+
+        normalized_actor = str(actor or "").strip() or None
+        normalized_reason = str(reason or "").strip()
+        normalized_limit = max(1, min(int(limit), 50_000))
+        statuses: list[str] = []
+        if include_running:
+            statuses.append("running")
+        if include_queued:
+            statuses.append("queued")
+
+        target_ids: list[str] = []
+        seen_ids: set[str] = set()
+        for status in statuses:
+            rows = self.database.list_agent_runs(status=status, limit=normalized_limit)
+            for row in rows:
+                run_id = str(row.get("id") or "").strip()
+                if not run_id or run_id in seen_ids:
+                    continue
+                seen_ids.add(run_id)
+                target_ids.append(run_id)
+
+        canceled_running = 0
+        canceled_queued = 0
+        now_iso = self._utc_now()
+        with self.database.write_transaction():
+            for run_id in target_ids:
+                current = self.database.get_agent_run(run_id)
+                if current is None:
+                    continue
+                current_status = str(current.get("status") or "").strip().lower()
+                if current_status not in {"queued", "running"}:
+                    continue
+
+                self.database.update_agent_run_fields(
+                    run_id,
+                    cancel_requested=1,
+                    status="canceled",
+                    stop_reason=KILL_SWITCH_STOP_REASON,
+                    failure_class="canceled",
+                    finished_at=now_iso,
+                    lease_owner=None,
+                    lease_token=None,
+                    lease_expires_at=None,
+                )
+                if current_status == "queued":
+                    canceled_queued += 1
+                    self.database.append_agent_run_checkpoint(
+                        run_id=run_id,
+                        checkpoint={
+                            "stage": "canceled",
+                            "message": "Run canceled by kill switch before execution.",
+                            "stop_reason": KILL_SWITCH_STOP_REASON,
+                            "failure_class": "canceled",
+                            "actor": normalized_actor,
+                            "reason": normalized_reason,
+                        },
+                    )
+                    self._finalize_open_issues(
+                        run_id=run_id,
+                        target_status="blocked",
+                        attempt=max(1, int(current.get("attempts", 0))),
+                        message="Run canceled by kill switch before execution.",
+                    )
+                else:
+                    canceled_running += 1
+                    self.database.append_agent_run_checkpoint(
+                        run_id=run_id,
+                        checkpoint={
+                            "stage": "kill_switch_triggered",
+                            "message": "Kill switch triggered for running run. Lease revoked.",
+                            "stop_reason": KILL_SWITCH_STOP_REASON,
+                            "failure_class": "canceled",
+                            "actor": normalized_actor,
+                            "reason": normalized_reason,
+                        },
+                    )
+                    self._finalize_open_issues(
+                        run_id=run_id,
+                        target_status="blocked",
+                        attempt=max(1, int(current.get("attempts", 0))),
+                        message="Run interrupted by kill switch.",
+                    )
+
+        canceled_total = canceled_running + canceled_queued
+        preview_ids = target_ids[:200]
+        self._emit(
+            "agent_runs_kill_switch",
+            {
+                "actor": normalized_actor,
+                "reason": normalized_reason,
+                "include_running": bool(include_running),
+                "include_queued": bool(include_queued),
+                "targeted_count": len(target_ids),
+                "canceled_running": canceled_running,
+                "canceled_queued": canceled_queued,
+                "canceled_total": canceled_total,
+            },
+        )
+        return {
+            "actor": normalized_actor,
+            "reason": normalized_reason,
+            "include_running": bool(include_running),
+            "include_queued": bool(include_queued),
+            "targeted_count": len(target_ids),
+            "targeted_run_ids": preview_ids,
+            "canceled_running": canceled_running,
+            "canceled_queued": canceled_queued,
+            "canceled_total": canceled_total,
+        }
 
     def resume_run(self, run_id: str) -> dict[str, Any]:
         run = self.database.get_agent_run(run_id)
@@ -708,15 +830,23 @@ class AgentRunManager:
             return None
         run = claimed
 
-        budget = self._normalize_run_budget(run.get("budget"))
-        metrics_base = self._normalize_run_metrics(run.get("metrics"))
+        latest_before_start = self.database.get_agent_run(run_id)
+        budget = self._normalize_run_budget((latest_before_start or run).get("budget"))
+        metrics_base = self._normalize_run_metrics((latest_before_start or run).get("metrics"))
 
-        if int(run.get("cancel_requested", 0)) == 1:
+        if latest_before_start is not None:
+            canceled_before_start = int(latest_before_start.get("cancel_requested", 0)) == 1 or str(
+                latest_before_start.get("status") or ""
+            ).strip().lower() == "canceled"
+        else:
+            canceled_before_start = int(run.get("cancel_requested", 0)) == 1
+        if canceled_before_start:
+            cancel_stop_reason = self._resolve_cancel_stop_reason(latest_before_start or run)
             with self.database.write_transaction():
                 self.database.update_agent_run_fields(
                     run_id,
                     status="canceled",
-                    stop_reason="canceled_by_user",
+                    stop_reason=cancel_stop_reason,
                     failure_class="canceled",
                     metrics_json=metrics_base,
                     finished_at=self._utc_now(),
@@ -726,7 +856,7 @@ class AgentRunManager:
                     checkpoint={
                         "stage": "canceled",
                         "message": "Run canceled before worker execution.",
-                        "stop_reason": "canceled_by_user",
+                        "stop_reason": cancel_stop_reason,
                         "failure_class": "canceled",
                     },
                 )
@@ -736,7 +866,7 @@ class AgentRunManager:
                     "run_id": run_id,
                     "agent_id": str(run.get("agent_id") or ""),
                     "status": "canceled",
-                    "stop_reason": "canceled_by_user",
+                    "stop_reason": cancel_stop_reason,
                     "failure_class": "canceled",
                     "duration_ms": 0.0,
                 },
@@ -912,6 +1042,14 @@ class AgentRunManager:
                 attempt=attempt,
                 attempt_duration_ms=attempt_duration_ms,
             )
+            latest_after_error = self.database.get_agent_run(run_id)
+            canceled = False
+            if latest_after_error is not None:
+                latest_status = str(latest_after_error.get("status") or "").strip().lower()
+                canceled = int(latest_after_error.get("cancel_requested", 0)) == 1 or latest_status == "canceled"
+            else:
+                canceled = int(run.get("cancel_requested", 0)) == 1
+            cancel_stop_reason = self._resolve_cancel_stop_reason(latest_after_error or run)
             with self.database.write_transaction():
                 self.database.append_agent_run_checkpoint(
                     run_id=run_id,
@@ -933,7 +1071,7 @@ class AgentRunManager:
                     error_message=error_message,
                 )
 
-                schedule_retry = attempt < max_attempts and int(run.get("cancel_requested", 0)) != 1 and retryable
+                schedule_retry = attempt < max_attempts and not canceled and retryable
                 if schedule_retry:
                     self.database.update_agent_run_fields(
                         run_id,
@@ -944,10 +1082,9 @@ class AgentRunManager:
                         metrics_json=metrics_after_error,
                     )
                 else:
-                    canceled = int(run.get("cancel_requested", 0)) == 1
                     final_status = "canceled" if canceled else "failed"
                     final_failure_class = "canceled" if canceled else failure_class
-                    final_stop_reason = "canceled_by_user" if canceled else stop_reason
+                    final_stop_reason = cancel_stop_reason if canceled else stop_reason
                     if not canceled and retryable and attempt >= max_attempts:
                         final_stop_reason = "max_attempts_exhausted"
                     self.database.update_agent_run_fields(
@@ -1016,11 +1153,15 @@ class AgentRunManager:
         latest = self.database.get_agent_run(run_id)
         metrics_final = self._extract_result_metrics(result=result, fallback=live_usage, attempt=attempt)
         if latest is not None and int(latest.get("cancel_requested", 0)) == 1:
+            cancel_stop_reason = self._resolve_cancel_stop_reason(latest)
+            cancel_message = "Execution completed but run was canceled."
+            if cancel_stop_reason == KILL_SWITCH_STOP_REASON:
+                cancel_message = "Execution completed but run was interrupted by kill switch."
             with self.database.write_transaction():
                 self.database.update_agent_run_fields(
                     run_id,
                     status="canceled",
-                    stop_reason="canceled_by_user",
+                    stop_reason=cancel_stop_reason,
                     failure_class="canceled",
                     result_json=result,
                     metrics_json=metrics_final,
@@ -1031,16 +1172,16 @@ class AgentRunManager:
                     checkpoint={
                         "stage": "canceled",
                         "attempt": attempt,
-                        "message": "Execution completed but run was canceled.",
+                        "message": cancel_message,
                         "failure_class": "canceled",
-                        "stop_reason": "canceled_by_user",
+                        "stop_reason": cancel_stop_reason,
                     },
                 )
                 self._finalize_open_issues(
                     run_id=run_id,
                     target_status="blocked",
                     attempt=attempt,
-                    message="Run canceled after task execution.",
+                    message=cancel_message,
                 )
             self._emit(
                 "agent_run_canceled",
@@ -1048,7 +1189,7 @@ class AgentRunManager:
                     "run_id": run_id,
                     "agent_id": agent.id,
                     "status": "canceled",
-                    "stop_reason": "canceled_by_user",
+                    "stop_reason": cancel_stop_reason,
                     "failure_class": "canceled",
                     "duration_ms": float(metrics_final.get("total_attempt_duration_ms", 0.0)),
                 },
@@ -1522,6 +1663,11 @@ class AgentRunManager:
             raise RunBudgetExceededError("Run duration budget exceeded.")
         attempt_deadline = min(attempt_deadline, attempt_started + remaining_duration)
         heartbeat = self._start_run_lease_heartbeat(run_id=run_id, lease_token=lease_token)
+        self._assert_active_run_lease(
+            run_id=run_id,
+            lease_token=lease_token,
+            heartbeat=heartbeat,
+        )
 
         def guarded_checkpoint(payload: dict[str, Any]) -> None:
             self._assert_active_run_lease(
@@ -1823,6 +1969,13 @@ class AgentRunManager:
             "stop_reason": "unknown_error",
             "retryable": False,
         }
+
+    @staticmethod
+    def _resolve_cancel_stop_reason(run: dict[str, Any]) -> str:
+        stop_reason = str(run.get("stop_reason") or "").strip().lower()
+        if stop_reason == KILL_SWITCH_STOP_REASON:
+            return KILL_SWITCH_STOP_REASON
+        return "canceled_by_user"
 
     def _normalize_run_budget(self, budget: dict[str, Any] | None) -> dict[str, Any]:
         raw = budget if isinstance(budget, dict) else {}

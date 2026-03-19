@@ -29,6 +29,7 @@ Task 09 introduces production-grade backup + restore controls for these assets.
 - `POST /service/backup/run`
 - `POST /service/backup/verify`
 - `POST /service/backup/restore-drill`
+- `POST /service/runs/kill-switch` (interrupt queued/running agent runs)
 
 All endpoints require `service` or `admin` scope and include signed action receipts.
 
@@ -38,6 +39,15 @@ Manual backup:
 
 ```bash
 python scripts/disaster_recovery/backup_now.py --trigger manual-cli --verify true
+```
+
+Emergency stop of active/queued runs:
+
+```bash
+python scripts/disaster_recovery/kill_switch_runs.py \
+  --reason emergency-stop \
+  --include-running true \
+  --include-queued true
 ```
 
 Restore drill (non-destructive):
@@ -56,15 +66,16 @@ python scripts/disaster_recovery/restore_from_archive.py \
 
 ## Recovery Workflow
 
-1. Stop runtime.
-2. Verify target archive (`/service/backup/verify` or CLI verify in restore script).
-3. Restore into data directory.
-4. Start runtime.
-5. Validate:
+1. If unsafe run activity is ongoing, trigger kill switch (`/service/runs/kill-switch` or CLI).
+2. Stop runtime.
+3. Verify target archive (`/service/backup/verify` or CLI verify in restore script).
+4. Restore into data directory.
+5. Start runtime.
+6. Validate:
    - `/health`
    - `/service/health`
    - `/service/observability/slo`
-6. If needed, roll back to generated rollback directory.
+7. If needed, roll back to generated rollback directory.
 
 ## RTO / RPO Guidance
 

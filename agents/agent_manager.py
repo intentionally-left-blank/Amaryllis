@@ -125,6 +125,25 @@ class AgentManager:
             raise ValueError("Run manager is not configured")
         return self.run_manager.resume_run(run_id)
 
+    def kill_switch_runs(
+        self,
+        *,
+        actor: str | None = None,
+        reason: str | None = None,
+        include_running: bool = True,
+        include_queued: bool = True,
+        limit: int = 5000,
+    ) -> dict[str, Any]:
+        if self.run_manager is None:
+            raise ValueError("Run manager is not configured")
+        return self.run_manager.kill_switch_runs(
+            actor=actor,
+            reason=reason,
+            include_running=include_running,
+            include_queued=include_queued,
+            limit=limit,
+        )
+
     def replay_run(self, run_id: str) -> dict[str, Any]:
         if self.run_manager is None:
             raise ValueError("Run manager is not configured")
