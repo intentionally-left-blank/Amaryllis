@@ -57,6 +57,23 @@ class SecurityHTTPAuthzTests(unittest.TestCase):
         cls.server_module = importlib.reload(server_module)
         cls._client_cm = TestClient(cls.server_module.app)
         cls.client = cls._client_cm.__enter__()
+        services = cls.server_module.app.state.services
+        if services.tool_registry.get("dangerous_echo") is None:
+            services.tool_registry.register(
+                name="dangerous_echo",
+                description="Test-only high-risk tool for action receipt coverage.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "echo": {"type": "string"},
+                    },
+                },
+                handler=lambda arguments: {"ok": True, "echo": str(arguments.get("echo", ""))},
+                source="test",
+                risk_level="high",
+                approval_mode="none",
+                isolation="process_internal",
+            )
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -219,6 +236,101 @@ class SecurityHTTPAuthzTests(unittest.TestCase):
         )
         self.assertEqual(foreign_cancel.status_code, 403)
         self.assertEqual(foreign_cancel.json()["error"]["type"], "permission_denied")
+
+    def test_high_risk_tool_receipts_include_policy_and_rollback_context(self) -> None:
+        session_id = "security-http-authz-high-risk-session"
+        arguments = {"echo": "receipt-check"}
+
+        denied = self.client.post(
+            "/mcp/tools/dangerous_echo/invoke",
+            headers=self._auth("user-token"),
+            json={
+                "arguments": arguments,
+                "user_id": "user-1",
+                "session_id": session_id,
+            },
+        )
+        self.assertEqual(denied.status_code, 403)
+        denied_payload = denied.json()
+        self.assertEqual(denied_payload["error"]["type"], "permission_denied")
+
+        prompts_response = self.client.get(
+            "/tools/permissions/prompts",
+            headers=self._auth("user-token"),
+            params={"status": "pending", "limit": 100},
+        )
+        self.assertEqual(prompts_response.status_code, 200)
+        prompts_payload = prompts_response.json()
+        prompt = next(
+            (
+                item
+                for item in prompts_payload.get("items", [])
+                if str(item.get("tool_name")) == "dangerous_echo"
+                and str(item.get("session_id") or "") == session_id
+            ),
+            None,
+        )
+        self.assertIsNotNone(prompt)
+        prompt_id = str(prompt.get("id"))
+        self.assertTrue(prompt_id)
+
+        approve = self.client.post(
+            f"/tools/permissions/prompts/{prompt_id}/approve",
+            headers=self._auth("user-token"),
+        )
+        self.assertEqual(approve.status_code, 200)
+
+        allowed = self.client.post(
+            "/mcp/tools/dangerous_echo/invoke",
+            headers=self._auth("user-token"),
+            json={
+                "arguments": arguments,
+                "user_id": "user-1",
+                "session_id": session_id,
+                "permission_id": prompt_id,
+            },
+        )
+        self.assertEqual(allowed.status_code, 200)
+        allowed_payload = allowed.json()
+        self.assertTrue(bool(allowed_payload.get("action_receipt", {}).get("signature")))
+        self.assertEqual(str(allowed_payload.get("result", {}).get("tool")), "dangerous_echo")
+        high_risk_action = allowed_payload.get("high_risk_action", {})
+        self.assertTrue(bool(high_risk_action.get("high_risk")))
+        self.assertEqual(str(high_risk_action.get("risk_level")), "high")
+        self.assertEqual(str(high_risk_action.get("policy_level")), "l3")
+        self.assertEqual(str(high_risk_action.get("actor")), "user-1")
+        self.assertEqual(str(high_risk_action.get("session_id")), session_id)
+        self.assertEqual(str(high_risk_action.get("permission_id")), prompt_id)
+        self.assertIn("rollback", str(high_risk_action.get("rollback_hint", "")).lower())
+
+        audit = self.client.get(
+            "/security/audit",
+            headers=self._auth("admin-token"),
+            params={"action": "tool_invoke", "limit": 500},
+        )
+        self.assertEqual(audit.status_code, 200)
+        items = audit.json().get("items", [])
+        receipt_events = [
+            item
+            for item in items
+            if str(item.get("event_type")) == "high_risk_action_receipt"
+            and str(item.get("target_id")) == "dangerous_echo"
+        ]
+        self.assertTrue(receipt_events)
+        failed_event = next((item for item in receipt_events if str(item.get("status")) == "failed"), None)
+        self.assertIsNotNone(failed_event)
+        succeeded_event = next((item for item in receipt_events if str(item.get("status")) == "succeeded"), None)
+        self.assertIsNotNone(succeeded_event)
+        failed_details = failed_event.get("details", {})
+        succeeded_details = succeeded_event.get("details", {})
+        self.assertEqual(str(failed_details.get("policy_level")), "l3")
+        self.assertEqual(str(succeeded_details.get("policy_level")), "l3")
+        self.assertEqual(str(failed_details.get("actor")), "user-1")
+        self.assertEqual(str(succeeded_details.get("actor")), "user-1")
+        self.assertEqual(str(succeeded_details.get("permission_id")), prompt_id)
+        self.assertIn("rollback", str(failed_details.get("rollback_hint", "")).lower())
+        self.assertIn("rollback", str(succeeded_details.get("rollback_hint", "")).lower())
+        self.assertTrue(str(failed_details.get("error", "")).strip())
 
 
 if __name__ == "__main__":

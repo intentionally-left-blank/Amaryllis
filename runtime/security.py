@@ -336,6 +336,7 @@ class SecurityManager:
         actor: str | None,
         target_type: str | None = None,
         target_id: str | None = None,
+        event_type: str = "signed_action",
         status: str = "succeeded",
         details: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -346,7 +347,7 @@ class SecurityManager:
             actor=actor,
         )
         self.database.add_security_audit_event(
-            event_type="signed_action",
+            event_type=event_type,
             action=action,
             actor=actor,
             request_id=request_id,

@@ -24,6 +24,7 @@ def _sign_action(
     actor: str | None = None,
     target_type: str | None = None,
     target_id: str | None = None,
+    event_type: str = "signed_action",
     status: str = "succeeded",
     details: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -36,11 +37,67 @@ def _sign_action(
             actor=actor,
             target_type=target_type,
             target_id=target_id,
+            event_type=event_type,
             status=status,
             details=details,
         )
     except Exception:
         return {}
+
+
+def _normalized_risk_level(raw: str | None) -> str:
+    value = str(raw or "").strip().lower()
+    if value not in {"low", "medium", "high", "critical"}:
+        return "medium"
+    return value
+
+
+def _is_high_risk(risk_level: str) -> bool:
+    return risk_level in {"high", "critical"}
+
+
+def _rollback_hint_for_tool(tool_name: str, risk_level: str) -> str:
+    name = str(tool_name or "").strip().lower()
+    if name == "python_exec":
+        return "Review stdout/stderr and revert any filesystem changes introduced by executed code."
+    if name == "filesystem":
+        return "Revert changed files from VCS or restore from backup snapshot."
+    if risk_level == "critical":
+        return "Trigger incident flow, disable related automation, and rollback affected resources."
+    return "Review action impact and rollback changed resources from audit trail metadata."
+
+
+def _high_risk_context(
+    request: Request,
+    *,
+    tool_name: str,
+    risk_level: str,
+    actor: str | None,
+    session_id: str | None,
+    permission_id: str | None,
+) -> dict[str, Any] | None:
+    normalized = _normalized_risk_level(risk_level)
+    if not _is_high_risk(normalized):
+        return None
+
+    services = request.app.state.services
+    policy_level = str(services.config.autonomy_level)
+    policy = {
+        "autonomy_level": policy_level,
+        "approval_enforcement_mode": str(services.config.tool_approval_enforcement),
+        "isolation_profile": str(services.config.tool_isolation_profile),
+    }
+    rollback_hint = _rollback_hint_for_tool(tool_name=tool_name, risk_level=normalized)
+    return {
+        "high_risk": True,
+        "risk_level": normalized,
+        "policy_level": policy_level,
+        "policy": policy,
+        "rollback_hint": rollback_hint,
+        "actor": actor,
+        "session_id": session_id,
+        "permission_id": permission_id,
+    }
 
 
 class MCPInvokeRequest(BaseModel):
@@ -323,8 +380,32 @@ def invoke_mcp_tool(
     services = request.app.state.services
     auth = auth_context_from_request(request)
     effective_user_id = resolve_user_id(request_user_id=payload.user_id, auth=auth)
-    if services.tool_registry.get(tool_name) is None:
+    tool = services.tool_registry.get(tool_name)
+    if tool is None:
         raise NotFoundError(f"Tool not found: {tool_name}")
+
+    high_risk_action = _high_risk_context(
+        request,
+        tool_name=tool_name,
+        risk_level=str(getattr(tool, "risk_level", "medium")),
+        actor=auth.user_id,
+        session_id=payload.session_id,
+        permission_id=payload.permission_id,
+    )
+    event_type = "high_risk_action_receipt" if high_risk_action is not None else "signed_action"
+    sign_details: dict[str, Any] = {
+        "session_id": payload.session_id,
+        "permission_id": payload.permission_id,
+    }
+    if high_risk_action is not None:
+        sign_details.update(high_risk_action)
+
+    def _failure_details(message: str, *, prompt_id: str | None = None) -> dict[str, Any]:
+        details = dict(sign_details)
+        details["error"] = message
+        if prompt_id:
+            details["prompt_id"] = prompt_id
+        return details
 
     try:
         result = services.tool_executor.execute(
@@ -345,16 +426,17 @@ def invoke_mcp_tool(
             actor=auth.user_id,
             target_type="tool",
             target_id=tool_name,
-            details={
-                "session_id": payload.session_id,
-                "permission_id": payload.permission_id,
-            },
+            event_type=event_type,
+            details=sign_details,
         )
-        return {
+        response = {
             "result": result,
             "action_receipt": receipt,
             "request_id": _request_id(request),
         }
+        if high_risk_action is not None:
+            response["high_risk_action"] = high_risk_action
+        return response
     except PermissionRequiredError as exc:
         _sign_action(
             request,
@@ -366,8 +448,9 @@ def invoke_mcp_tool(
             actor=auth.user_id,
             target_type="tool",
             target_id=tool_name,
+            event_type=event_type,
             status="failed",
-            details={"error": str(exc), "session_id": payload.session_id},
+            details=_failure_details(str(exc), prompt_id=getattr(exc, "prompt_id", None)),
         )
         raise PermissionDeniedError(str(exc)) from exc
     except ToolBudgetLimitError as exc:
@@ -381,8 +464,9 @@ def invoke_mcp_tool(
             actor=auth.user_id,
             target_type="tool",
             target_id=tool_name,
+            event_type=event_type,
             status="failed",
-            details={"error": str(exc), "session_id": payload.session_id},
+            details=_failure_details(str(exc)),
         )
         raise PermissionDeniedError(str(exc)) from exc
     except ValueError as exc:
@@ -396,8 +480,9 @@ def invoke_mcp_tool(
             actor=auth.user_id,
             target_type="tool",
             target_id=tool_name,
+            event_type=event_type,
             status="failed",
-            details={"error": str(exc), "session_id": payload.session_id},
+            details=_failure_details(str(exc)),
         )
         raise ValidationError(str(exc)) from exc
     except AmaryllisError:
@@ -413,7 +498,8 @@ def invoke_mcp_tool(
             actor=auth.user_id,
             target_type="tool",
             target_id=tool_name,
+            event_type=event_type,
             status="failed",
-            details={"error": str(exc), "session_id": payload.session_id},
+            details=_failure_details(str(exc)),
         )
         raise ProviderError(str(exc)) from exc

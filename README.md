@@ -831,6 +831,7 @@ Implemented now:
 - real subprocess sandbox for builtin/plugin tools with CPU/RAM/time limits, env sanitization, and strict JSON contract
 - tool budget guardrails (window, per-tool, total, high-risk caps with session/user/request scoping)
 - scoped + expiring permission prompts for risky tools (`pending -> approved/denied -> consumed|expired`)
+- explicit high-risk action receipts for high/critical tool invokes (response `high_risk_action`, audit `event_type=high_risk_action_receipt`)
 - batch permission handoff in chat API via `permission_ids`
 - MCP server endpoints:
   - `GET /mcp/tools`
@@ -977,6 +978,16 @@ Deny prompt:
 ```bash
 curl -X POST "http://localhost:8000/tools/permissions/prompts/<prompt_id>/deny"
 ```
+
+Invoke MCP tool:
+
+```bash
+curl -X POST "http://localhost:8000/mcp/tools/<tool_name>/invoke" \
+  -H "Content-Type: application/json" \
+  -d '{"arguments":{},"session_id":"session-001"}'
+```
+
+Note: high/critical tool success responses include `high_risk_action` (`actor`, `policy_level`, `rollback_hint`) and are persisted into `/security/audit` as `high_risk_action_receipt`.
 
 Debug tool guardrails snapshot:
 

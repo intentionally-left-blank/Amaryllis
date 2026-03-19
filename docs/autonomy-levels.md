@@ -35,3 +35,22 @@ GET /v1/debug/tools/guardrails
 Response includes:
 - `autonomy_policy.level`
 - `autonomy_policy.rules`
+
+## High-Risk Action Receipts
+
+For high/critical tool invocations (`risk_level in {"high", "critical"}`), runtime now emits explicit high-risk receipts:
+
+- security audit `event_type`: `high_risk_action_receipt`
+- audit details include:
+  - `actor`
+  - `policy_level`
+  - `policy` (`autonomy_level`, `approval_enforcement_mode`, `isolation_profile`)
+  - `rollback_hint`
+  - `risk_level`
+  - `session_id`
+  - `permission_id`
+
+`POST /mcp/tools/{tool_name}/invoke` successful responses for high-risk tools include:
+
+- `action_receipt` (signed receipt)
+- `high_risk_action` (explicit context mirrored from audit details)
