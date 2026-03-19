@@ -55,6 +55,7 @@ Implemented in this version:
 - release gate assets: compatibility script, canary smoke script, disaster-recovery gate, compliance gate, rollback playbook
 - lease/CAS ownership for agent runs (single-owner execution under concurrent workers)
 - typed planner step execution with step contracts (pre/post conditions), verifier, retry and replan
+- modular step executor package (`tasks/execution/step_executors.py`) separated from run orchestration
 - production-grade backup and DR foundation (scheduled backups, retention, verification, restore drills)
 - compliance/security operations baseline: secret inventory posture, access reviews, incident response workflow, signed audit evidence export
 
@@ -180,6 +181,8 @@ Service backup/DR endpoints:
 │   ├── migrations.py
 │   └── vector_store.py
 ├── tasks
+│   ├── execution
+│   │   └── step_executors.py
 │   ├── step_registry.py
 │   └── task_executor.py
 ├── tests

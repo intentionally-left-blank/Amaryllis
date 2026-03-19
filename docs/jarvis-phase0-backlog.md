@@ -16,7 +16,7 @@ Harden architecture, delivery reproducibility, and quality gates to support futu
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
 | A-01 | done | Replace deprecated FastAPI shutdown event with lifespan lifecycle | `runtime/server.py` migrated | No `on_event("shutdown")` usage remains; service shutdown flow unchanged in tests |
-| A-02 | todo | Split `TaskExecutor` into orchestration + step executors package | `tasks/execution/` modules | Existing tests pass; no behavior regression in `tests/test_task_executor.py` |
+| A-02 | in_progress | Split `TaskExecutor` into orchestration + step executors package | `tasks/execution/` modules | Existing tests pass; no behavior regression in `tests/test_task_executor.py` |
 | A-03 | todo | Extract run retry/replan policy to dedicated module | `agents/run_policy.py` | `AgentRunManager` no longer contains policy branching internals |
 | A-04 | todo | Introduce import-boundary checks for core layers | boundary-check script + CI step | CI blocks forbidden imports between API/orchestration/storage layers |
 
@@ -51,6 +51,7 @@ Harden architecture, delivery reproducibility, and quality gates to support futu
 | ID | Status | Scope |
 |---|---|---|
 | A-01 | done | Lifecycle hardening via FastAPI lifespan |
+| A-02 | in_progress | step executors extracted to `tasks/execution/`; orchestration split ongoing |
 | B-01 | done | lock strategy, lock-file bootstrap, and CI wiring |
 | B-02 | done | Python patch-version pinning across gates |
 | B-03 | done | dependency drift guardrail in CI |
