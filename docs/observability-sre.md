@@ -12,7 +12,7 @@ Amaryllis exposes:
 
 ## SLO / SLI
 
-Current targets are configurable via env:
+Current targets are versioned by SLO profile manifests (`slo_profiles/*.json`) and can still be overridden via env.
 
 - Request availability target
 - Request latency p95 target (ms)
@@ -25,6 +25,15 @@ The runtime computes:
 - Error budget remaining
 - Error budget burn rate
 
+Quality budgets are also profile-scoped:
+
+- request error-budget burn-rate budget
+- run error-budget burn-rate budget
+- perf smoke p95 latency budget
+- perf smoke error-rate budget
+
+Active runtime/SLO profile and effective quality budget are exposed in `GET /service/observability/slo`.
+
 ## Incident Detection
 
 Incidents are opened automatically when thresholds are breached (availability, latency p95, run success rate) and recovered automatically when the signal returns within targets.
@@ -35,6 +44,18 @@ Key endpoints:
 - `GET /service/observability/incidents`
 - `GET /service/observability/metrics`
 
+## Profile Drift Gate
+
+Blocking check for CI/release pipelines:
+
+```bash
+python scripts/release/check_runtime_profile_drift.py
+```
+
+Reference:
+
+- `docs/runtime-profiles.md`
+
 ## OpenTelemetry
 
 Enable OTel export:
@@ -43,4 +64,3 @@ Enable OTel export:
 - `AMARYLLIS_OTEL_OTLP_ENDPOINT=http://collector:4318/v1/traces`
 
 If OTel packages are missing, runtime falls back to local telemetry without crashing.
-

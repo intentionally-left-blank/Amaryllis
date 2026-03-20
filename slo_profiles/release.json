@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "profile": "release",
+  "description": "Production release SLO profile with strict latency and reliability budgets.",
+  "targets": {
+    "window_sec": 3600,
+    "request_availability_target": 0.999,
+    "request_latency_p95_ms_target": 800,
+    "run_success_target": 0.992,
+    "min_request_samples": 120,
+    "min_run_samples": 50,
+    "incident_cooldown_sec": 300
+  },
+  "quality_budget": {
+    "error_budget_burn_rate_requests": 0.6,
+    "error_budget_burn_rate_runs": 0.6,
+    "perf_max_p95_latency_ms": 280,
+    "perf_max_error_rate_pct": 0
+  }
+}

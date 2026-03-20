@@ -720,6 +720,16 @@ def create_app() -> FastAPI:
             "request_id": request_id_from_request(request),
             "actor": auth.user_id,
             "scopes": sorted(auth.scopes),
+            "profiles": {
+                "runtime": services.config.runtime_profile,
+                "slo": services.config.slo_profile,
+            },
+            "quality_budget": {
+                "request_burn_rate": services.config.slo_budget_request_burn_rate,
+                "run_burn_rate": services.config.slo_budget_run_burn_rate,
+                "perf_max_p95_latency_ms": services.config.perf_budget_max_p95_latency_ms,
+                "perf_max_error_rate_pct": services.config.perf_budget_max_error_rate_pct,
+            },
             "snapshot": services.observability.sre.snapshot(),
         }
 

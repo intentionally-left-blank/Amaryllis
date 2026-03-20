@@ -256,11 +256,13 @@ Deterministic dependency path (manual):
 ```bash
 pip install -r requirements.lock
 python scripts/release/check_dependency_drift.py
+python scripts/release/check_runtime_profile_drift.py
 python scripts/eval/run_golden_tasks.py --validate-only
 ```
 
 Reference:
 - `docs/reproducible-bootstrap.md`
+- `docs/runtime-profiles.md`
 
 ## Run
 
@@ -1562,6 +1564,12 @@ python scripts/release/disaster_recovery_gate.py
 python scripts/release/compliance_ops_gate.py
 ```
 
+- Runtime/SLO profile drift gate:
+
+```bash
+python scripts/release/check_runtime_profile_drift.py
+```
+
 - Rollback playbook: `docs/release-playbook.md`
 - Local rollback helper:
 
@@ -1575,6 +1583,8 @@ scripts/release/rollback_local.sh <tag-or-commit>
 - Phase 0 implementation backlog (with DoD and sprint status): `docs/jarvis-phase0-backlog.md`
 - Phase 1 implementation backlog (Developer Jarvis Alpha): `docs/jarvis-phase1-backlog.md`
 - Phase 2 implementation backlog (Tier-1 Operator Beta): `docs/jarvis-phase2-backlog.md`
+- ADR-0001 (kernel contract surface v1): `docs/adr-0001-cognitive-kernel-contracts.md`
+- Runtime/SLO profiles and quality budgets: `docs/runtime-profiles.md`
 
 ## License
 

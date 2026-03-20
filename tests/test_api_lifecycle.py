@@ -94,6 +94,12 @@ class APILifecycleTests(unittest.TestCase):
         self.assertEqual(allowed.status_code, 200)
         payload = allowed.json()
         self.assertIn("snapshot", payload)
+        profiles = payload.get("profiles", {})
+        self.assertEqual(str(profiles.get("runtime")), "dev")
+        self.assertEqual(str(profiles.get("slo")), "dev")
+        quality_budget = payload.get("quality_budget", {})
+        self.assertIn("perf_max_p95_latency_ms", quality_budget)
+        self.assertIn("perf_max_error_rate_pct", quality_budget)
 
         metrics = self.client.get("/service/observability/metrics", headers=self._auth("service-token"))
         self.assertEqual(metrics.status_code, 200)
@@ -102,4 +108,3 @@ class APILifecycleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

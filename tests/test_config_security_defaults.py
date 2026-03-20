@@ -36,6 +36,8 @@ class ConfigSecurityDefaultsTests(unittest.TestCase):
         self.assertTrue(config.backup_verify_on_create)
         self.assertTrue(config.backup_restore_drill_enabled)
         self.assertEqual(config.autonomy_level, "l3")
+        self.assertEqual(config.runtime_profile, "dev")
+        self.assertEqual(config.slo_profile, "dev")
 
     def test_invalid_modes_fallback_to_strict(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-config-tests-") as tmp:

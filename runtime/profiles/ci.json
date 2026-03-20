@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "profile": "ci",
+  "description": "CI runtime profile with deterministic production-safe controls and CI SLO budgets.",
+  "slo_profile": "ci",
+  "required_env": [
+    "AMARYLLIS_AUTH_TOKENS"
+  ],
+  "env_defaults": {
+    "AMARYLLIS_SECURITY_PROFILE": "production",
+    "AMARYLLIS_RELEASE_CHANNEL": "beta",
+    "AMARYLLIS_TOOL_APPROVAL_ENFORCEMENT": "strict",
+    "AMARYLLIS_TOOL_SANDBOX_ENABLED": true,
+    "AMARYLLIS_PLUGIN_SIGNING_MODE": "strict",
+    "AMARYLLIS_PLUGIN_RUNTIME_MODE": "sandboxed"
+  }
+}

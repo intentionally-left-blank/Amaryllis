@@ -5,6 +5,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from runtime.profile_loader import ProfileLoadError, build_profiled_env
+
 
 class AppConfigError(ValueError):
     pass
@@ -21,6 +23,12 @@ class AuthTokenConfig:
 class AppConfig:
     app_name: str
     app_version: str
+    runtime_profile: str
+    runtime_profile_path: Path
+    runtime_profile_schema_version: int
+    slo_profile: str
+    slo_profile_path: Path
+    slo_profile_schema_version: int
     host: str
     port: int
     support_dir: Path
@@ -41,6 +49,10 @@ class AppConfig:
     observability_min_request_samples: int
     observability_min_run_samples: int
     observability_incident_cooldown_sec: float
+    slo_budget_request_burn_rate: float
+    slo_budget_run_burn_rate: float
+    perf_budget_max_p95_latency_ms: float
+    perf_budget_max_error_rate_pct: float
     backup_enabled: bool
     backup_interval_sec: float
     backup_retention_count: int
@@ -165,156 +177,168 @@ class AppConfig:
 
     @classmethod
     def from_env(cls) -> "AppConfig":
+        try:
+            profiled = build_profiled_env(base_env=os.environ)
+        except ProfileLoadError as exc:
+            raise AppConfigError(f"Invalid runtime/SLO profile configuration: {exc}") from exc
+        env = profiled.env
+
         support_dir = Path(
-            os.getenv(
+            env.get(
                 "AMARYLLIS_SUPPORT_DIR",
                 str(Path.home() / "Library" / "Application Support" / "amaryllis"),
             )
         ).expanduser()
 
         models_dir = Path(
-            os.getenv(
+            env.get(
                 "AMARYLLIS_MODELS_DIR",
                 str(support_dir / "models"),
             )
         ).expanduser()
 
         data_dir = Path(
-            os.getenv(
+            env.get(
                 "AMARYLLIS_DATA_DIR",
                 str(support_dir / "data"),
             )
         ).expanduser()
 
         plugins_dir = Path(
-            os.getenv(
+            env.get(
                 "AMARYLLIS_PLUGINS_DIR",
                 str(Path.cwd() / "plugins"),
             )
         ).expanduser()
         evidence_dir = Path(
-            os.getenv(
+            env.get(
                 "AMARYLLIS_EVIDENCE_DIR",
                 str(support_dir / "evidence"),
             )
         ).expanduser()
         backup_dir = Path(
-            os.getenv(
+            env.get(
                 "AMARYLLIS_BACKUP_DIR",
                 str(support_dir / "backups"),
             )
         ).expanduser()
 
         database_path = Path(
-            os.getenv(
+            env.get(
                 "AMARYLLIS_DATABASE_PATH",
                 str(data_dir / "amaryllis.db"),
             )
         ).expanduser()
 
         vector_index_path = Path(
-            os.getenv(
+            env.get(
                 "AMARYLLIS_VECTOR_INDEX_PATH",
                 str(data_dir / "semantic.index"),
             )
         ).expanduser()
 
         telemetry_path = Path(
-            os.getenv(
+            env.get(
                 "AMARYLLIS_TELEMETRY_PATH",
                 str(data_dir / "telemetry.jsonl"),
             )
         ).expanduser()
         api_compat_contract_path = Path(
-            os.getenv(
+            env.get(
                 "AMARYLLIS_API_COMPAT_CONTRACT_PATH",
                 str(Path.cwd() / "contracts" / "api_compat_v1.json"),
             )
         ).expanduser()
         identity_path = Path(
-            os.getenv(
+            env.get(
                 "AMARYLLIS_IDENTITY_PATH",
                 str(data_dir / "identity.json"),
             )
         ).expanduser()
 
-        fallback_raw = os.getenv("AMARYLLIS_OLLAMA_FALLBACK", "true").strip().lower()
+        fallback_raw = env.get("AMARYLLIS_OLLAMA_FALLBACK", "true").strip().lower()
         enable_ollama_fallback = fallback_raw in {"1", "true", "yes", "on"}
         memory_consolidation_enabled = _parse_bool(
-            os.getenv("AMARYLLIS_MEMORY_CONSOLIDATION_ENABLED", "true")
+            env.get("AMARYLLIS_MEMORY_CONSOLIDATION_ENABLED", "true")
         )
-        blocked_tools = tuple(_csv_items(os.getenv("AMARYLLIS_BLOCKED_TOOLS", "")))
-        allowed_high_risk_tools = tuple(_csv_items(os.getenv("AMARYLLIS_ALLOWED_HIGH_RISK_TOOLS", "")))
-        mcp_endpoints = tuple(_csv_items(os.getenv("AMARYLLIS_MCP_ENDPOINTS", "")))
-        tool_approval_enforcement = os.getenv(
+        blocked_tools = tuple(_csv_items(env.get("AMARYLLIS_BLOCKED_TOOLS", "")))
+        allowed_high_risk_tools = tuple(_csv_items(env.get("AMARYLLIS_ALLOWED_HIGH_RISK_TOOLS", "")))
+        mcp_endpoints = tuple(_csv_items(env.get("AMARYLLIS_MCP_ENDPOINTS", "")))
+        tool_approval_enforcement = env.get(
             "AMARYLLIS_TOOL_APPROVAL_ENFORCEMENT",
             "strict",
         ).strip().lower()
         if tool_approval_enforcement not in {"strict", "prompt_and_allow"}:
             tool_approval_enforcement = "strict"
-        autonomy_level = os.getenv(
+        autonomy_level = env.get(
             "AMARYLLIS_AUTONOMY_LEVEL",
             "l3",
         ).strip().lower()
         if autonomy_level not in {"l0", "l1", "l2", "l3", "l4", "l5"}:
             autonomy_level = "l3"
-        api_release_channel = os.getenv(
+        api_release_channel = env.get(
             "AMARYLLIS_RELEASE_CHANNEL",
             "stable",
         ).strip().lower()
         if api_release_channel not in {"alpha", "beta", "stable"}:
             api_release_channel = "stable"
-        security_profile = os.getenv(
+        security_profile = env.get(
             "AMARYLLIS_SECURITY_PROFILE",
             "production",
         ).strip().lower()
         if security_profile not in {"production", "development"}:
             security_profile = "production"
         security_allow_insecure_modes = _parse_bool(
-            os.getenv("AMARYLLIS_ALLOW_INSECURE_SECURITY_MODES", "false")
+            env.get("AMARYLLIS_ALLOW_INSECURE_SECURITY_MODES", "false")
         )
-        tool_isolation_profile = os.getenv(
+        tool_isolation_profile = env.get(
             "AMARYLLIS_TOOL_ISOLATION_PROFILE",
             "balanced",
         ).strip().lower()
         if tool_isolation_profile not in {"balanced", "strict"}:
             tool_isolation_profile = "balanced"
-        plugin_signing_mode = os.getenv(
+        plugin_signing_mode = env.get(
             "AMARYLLIS_PLUGIN_SIGNING_MODE",
             "strict",
         ).strip().lower()
         if plugin_signing_mode not in {"off", "warn", "strict"}:
             plugin_signing_mode = "strict"
-        plugin_runtime_mode = os.getenv(
+        plugin_runtime_mode = env.get(
             "AMARYLLIS_PLUGIN_RUNTIME_MODE",
             "sandboxed",
         ).strip().lower()
         if plugin_runtime_mode not in {"sandboxed", "legacy"}:
             plugin_runtime_mode = "sandboxed"
-        tool_sandbox_enabled = _parse_bool(os.getenv("AMARYLLIS_TOOL_SANDBOX_ENABLED", "true"))
+        tool_sandbox_enabled = _parse_bool(env.get("AMARYLLIS_TOOL_SANDBOX_ENABLED", "true"))
         tool_sandbox_allow_network_tools = tuple(
-            _csv_items(os.getenv("AMARYLLIS_TOOL_SANDBOX_ALLOW_NETWORK_TOOLS", "web_search"))
+            _csv_items(env.get("AMARYLLIS_TOOL_SANDBOX_ALLOW_NETWORK_TOOLS", "web_search"))
         )
         tool_sandbox_allowed_roots = tuple(
             _csv_items(
-                os.getenv(
+                env.get(
                     "AMARYLLIS_TOOL_SANDBOX_ALLOWED_ROOTS",
                     str(Path.cwd()),
                 )
             )
         )
-        auth_enabled = _parse_bool(os.getenv("AMARYLLIS_AUTH_ENABLED", "true"))
+        auth_enabled = _parse_bool(env.get("AMARYLLIS_AUTH_ENABLED", "true"))
         auth_tokens = tuple(
             _parse_auth_tokens(
-                raw=os.getenv("AMARYLLIS_AUTH_TOKENS", ""),
-                single_token=os.getenv("AMARYLLIS_API_TOKEN", ""),
+                raw=env.get("AMARYLLIS_AUTH_TOKENS", ""),
+                single_token=env.get("AMARYLLIS_API_TOKEN", ""),
             )
         )
         config = cls(
             app_name="Amaryllis",
-            app_version=os.getenv("AMARYLLIS_APP_VERSION", "0.1.0"),
-            host=os.getenv("AMARYLLIS_HOST", "localhost"),
-            port=int(os.getenv("AMARYLLIS_PORT", "8000")),
+            app_version=env.get("AMARYLLIS_APP_VERSION", "0.1.0"),
+            runtime_profile=profiled.runtime.profile,
+            runtime_profile_path=profiled.runtime.source_path,
+            runtime_profile_schema_version=profiled.runtime.schema_version,
+            slo_profile=profiled.slo.profile,
+            slo_profile_path=profiled.slo.source_path,
+            slo_profile_schema_version=profiled.slo.schema_version,
+            host=env.get("AMARYLLIS_HOST", "localhost"),
+            port=int(env.get("AMARYLLIS_PORT", "8000")),
             support_dir=support_dir,
             models_dir=models_dir,
             data_dir=data_dir,
@@ -325,270 +349,282 @@ class AppConfig:
             vector_index_path=vector_index_path,
             telemetry_path=telemetry_path,
             observability_otel_enabled=_parse_bool(
-                os.getenv("AMARYLLIS_OTEL_ENABLED", "true")
+                env.get("AMARYLLIS_OTEL_ENABLED", "true")
             ),
-            observability_otlp_endpoint=(os.getenv("AMARYLLIS_OTEL_OTLP_ENDPOINT") or "").strip() or None,
+            observability_otlp_endpoint=(env.get("AMARYLLIS_OTEL_OTLP_ENDPOINT") or "").strip() or None,
             observability_slo_window_sec=max(
-                60.0, float(os.getenv("AMARYLLIS_SLO_WINDOW_SEC", "3600"))
+                60.0, float(env.get("AMARYLLIS_SLO_WINDOW_SEC", "3600"))
             ),
             observability_request_availability_target=min(
                 0.9999,
-                max(0.5, float(os.getenv("AMARYLLIS_SLO_REQUEST_AVAILABILITY_TARGET", "0.995"))),
+                max(0.5, float(env.get("AMARYLLIS_SLO_REQUEST_AVAILABILITY_TARGET", "0.995"))),
             ),
             observability_request_latency_p95_ms_target=max(
-                1.0, float(os.getenv("AMARYLLIS_SLO_REQUEST_LATENCY_P95_MS_TARGET", "1200"))
+                1.0, float(env.get("AMARYLLIS_SLO_REQUEST_LATENCY_P95_MS_TARGET", "1200"))
             ),
             observability_run_success_target=min(
                 0.9999,
-                max(0.5, float(os.getenv("AMARYLLIS_SLO_RUN_SUCCESS_TARGET", "0.98"))),
+                max(0.5, float(env.get("AMARYLLIS_SLO_RUN_SUCCESS_TARGET", "0.98"))),
             ),
             observability_min_request_samples=max(
-                1, int(os.getenv("AMARYLLIS_SLO_MIN_REQUEST_SAMPLES", "50"))
+                1, int(env.get("AMARYLLIS_SLO_MIN_REQUEST_SAMPLES", "50"))
             ),
             observability_min_run_samples=max(
-                1, int(os.getenv("AMARYLLIS_SLO_MIN_RUN_SAMPLES", "20"))
+                1, int(env.get("AMARYLLIS_SLO_MIN_RUN_SAMPLES", "20"))
             ),
             observability_incident_cooldown_sec=max(
-                5.0, float(os.getenv("AMARYLLIS_SLO_INCIDENT_COOLDOWN_SEC", "300"))
+                5.0, float(env.get("AMARYLLIS_SLO_INCIDENT_COOLDOWN_SEC", "300"))
             ),
-            backup_enabled=_parse_bool(os.getenv("AMARYLLIS_BACKUP_ENABLED", "true")),
+            slo_budget_request_burn_rate=max(
+                0.01, float(env.get("AMARYLLIS_SLO_BUDGET_REQUEST_BURN_RATE", "1.0"))
+            ),
+            slo_budget_run_burn_rate=max(
+                0.01, float(env.get("AMARYLLIS_SLO_BUDGET_RUN_BURN_RATE", "1.0"))
+            ),
+            perf_budget_max_p95_latency_ms=max(
+                1.0, float(env.get("AMARYLLIS_PERF_BUDGET_MAX_P95_MS", "350"))
+            ),
+            perf_budget_max_error_rate_pct=max(
+                0.0, float(env.get("AMARYLLIS_PERF_BUDGET_MAX_ERROR_RATE_PCT", "0"))
+            ),
+            backup_enabled=_parse_bool(env.get("AMARYLLIS_BACKUP_ENABLED", "true")),
             backup_interval_sec=max(
-                30.0, float(os.getenv("AMARYLLIS_BACKUP_INTERVAL_SEC", "3600"))
+                30.0, float(env.get("AMARYLLIS_BACKUP_INTERVAL_SEC", "3600"))
             ),
             backup_retention_count=max(
-                1, int(os.getenv("AMARYLLIS_BACKUP_RETENTION_COUNT", "120"))
+                1, int(env.get("AMARYLLIS_BACKUP_RETENTION_COUNT", "120"))
             ),
             backup_retention_days=max(
-                1, int(os.getenv("AMARYLLIS_BACKUP_RETENTION_DAYS", "30"))
+                1, int(env.get("AMARYLLIS_BACKUP_RETENTION_DAYS", "30"))
             ),
             backup_verify_on_create=_parse_bool(
-                os.getenv("AMARYLLIS_BACKUP_VERIFY_ON_CREATE", "true")
+                env.get("AMARYLLIS_BACKUP_VERIFY_ON_CREATE", "true")
             ),
             backup_restore_drill_enabled=_parse_bool(
-                os.getenv("AMARYLLIS_BACKUP_RESTORE_DRILL_ENABLED", "true")
+                env.get("AMARYLLIS_BACKUP_RESTORE_DRILL_ENABLED", "true")
             ),
             backup_restore_drill_interval_sec=max(
                 300.0,
                 float(
-                    os.getenv(
+                    env.get(
                         "AMARYLLIS_BACKUP_RESTORE_DRILL_INTERVAL_SEC",
                         "86400",
                     )
                 ),
             ),
-            automation_enabled=_parse_bool(os.getenv("AMARYLLIS_AUTOMATION_ENABLED", "true")),
-            api_version=os.getenv("AMARYLLIS_API_VERSION", "v1").strip() or "v1",
+            automation_enabled=_parse_bool(env.get("AMARYLLIS_AUTOMATION_ENABLED", "true")),
+            api_version=env.get("AMARYLLIS_API_VERSION", "v1").strip() or "v1",
             api_release_channel=api_release_channel,
             api_deprecation_sunset_days=max(
-                7, int(os.getenv("AMARYLLIS_API_DEPRECATION_SUNSET_DAYS", "180"))
+                7, int(env.get("AMARYLLIS_API_DEPRECATION_SUNSET_DAYS", "180"))
             ),
             api_compat_contract_path=api_compat_contract_path,
-            default_provider=os.getenv("AMARYLLIS_DEFAULT_PROVIDER", "mlx"),
-            default_model=os.getenv(
+            default_provider=env.get("AMARYLLIS_DEFAULT_PROVIDER", "mlx"),
+            default_model=env.get(
                 "AMARYLLIS_DEFAULT_MODEL",
                 "mlx-community/Qwen2.5-1.5B-Instruct-4bit",
             ),
-            ollama_base_url=os.getenv("AMARYLLIS_OLLAMA_URL", "http://localhost:11434"),
+            ollama_base_url=env.get("AMARYLLIS_OLLAMA_URL", "http://localhost:11434"),
             enable_ollama_fallback=enable_ollama_fallback,
-            openai_base_url=os.getenv("AMARYLLIS_OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
-            openai_api_key=(os.getenv("AMARYLLIS_OPENAI_API_KEY") or "").strip() or None,
-            openai_api_key_rotated_at=(os.getenv("AMARYLLIS_OPENAI_API_KEY_ROTATED_AT") or "").strip() or None,
-            openai_api_key_expires_at=(os.getenv("AMARYLLIS_OPENAI_API_KEY_EXPIRES_AT") or "").strip() or None,
-            anthropic_base_url=os.getenv("AMARYLLIS_ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1").rstrip(
+            openai_base_url=env.get("AMARYLLIS_OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
+            openai_api_key=(env.get("AMARYLLIS_OPENAI_API_KEY") or "").strip() or None,
+            openai_api_key_rotated_at=(env.get("AMARYLLIS_OPENAI_API_KEY_ROTATED_AT") or "").strip() or None,
+            openai_api_key_expires_at=(env.get("AMARYLLIS_OPENAI_API_KEY_EXPIRES_AT") or "").strip() or None,
+            anthropic_base_url=env.get("AMARYLLIS_ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1").rstrip(
                 "/"
             ),
-            anthropic_api_key=(os.getenv("AMARYLLIS_ANTHROPIC_API_KEY") or "").strip() or None,
-            anthropic_api_key_rotated_at=(os.getenv("AMARYLLIS_ANTHROPIC_API_KEY_ROTATED_AT") or "").strip() or None,
-            anthropic_api_key_expires_at=(os.getenv("AMARYLLIS_ANTHROPIC_API_KEY_EXPIRES_AT") or "").strip() or None,
-            openrouter_base_url=os.getenv("AMARYLLIS_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/"),
-            openrouter_api_key=(os.getenv("AMARYLLIS_OPENROUTER_API_KEY") or "").strip() or None,
-            openrouter_api_key_rotated_at=(os.getenv("AMARYLLIS_OPENROUTER_API_KEY_ROTATED_AT") or "").strip() or None,
-            openrouter_api_key_expires_at=(os.getenv("AMARYLLIS_OPENROUTER_API_KEY_EXPIRES_AT") or "").strip() or None,
-            run_workers=max(1, int(os.getenv("AMARYLLIS_RUN_WORKERS", "2"))),
+            anthropic_api_key=(env.get("AMARYLLIS_ANTHROPIC_API_KEY") or "").strip() or None,
+            anthropic_api_key_rotated_at=(env.get("AMARYLLIS_ANTHROPIC_API_KEY_ROTATED_AT") or "").strip() or None,
+            anthropic_api_key_expires_at=(env.get("AMARYLLIS_ANTHROPIC_API_KEY_EXPIRES_AT") or "").strip() or None,
+            openrouter_base_url=env.get("AMARYLLIS_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/"),
+            openrouter_api_key=(env.get("AMARYLLIS_OPENROUTER_API_KEY") or "").strip() or None,
+            openrouter_api_key_rotated_at=(env.get("AMARYLLIS_OPENROUTER_API_KEY_ROTATED_AT") or "").strip() or None,
+            openrouter_api_key_expires_at=(env.get("AMARYLLIS_OPENROUTER_API_KEY_EXPIRES_AT") or "").strip() or None,
+            run_workers=max(1, int(env.get("AMARYLLIS_RUN_WORKERS", "2"))),
             run_recover_pending_on_start=_parse_bool(
-                os.getenv("AMARYLLIS_RUN_RECOVER_PENDING_ON_START", "true")
+                env.get("AMARYLLIS_RUN_RECOVER_PENDING_ON_START", "true")
             ),
-            run_max_attempts=max(1, int(os.getenv("AMARYLLIS_RUN_MAX_ATTEMPTS", "2"))),
-            run_attempt_timeout_sec=max(5.0, float(os.getenv("AMARYLLIS_RUN_ATTEMPT_TIMEOUT_SEC", "180"))),
+            run_max_attempts=max(1, int(env.get("AMARYLLIS_RUN_MAX_ATTEMPTS", "2"))),
+            run_attempt_timeout_sec=max(5.0, float(env.get("AMARYLLIS_RUN_ATTEMPT_TIMEOUT_SEC", "180"))),
             run_lease_ttl_sec=max(
                 10.0,
                 float(
-                    os.getenv(
+                    env.get(
                         "AMARYLLIS_RUN_LEASE_TTL_SEC",
-                        str(max(10.0, float(os.getenv("AMARYLLIS_RUN_ATTEMPT_TIMEOUT_SEC", "180")) * 2.0 + 5.0)),
+                        str(max(10.0, float(env.get("AMARYLLIS_RUN_ATTEMPT_TIMEOUT_SEC", "180")) * 2.0 + 5.0)),
                     )
                 ),
             ),
-            run_retry_backoff_sec=max(0.0, float(os.getenv("AMARYLLIS_RUN_RETRY_BACKOFF_SEC", "0.3"))),
-            run_retry_max_backoff_sec=max(0.0, float(os.getenv("AMARYLLIS_RUN_RETRY_MAX_BACKOFF_SEC", "2.0"))),
-            run_retry_jitter_sec=max(0.0, float(os.getenv("AMARYLLIS_RUN_RETRY_JITTER_SEC", "0.15"))),
-            run_budget_max_tokens=max(256, int(os.getenv("AMARYLLIS_RUN_BUDGET_MAX_TOKENS", "24000"))),
+            run_retry_backoff_sec=max(0.0, float(env.get("AMARYLLIS_RUN_RETRY_BACKOFF_SEC", "0.3"))),
+            run_retry_max_backoff_sec=max(0.0, float(env.get("AMARYLLIS_RUN_RETRY_MAX_BACKOFF_SEC", "2.0"))),
+            run_retry_jitter_sec=max(0.0, float(env.get("AMARYLLIS_RUN_RETRY_JITTER_SEC", "0.15"))),
+            run_budget_max_tokens=max(256, int(env.get("AMARYLLIS_RUN_BUDGET_MAX_TOKENS", "24000"))),
             run_budget_max_duration_sec=max(
-                10.0, float(os.getenv("AMARYLLIS_RUN_BUDGET_MAX_DURATION_SEC", "300"))
+                10.0, float(env.get("AMARYLLIS_RUN_BUDGET_MAX_DURATION_SEC", "300"))
             ),
-            run_budget_max_tool_calls=max(1, int(os.getenv("AMARYLLIS_RUN_BUDGET_MAX_TOOL_CALLS", "8"))),
-            run_budget_max_tool_errors=max(0, int(os.getenv("AMARYLLIS_RUN_BUDGET_MAX_TOOL_ERRORS", "3"))),
-            automation_poll_sec=max(0.5, float(os.getenv("AMARYLLIS_AUTOMATION_POLL_SEC", "2"))),
-            automation_batch_size=max(1, int(os.getenv("AMARYLLIS_AUTOMATION_BATCH_SIZE", "10"))),
-            automation_escalation_warning=max(1, int(os.getenv("AMARYLLIS_AUTOMATION_ESCALATION_WARNING", "2"))),
+            run_budget_max_tool_calls=max(1, int(env.get("AMARYLLIS_RUN_BUDGET_MAX_TOOL_CALLS", "8"))),
+            run_budget_max_tool_errors=max(0, int(env.get("AMARYLLIS_RUN_BUDGET_MAX_TOOL_ERRORS", "3"))),
+            automation_poll_sec=max(0.5, float(env.get("AMARYLLIS_AUTOMATION_POLL_SEC", "2"))),
+            automation_batch_size=max(1, int(env.get("AMARYLLIS_AUTOMATION_BATCH_SIZE", "10"))),
+            automation_escalation_warning=max(1, int(env.get("AMARYLLIS_AUTOMATION_ESCALATION_WARNING", "2"))),
             automation_escalation_critical=max(
-                1, int(os.getenv("AMARYLLIS_AUTOMATION_ESCALATION_CRITICAL", "4"))
+                1, int(env.get("AMARYLLIS_AUTOMATION_ESCALATION_CRITICAL", "4"))
             ),
-            automation_escalation_disable=max(1, int(os.getenv("AMARYLLIS_AUTOMATION_ESCALATION_DISABLE", "6"))),
-            automation_lease_ttl_sec=max(5, int(os.getenv("AMARYLLIS_AUTOMATION_LEASE_TTL_SEC", "30"))),
+            automation_escalation_disable=max(1, int(env.get("AMARYLLIS_AUTOMATION_ESCALATION_DISABLE", "6"))),
+            automation_lease_ttl_sec=max(5, int(env.get("AMARYLLIS_AUTOMATION_LEASE_TTL_SEC", "30"))),
             automation_backoff_base_sec=max(
-                1.0, float(os.getenv("AMARYLLIS_AUTOMATION_BACKOFF_BASE_SEC", "5"))
+                1.0, float(env.get("AMARYLLIS_AUTOMATION_BACKOFF_BASE_SEC", "5"))
             ),
             automation_backoff_max_sec=max(
-                1.0, float(os.getenv("AMARYLLIS_AUTOMATION_BACKOFF_MAX_SEC", "300"))
+                1.0, float(env.get("AMARYLLIS_AUTOMATION_BACKOFF_MAX_SEC", "300"))
             ),
             automation_circuit_failure_threshold=max(
-                1, int(os.getenv("AMARYLLIS_AUTOMATION_CIRCUIT_FAILURE_THRESHOLD", "4"))
+                1, int(env.get("AMARYLLIS_AUTOMATION_CIRCUIT_FAILURE_THRESHOLD", "4"))
             ),
             automation_circuit_open_sec=max(
-                1.0, float(os.getenv("AMARYLLIS_AUTOMATION_CIRCUIT_OPEN_SEC", "120"))
+                1.0, float(env.get("AMARYLLIS_AUTOMATION_CIRCUIT_OPEN_SEC", "120"))
             ),
-            task_max_duration_sec=max(10.0, float(os.getenv("AMARYLLIS_TASK_MAX_DURATION_SEC", "120"))),
-            task_max_model_calls=max(1, int(os.getenv("AMARYLLIS_TASK_MAX_MODEL_CALLS", "6"))),
-            task_max_prompt_chars=max(2000, int(os.getenv("AMARYLLIS_TASK_MAX_PROMPT_CHARS", "40000"))),
-            task_max_tool_rounds=max(1, int(os.getenv("AMARYLLIS_TASK_MAX_TOOL_ROUNDS", "3"))),
+            task_max_duration_sec=max(10.0, float(env.get("AMARYLLIS_TASK_MAX_DURATION_SEC", "120"))),
+            task_max_model_calls=max(1, int(env.get("AMARYLLIS_TASK_MAX_MODEL_CALLS", "6"))),
+            task_max_prompt_chars=max(2000, int(env.get("AMARYLLIS_TASK_MAX_PROMPT_CHARS", "40000"))),
+            task_max_tool_rounds=max(1, int(env.get("AMARYLLIS_TASK_MAX_TOOL_ROUNDS", "3"))),
             task_issue_parallel_workers=max(
-                1, int(os.getenv("AMARYLLIS_TASK_ISSUE_PARALLEL_WORKERS", "2"))
+                1, int(env.get("AMARYLLIS_TASK_ISSUE_PARALLEL_WORKERS", "2"))
             ),
             task_issue_timeout_sec=max(
-                0.01, float(os.getenv("AMARYLLIS_TASK_ISSUE_TIMEOUT_SEC", "15"))
+                0.01, float(env.get("AMARYLLIS_TASK_ISSUE_TIMEOUT_SEC", "15"))
             ),
-            task_verifier_enabled=_parse_bool(os.getenv("AMARYLLIS_TASK_VERIFIER_ENABLED", "true")),
+            task_verifier_enabled=_parse_bool(env.get("AMARYLLIS_TASK_VERIFIER_ENABLED", "true")),
             task_verifier_max_repair_attempts=max(
-                0, int(os.getenv("AMARYLLIS_TASK_VERIFIER_MAX_REPAIR_ATTEMPTS", "1"))
+                0, int(env.get("AMARYLLIS_TASK_VERIFIER_MAX_REPAIR_ATTEMPTS", "1"))
             ),
             task_verifier_min_response_chars=max(
-                1, int(os.getenv("AMARYLLIS_TASK_VERIFIER_MIN_RESPONSE_CHARS", "8"))
+                1, int(env.get("AMARYLLIS_TASK_VERIFIER_MIN_RESPONSE_CHARS", "8"))
             ),
             task_artifact_quality_enabled=_parse_bool(
-                os.getenv("AMARYLLIS_TASK_ARTIFACT_QUALITY_ENABLED", "true")
+                env.get("AMARYLLIS_TASK_ARTIFACT_QUALITY_ENABLED", "true")
             ),
             task_artifact_quality_max_repair_attempts=max(
-                0, int(os.getenv("AMARYLLIS_TASK_ARTIFACT_QUALITY_MAX_REPAIR_ATTEMPTS", "1"))
+                0, int(env.get("AMARYLLIS_TASK_ARTIFACT_QUALITY_MAX_REPAIR_ATTEMPTS", "1"))
             ),
             task_step_verifier_enabled=_parse_bool(
-                os.getenv("AMARYLLIS_TASK_STEP_VERIFIER_ENABLED", "true")
+                env.get("AMARYLLIS_TASK_STEP_VERIFIER_ENABLED", "true")
             ),
             task_step_max_retries_default=max(
-                0, int(os.getenv("AMARYLLIS_TASK_STEP_MAX_RETRIES_DEFAULT", "1"))
+                0, int(env.get("AMARYLLIS_TASK_STEP_MAX_RETRIES_DEFAULT", "1"))
             ),
             task_step_replan_max_attempts=max(
-                0, int(os.getenv("AMARYLLIS_TASK_STEP_REPLAN_MAX_ATTEMPTS", "1"))
+                0, int(env.get("AMARYLLIS_TASK_STEP_REPLAN_MAX_ATTEMPTS", "1"))
             ),
             memory_consolidation_enabled=memory_consolidation_enabled,
             memory_consolidation_interval_sec=max(
-                30.0, float(os.getenv("AMARYLLIS_MEMORY_CONSOLIDATION_INTERVAL_SEC", "600"))
+                30.0, float(env.get("AMARYLLIS_MEMORY_CONSOLIDATION_INTERVAL_SEC", "600"))
             ),
             memory_consolidation_semantic_limit=max(
-                100, int(os.getenv("AMARYLLIS_MEMORY_CONSOLIDATION_SEMANTIC_LIMIT", "1000"))
+                100, int(env.get("AMARYLLIS_MEMORY_CONSOLIDATION_SEMANTIC_LIMIT", "1000"))
             ),
             memory_consolidation_max_users_per_tick=max(
-                1, int(os.getenv("AMARYLLIS_MEMORY_CONSOLIDATION_MAX_USERS_PER_TICK", "20"))
+                1, int(env.get("AMARYLLIS_MEMORY_CONSOLIDATION_MAX_USERS_PER_TICK", "20"))
             ),
             memory_profile_decay_enabled=_parse_bool(
-                os.getenv("AMARYLLIS_MEMORY_PROFILE_DECAY_ENABLED", "true")
+                env.get("AMARYLLIS_MEMORY_PROFILE_DECAY_ENABLED", "true")
             ),
             memory_profile_decay_half_life_days=max(
-                1.0, float(os.getenv("AMARYLLIS_MEMORY_PROFILE_DECAY_HALF_LIFE_DAYS", "45"))
+                1.0, float(env.get("AMARYLLIS_MEMORY_PROFILE_DECAY_HALF_LIFE_DAYS", "45"))
             ),
             memory_profile_decay_floor=max(
-                0.0, min(1.0, float(os.getenv("AMARYLLIS_MEMORY_PROFILE_DECAY_FLOOR", "0.35")))
+                0.0, min(1.0, float(env.get("AMARYLLIS_MEMORY_PROFILE_DECAY_FLOOR", "0.35")))
             ),
             memory_profile_decay_min_delta=max(
-                0.0, float(os.getenv("AMARYLLIS_MEMORY_PROFILE_DECAY_MIN_DELTA", "0.05"))
+                0.0, float(env.get("AMARYLLIS_MEMORY_PROFILE_DECAY_MIN_DELTA", "0.05"))
             ),
-            provider_retry_attempts=max(1, int(os.getenv("AMARYLLIS_PROVIDER_RETRY_ATTEMPTS", "2"))),
-            provider_retry_backoff_sec=max(0.0, float(os.getenv("AMARYLLIS_PROVIDER_RETRY_BACKOFF_SEC", "0.5"))),
-            provider_retry_jitter_sec=max(0.0, float(os.getenv("AMARYLLIS_PROVIDER_RETRY_JITTER_SEC", "0.2"))),
+            provider_retry_attempts=max(1, int(env.get("AMARYLLIS_PROVIDER_RETRY_ATTEMPTS", "2"))),
+            provider_retry_backoff_sec=max(0.0, float(env.get("AMARYLLIS_PROVIDER_RETRY_BACKOFF_SEC", "0.5"))),
+            provider_retry_jitter_sec=max(0.0, float(env.get("AMARYLLIS_PROVIDER_RETRY_JITTER_SEC", "0.2"))),
             provider_circuit_failure_threshold=max(
-                1, int(os.getenv("AMARYLLIS_PROVIDER_CIRCUIT_FAILURE_THRESHOLD", "3"))
+                1, int(env.get("AMARYLLIS_PROVIDER_CIRCUIT_FAILURE_THRESHOLD", "3"))
             ),
             provider_circuit_cooldown_sec=max(
-                1.0, float(os.getenv("AMARYLLIS_PROVIDER_CIRCUIT_COOLDOWN_SEC", "20"))
+                1.0, float(env.get("AMARYLLIS_PROVIDER_CIRCUIT_COOLDOWN_SEC", "20"))
             ),
             cloud_rate_window_sec=max(
-                1.0, float(os.getenv("AMARYLLIS_CLOUD_RATE_WINDOW_SEC", "60"))
+                1.0, float(env.get("AMARYLLIS_CLOUD_RATE_WINDOW_SEC", "60"))
             ),
             cloud_rate_max_requests=max(
-                1, int(os.getenv("AMARYLLIS_CLOUD_RATE_MAX_REQUESTS", "30"))
+                1, int(env.get("AMARYLLIS_CLOUD_RATE_MAX_REQUESTS", "30"))
             ),
             cloud_budget_window_sec=max(
-                60.0, float(os.getenv("AMARYLLIS_CLOUD_BUDGET_WINDOW_SEC", "3600"))
+                60.0, float(env.get("AMARYLLIS_CLOUD_BUDGET_WINDOW_SEC", "3600"))
             ),
             cloud_budget_max_units=max(
-                100, int(os.getenv("AMARYLLIS_CLOUD_BUDGET_MAX_UNITS", "400000"))
+                100, int(env.get("AMARYLLIS_CLOUD_BUDGET_MAX_UNITS", "400000"))
             ),
             request_trace_logs_enabled=_parse_bool(
-                os.getenv("AMARYLLIS_REQUEST_TRACE_LOGS_ENABLED", "true")
+                env.get("AMARYLLIS_REQUEST_TRACE_LOGS_ENABLED", "true")
             ),
             security_profile=security_profile,
             security_allow_insecure_modes=security_allow_insecure_modes,
             auth_enabled=auth_enabled,
             auth_tokens=auth_tokens,
-            chat_max_messages=max(1, int(os.getenv("AMARYLLIS_CHAT_MAX_MESSAGES", "80"))),
-            chat_max_input_chars=max(2000, int(os.getenv("AMARYLLIS_CHAT_MAX_INPUT_CHARS", "50000"))),
-            chat_max_tokens=max(64, int(os.getenv("AMARYLLIS_CHAT_MAX_TOKENS", "4096"))),
+            chat_max_messages=max(1, int(env.get("AMARYLLIS_CHAT_MAX_MESSAGES", "80"))),
+            chat_max_input_chars=max(2000, int(env.get("AMARYLLIS_CHAT_MAX_INPUT_CHARS", "50000"))),
+            chat_max_tokens=max(64, int(env.get("AMARYLLIS_CHAT_MAX_TOKENS", "4096"))),
             autonomy_level=autonomy_level,
             tool_approval_enforcement=tool_approval_enforcement,
             tool_isolation_profile=tool_isolation_profile,
-            tool_budget_window_sec=max(1.0, float(os.getenv("AMARYLLIS_TOOL_BUDGET_WINDOW_SEC", "60"))),
+            tool_budget_window_sec=max(1.0, float(env.get("AMARYLLIS_TOOL_BUDGET_WINDOW_SEC", "60"))),
             tool_budget_max_calls_per_tool=max(
-                1, int(os.getenv("AMARYLLIS_TOOL_BUDGET_MAX_CALLS_PER_TOOL", "12"))
+                1, int(env.get("AMARYLLIS_TOOL_BUDGET_MAX_CALLS_PER_TOOL", "12"))
             ),
             tool_budget_max_total_calls=max(
-                1, int(os.getenv("AMARYLLIS_TOOL_BUDGET_MAX_TOTAL_CALLS", "40"))
+                1, int(env.get("AMARYLLIS_TOOL_BUDGET_MAX_TOTAL_CALLS", "40"))
             ),
             tool_budget_max_high_risk_calls=max(
-                1, int(os.getenv("AMARYLLIS_TOOL_BUDGET_MAX_HIGH_RISK_CALLS", "4"))
+                1, int(env.get("AMARYLLIS_TOOL_BUDGET_MAX_HIGH_RISK_CALLS", "4"))
             ),
             blocked_tools=blocked_tools,
             allowed_high_risk_tools=allowed_high_risk_tools,
             tool_python_exec_max_timeout_sec=max(
-                1, int(os.getenv("AMARYLLIS_TOOL_PYTHON_EXEC_MAX_TIMEOUT_SEC", "10"))
+                1, int(env.get("AMARYLLIS_TOOL_PYTHON_EXEC_MAX_TIMEOUT_SEC", "10"))
             ),
             tool_python_exec_max_code_chars=max(
-                100, int(os.getenv("AMARYLLIS_TOOL_PYTHON_EXEC_MAX_CODE_CHARS", "4000"))
+                100, int(env.get("AMARYLLIS_TOOL_PYTHON_EXEC_MAX_CODE_CHARS", "4000"))
             ),
             tool_filesystem_allow_write=_parse_bool(
-                os.getenv("AMARYLLIS_TOOL_FILESYSTEM_ALLOW_WRITE", "true")
+                env.get("AMARYLLIS_TOOL_FILESYSTEM_ALLOW_WRITE", "true")
             ),
             tool_sandbox_enabled=tool_sandbox_enabled,
             tool_sandbox_timeout_sec=max(
-                1, int(os.getenv("AMARYLLIS_TOOL_SANDBOX_TIMEOUT_SEC", "12"))
+                1, int(env.get("AMARYLLIS_TOOL_SANDBOX_TIMEOUT_SEC", "12"))
             ),
             tool_sandbox_max_cpu_sec=max(
-                1, int(os.getenv("AMARYLLIS_TOOL_SANDBOX_MAX_CPU_SEC", "6"))
+                1, int(env.get("AMARYLLIS_TOOL_SANDBOX_MAX_CPU_SEC", "6"))
             ),
             tool_sandbox_max_memory_mb=max(
-                64, int(os.getenv("AMARYLLIS_TOOL_SANDBOX_MAX_MEMORY_MB", "512"))
+                64, int(env.get("AMARYLLIS_TOOL_SANDBOX_MAX_MEMORY_MB", "512"))
             ),
             tool_sandbox_allow_network_tools=tool_sandbox_allow_network_tools,
             tool_sandbox_allowed_roots=tool_sandbox_allowed_roots,
-            plugin_signing_key=(os.getenv("AMARYLLIS_PLUGIN_SIGNING_KEY") or "").strip() or None,
-            plugin_signing_key_rotated_at=(os.getenv("AMARYLLIS_PLUGIN_SIGNING_KEY_ROTATED_AT") or "").strip() or None,
-            plugin_signing_key_expires_at=(os.getenv("AMARYLLIS_PLUGIN_SIGNING_KEY_EXPIRES_AT") or "").strip() or None,
+            plugin_signing_key=(env.get("AMARYLLIS_PLUGIN_SIGNING_KEY") or "").strip() or None,
+            plugin_signing_key_rotated_at=(env.get("AMARYLLIS_PLUGIN_SIGNING_KEY_ROTATED_AT") or "").strip() or None,
+            plugin_signing_key_expires_at=(env.get("AMARYLLIS_PLUGIN_SIGNING_KEY_EXPIRES_AT") or "").strip() or None,
             plugin_signing_mode=plugin_signing_mode,
             plugin_runtime_mode=plugin_runtime_mode,
             mcp_endpoints=mcp_endpoints,
-            mcp_timeout_sec=max(1.0, float(os.getenv("AMARYLLIS_MCP_TIMEOUT_SEC", "10"))),
-            mcp_failure_threshold=max(1, int(os.getenv("AMARYLLIS_MCP_FAILURE_THRESHOLD", "2"))),
-            mcp_quarantine_sec=max(1.0, float(os.getenv("AMARYLLIS_MCP_QUARANTINE_SEC", "60"))),
+            mcp_timeout_sec=max(1.0, float(env.get("AMARYLLIS_MCP_TIMEOUT_SEC", "10"))),
+            mcp_failure_threshold=max(1, int(env.get("AMARYLLIS_MCP_FAILURE_THRESHOLD", "2"))),
+            mcp_quarantine_sec=max(1.0, float(env.get("AMARYLLIS_MCP_QUARANTINE_SEC", "60"))),
             compliance_secret_rotation_max_age_days=max(
-                1, int(os.getenv("AMARYLLIS_SECRET_ROTATION_MAX_AGE_DAYS", "90"))
+                1, int(env.get("AMARYLLIS_SECRET_ROTATION_MAX_AGE_DAYS", "90"))
             ),
             compliance_secret_expiry_warning_days=max(
-                1, int(os.getenv("AMARYLLIS_SECRET_EXPIRY_WARNING_DAYS", "14"))
+                1, int(env.get("AMARYLLIS_SECRET_EXPIRY_WARNING_DAYS", "14"))
             ),
             compliance_identity_rotation_max_age_days=max(
-                1, int(os.getenv("AMARYLLIS_IDENTITY_ROTATION_MAX_AGE_DAYS", "30"))
+                1, int(env.get("AMARYLLIS_IDENTITY_ROTATION_MAX_AGE_DAYS", "30"))
             ),
             compliance_access_review_max_age_days=max(
-                1, int(os.getenv("AMARYLLIS_ACCESS_REVIEW_MAX_AGE_DAYS", "30"))
+                1, int(env.get("AMARYLLIS_ACCESS_REVIEW_MAX_AGE_DAYS", "30"))
             ),
             identity_path=identity_path,
         )

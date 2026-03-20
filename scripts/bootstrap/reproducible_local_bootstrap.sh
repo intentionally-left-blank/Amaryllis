@@ -41,6 +41,9 @@ echo "[bootstrap] installing deterministic dependencies from requirements.lock"
 echo "[bootstrap] validating dependency drift guard"
 "${VENV_PYTHON}" "${ROOT_DIR}/scripts/release/check_dependency_drift.py"
 
+echo "[bootstrap] validating runtime/SLO profile drift guard"
+"${VENV_PYTHON}" "${ROOT_DIR}/scripts/release/check_runtime_profile_drift.py"
+
 echo "[bootstrap] validating golden task suite schema"
 "${VENV_PYTHON}" "${ROOT_DIR}/scripts/eval/run_golden_tasks.py" --validate-only
 

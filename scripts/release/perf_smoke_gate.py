@@ -30,13 +30,23 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-p95-latency-ms",
         type=float,
-        default=float(os.getenv("AMARYLLIS_PERF_SMOKE_MAX_P95_MS", "350")),
+        default=float(
+            os.getenv(
+                "AMARYLLIS_PERF_SMOKE_MAX_P95_MS",
+                os.getenv("AMARYLLIS_PERF_BUDGET_MAX_P95_MS", "350"),
+            )
+        ),
         help="Maximum allowed p95 request latency in milliseconds.",
     )
     parser.add_argument(
         "--max-error-rate-pct",
         type=float,
-        default=float(os.getenv("AMARYLLIS_PERF_SMOKE_MAX_ERROR_RATE_PCT", "0")),
+        default=float(
+            os.getenv(
+                "AMARYLLIS_PERF_SMOKE_MAX_ERROR_RATE_PCT",
+                os.getenv("AMARYLLIS_PERF_BUDGET_MAX_ERROR_RATE_PCT", "0"),
+            )
+        ),
         help="Maximum allowed request error rate in percent.",
     )
     parser.add_argument(

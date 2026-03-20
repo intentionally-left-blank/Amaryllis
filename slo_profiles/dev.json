@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "profile": "dev",
+  "description": "Default development SLO profile used for local runtime and non-blocking iteration.",
+  "targets": {
+    "window_sec": 3600,
+    "request_availability_target": 0.995,
+    "request_latency_p95_ms_target": 1200,
+    "run_success_target": 0.98,
+    "min_request_samples": 50,
+    "min_run_samples": 20,
+    "incident_cooldown_sec": 300
+  },
+  "quality_budget": {
+    "error_budget_burn_rate_requests": 1.0,
+    "error_budget_burn_rate_runs": 1.0,
+    "perf_max_p95_latency_ms": 350,
+    "perf_max_error_rate_pct": 0
+  }
+}

@@ -34,6 +34,10 @@ jobs:
         run: |
           python scripts/release/check_dependency_drift.py
 
+      - name: Check runtime/SLO profile drift
+        run: |
+          python scripts/release/check_runtime_profile_drift.py
+
       - name: Check architectural import boundaries
         run: |
           python scripts/release/check_import_boundaries.py
