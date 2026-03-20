@@ -32,14 +32,14 @@ Deliver Developer Jarvis Alpha with reliable async missions, actionable diagnost
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
 | P1-C01 | done | Add run event stream endpoint | SSE/WebSocket run stream API | UI receives low-latency run status/checkpoint updates without polling loops |
-| P1-C02 | todo | Add mission diagnostics pane in macOS app | run details + warning chips UI | User can inspect timeline, warnings, and recommended actions from one screen |
+| P1-C02 | done | Add mission diagnostics pane in macOS app | run details + warning chips UI | User can inspect timeline, warnings, and recommended actions from one screen |
 
 ### Epic D - Voice Push-To-Talk Foundation
 
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
 | P1-D01 | done | Add voice session contract | runtime voice session API schema | Start/stop PTT session with explicit state transitions and telemetry |
-| P1-D02 | todo | Integrate local STT adapter (pluggable) | `voice/stt_adapter.py` + tests | Adapter interface supports at least one local backend with graceful unavailable mode |
+| P1-D02 | done | Integrate local STT adapter (pluggable) | `voice/stt_adapter.py` + tests | Adapter interface supports at least one local backend with graceful unavailable mode |
 
 ## Current Sprint (Sprint P1-S1)
 
@@ -52,13 +52,17 @@ Deliver Developer Jarvis Alpha with reliable async missions, actionable diagnost
 | P1-B02 | done | filesystem patch preview/approve/apply workflow with structured diff |
 | P1-B03 | done | provider-agnostic browser action adapter contract + stub tool integration |
 | P1-C01 | done | event-stream contract for mission HUD |
+| P1-C02 | done | macOS mission diagnostics pane with warning chips, signals, and recommended actions |
 | P1-D01 | done | voice session API contract with explicit state transitions and telemetry hooks |
+| P1-D02 | done | local STT adapter contract + runtime voice transcribe API with graceful unavailable mode |
 
 ## Next Checkpoint
 - Deliver sprint result with:
   - run replay filter API contract with preset/stage/status/failure/retryable selectors,
   - run SSE event stream contract for mission HUD with ownership enforcement and regression tests,
+  - macOS mission diagnostics pane integrating run timeline + warnings + recommended actions in one screen,
   - terminal action receipt persistence with owner-scoped retrieval,
   - filesystem patch preview/approval flow with structured diff and apply gate,
   - provider-agnostic browser action adapter contract with stub runtime implementation,
-  - voice session contract (`start/get/list/stop`) with explicit state transitions and telemetry emission.
+  - voice session contract (`start/get/list/stop`) with explicit state transitions and telemetry emission,
+  - pluggable local STT adapter with graceful unavailable mode and runtime transcribe API.

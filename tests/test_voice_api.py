@@ -13,6 +13,54 @@ try:
 except Exception:  # pragma: no cover - dependency may be unavailable
     TestClient = None  # type: ignore[assignment]
 
+from voice.stt_adapter import STTTranscriptionRequest, STTTranscriptionResult
+
+
+class _FakeSuccessSTTAdapter:
+    def __init__(self) -> None:
+        self.last_request: STTTranscriptionRequest | None = None
+
+    def describe(self) -> dict[str, object]:
+        return {
+            "backend": "test-success",
+            "provider": "fake-stt-success",
+            "available": True,
+            "supports_local": True,
+        }
+
+    def transcribe(self, request: STTTranscriptionRequest) -> STTTranscriptionResult:
+        self.last_request = request
+        return STTTranscriptionResult(
+            ok=True,
+            provider="fake-stt-success",
+            text="hello local stt",
+            language=request.language or "en",
+            duration_ms=12,
+            metadata={"test": True},
+        )
+
+
+class _FakeUnavailableSTTAdapter:
+    def describe(self) -> dict[str, object]:
+        return {
+            "backend": "test-unavailable",
+            "provider": "fake-stt-unavailable",
+            "available": False,
+            "reason": "test adapter unavailable",
+            "supports_local": True,
+        }
+
+    def transcribe(self, request: STTTranscriptionRequest) -> STTTranscriptionResult:
+        _ = request
+        return STTTranscriptionResult(
+            ok=False,
+            provider="fake-stt-unavailable",
+            text="",
+            unavailable=True,
+            error="test adapter unavailable",
+            duration_ms=1,
+        )
+
 
 @unittest.skipIf(TestClient is None, "fastapi dependency is not available")
 class VoiceAPITests(unittest.TestCase):
@@ -156,6 +204,103 @@ class VoiceAPITests(unittest.TestCase):
         service_denied = self.client.get("/voice/sessions", headers=self._auth("service-token"))
         self.assertEqual(service_denied.status_code, 403)
         self.assertEqual(service_denied.json()["error"]["type"], "permission_denied")
+
+    def test_voice_stt_health_and_graceful_unavailable_transcribe(self) -> None:
+        services = self.server_module.app.state.services
+        original_adapter = services.stt_adapter
+        services.stt_adapter = _FakeUnavailableSTTAdapter()
+        try:
+            health = self.client.get("/voice/stt/health", headers=self._auth("user-token"))
+            self.assertEqual(health.status_code, 200)
+            self.assertFalse(bool(health.json().get("stt", {}).get("available")))
+
+            transcribe = self.client.post(
+                "/voice/stt/transcribe",
+                headers=self._auth("user-token"),
+                json={
+                    "user_id": "user-1",
+                    "audio_base64": "aGVsbG8=",
+                    "language": "en",
+                },
+            )
+            self.assertEqual(transcribe.status_code, 200)
+            payload = transcribe.json()
+            transcription = payload.get("transcription", {})
+            self.assertFalse(bool(transcription.get("ok")))
+            self.assertTrue(bool(transcription.get("unavailable")))
+            self.assertTrue(str(transcription.get("error", "")).strip())
+            self.assertTrue(bool(payload.get("action_receipt", {}).get("signature")))
+        finally:
+            services.stt_adapter = original_adapter
+
+    def test_voice_stt_transcribe_enforces_session_owner(self) -> None:
+        services = self.server_module.app.state.services
+        original_adapter = services.stt_adapter
+        fake_adapter = _FakeSuccessSTTAdapter()
+        services.stt_adapter = fake_adapter
+        try:
+            started = self.client.post(
+                "/voice/sessions/start",
+                headers=self._auth("user-token"),
+                json={"user_id": "user-1", "mode": "ptt"},
+            )
+            self.assertEqual(started.status_code, 200)
+            session_id = str(started.json().get("voice_session", {}).get("id"))
+            self.assertTrue(session_id)
+
+            foreign = self.client.post(
+                "/voice/stt/transcribe",
+                headers=self._auth("user2-token"),
+                json={
+                    "session_id": session_id,
+                    "audio_base64": "aGVsbG8=",
+                    "language": "en",
+                },
+            )
+            self.assertEqual(foreign.status_code, 403)
+            self.assertEqual(foreign.json()["error"]["type"], "permission_denied")
+
+            missing = self.client.post(
+                "/voice/stt/transcribe",
+                headers=self._auth("user-token"),
+                json={
+                    "session_id": "voice-missing",
+                    "audio_base64": "aGVsbG8=",
+                },
+            )
+            self.assertEqual(missing.status_code, 404)
+            self.assertEqual(missing.json()["error"]["type"], "not_found")
+
+            own = self.client.post(
+                "/voice/stt/transcribe",
+                headers=self._auth("user-token"),
+                json={
+                    "session_id": session_id,
+                    "audio_base64": "aGVsbG8=",
+                    "language": "en",
+                    "metadata": {"source": "voice-api-test"},
+                },
+            )
+            self.assertEqual(own.status_code, 200)
+            payload = own.json()
+            transcription = payload.get("transcription", {})
+            self.assertTrue(bool(transcription.get("ok")))
+            self.assertEqual(str(transcription.get("text")), "hello local stt")
+            self.assertTrue(bool(payload.get("action_receipt", {}).get("signature")))
+
+            self.assertIsNotNone(fake_adapter.last_request)
+            assert fake_adapter.last_request is not None
+            self.assertEqual(fake_adapter.last_request.language, "en")
+            self.assertEqual(
+                str(fake_adapter.last_request.metadata.get("session_id")),
+                session_id,
+            )
+            self.assertEqual(
+                str(fake_adapter.last_request.metadata.get("user_id")),
+                "user-1",
+            )
+        finally:
+            services.stt_adapter = original_adapter
 
 
 if __name__ == "__main__":

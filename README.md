@@ -56,6 +56,7 @@ Implemented in this version:
 - lease/CAS ownership for agent runs (single-owner execution under concurrent workers)
 - compact run diagnostics endpoint for mission postmortem (`GET /agents/runs/{run_id}/diagnostics`)
 - voice push-to-talk session contract with explicit state transitions (`created -> listening -> stopping -> stopped`)
+- pluggable local STT adapter layer (`whisper_python` backend + graceful unavailable mode)
 - typed planner step execution with step contracts (pre/post conditions), verifier, retry and replan
 - modular step executor package (`tasks/execution/step_executors.py`) separated from run orchestration
 - production-grade backup and DR foundation (scheduled backups, retention, verification, restore drills)
@@ -214,7 +215,8 @@ Service backup/DR endpoints:
 │   ├── tool_executor.py
 │   └── tool_registry.py
 ├── voice
-│   └── session_manager.py
+│   ├── session_manager.py
+│   └── stt_adapter.py
 ├── LICENSE
 ├── README.md
 └── requirements.txt
@@ -595,6 +597,40 @@ curl -X POST "http://localhost:8000/voice/sessions/<session_id>/stop" \
   -d '{"reason":"user_done"}'
 ```
 
+Check STT adapter health:
+
+```bash
+curl "http://localhost:8000/voice/stt/health"
+```
+
+Transcribe with STT adapter:
+
+```bash
+curl -X POST "http://localhost:8000/voice/stt/transcribe" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id":"user-001",
+    "audio_path":"/absolute/path/to/audio.wav",
+    "language":"en"
+  }'
+```
+
+Transcribe base64 audio bound to existing voice session:
+
+```bash
+curl -X POST "http://localhost:8000/voice/stt/transcribe" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id":"<session_id>",
+    "audio_base64":"<base64-audio>",
+    "language":"en"
+  }'
+```
+
+Voice STT env vars:
+- `AMARYLLIS_VOICE_STT_BACKEND` (default `whisper_python`; supported: `whisper_python`, `none`)
+- `AMARYLLIS_VOICE_STT_MODEL` (default `base`)
+
 ## Agent API
 
 ### Create agent
@@ -848,6 +884,7 @@ Implemented now:
   - live polling until terminal state
   - cancel/resume actions
   - checkpoint timeline and result preview
+  - mission diagnostics pane with warning chips, signal badges, and recommended actions
   - replay loader with attempt summary and event timeline
   - replay timeline filters with presets (`errors`, `tools`, `verify`), pagination, side-by-side attempt diff, and diagnostic package export
 

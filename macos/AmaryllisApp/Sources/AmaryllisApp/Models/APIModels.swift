@@ -739,6 +739,78 @@ struct APIAgentRunReplayResponse: Codable {
     }
 }
 
+struct APIAgentRunDiagnosticsSignals: Codable {
+    let blockedIssues: Int
+    let toolCallsTotal: Int
+    let toolCallFailures: Int
+    let retryCount: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case blockedIssues = "blocked_issues"
+        case toolCallsTotal = "tool_calls_total"
+        case toolCallFailures = "tool_call_failures"
+        case retryCount = "retry_count"
+    }
+}
+
+struct APIAgentRunDiagnosticsDetails: Codable {
+    let warnings: [String]
+    let recommendedActions: [String]
+    let signals: APIAgentRunDiagnosticsSignals
+
+    private enum CodingKeys: String, CodingKey {
+        case warnings
+        case recommendedActions = "recommended_actions"
+        case signals
+    }
+}
+
+struct APIAgentRunTimelineSummary: Codable {
+    let checkpointCount: Int
+    let stageBreakdown: [String: Int]
+
+    private enum CodingKeys: String, CodingKey {
+        case checkpointCount = "checkpoint_count"
+        case stageBreakdown = "stage_breakdown"
+    }
+}
+
+struct APIAgentRunDiagnosticsPayload: Codable {
+    let runId: String
+    let status: String
+    let stopReason: String
+    let failureClass: String
+    let attempts: Int
+    let maxAttempts: Int
+    let metrics: [String: JSONValue]
+    let issueSummary: [String: JSONValue]
+    let timelineSummary: APIAgentRunTimelineSummary
+    let diagnostics: APIAgentRunDiagnosticsDetails
+
+    private enum CodingKeys: String, CodingKey {
+        case runId = "run_id"
+        case status
+        case stopReason = "stop_reason"
+        case failureClass = "failure_class"
+        case attempts
+        case maxAttempts = "max_attempts"
+        case metrics
+        case issueSummary = "issue_summary"
+        case timelineSummary = "timeline_summary"
+        case diagnostics
+    }
+}
+
+struct APIAgentRunDiagnosticsResponse: Codable {
+    let diagnostics: APIAgentRunDiagnosticsPayload
+    let requestId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case diagnostics
+        case requestId = "request_id"
+    }
+}
+
 struct APICreateAutomationRequest: Encodable {
     let agentId: String
     let userId: String

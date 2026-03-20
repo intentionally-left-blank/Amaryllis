@@ -26,6 +26,9 @@ struct AgentsView: View {
     @State private var selectedRunReplay: APIAgentRunReplayPayload?
     @State private var replayStatusMessage: String = "Replay not loaded."
     @State private var isLoadingReplay: Bool = false
+    @State private var selectedRunDiagnostics: APIAgentRunDiagnosticsPayload?
+    @State private var diagnosticsStatusMessage: String = "Diagnostics not loaded."
+    @State private var isLoadingDiagnostics: Bool = false
     @State private var replaySearchQuery: String = ""
     @State private var replayStageFilter: String = "all"
     @State private var replayAttemptFilter: String = "all"
@@ -95,6 +98,8 @@ struct AgentsView: View {
             guard let run = selectedRun else {
                 selectedRunReplay = nil
                 replayStatusMessage = "Replay not loaded."
+                selectedRunDiagnostics = nil
+                diagnosticsStatusMessage = "Diagnostics not loaded."
                 return
             }
             if selectedRunReplay?.runId != run.id {
@@ -107,6 +112,10 @@ struct AgentsView: View {
                 replayCompareLeftAttempt = "auto"
                 replayCompareRightAttempt = "auto"
                 replayTimelineLimit = replayTimelinePageSize
+            }
+            if selectedRunDiagnostics?.runId != run.id {
+                selectedRunDiagnostics = nil
+                diagnosticsStatusMessage = "Diagnostics not loaded for selected run. Press Load Diagnostics."
             }
         }
         .onChange(of: inboxUnreadOnly) { _ in
@@ -191,6 +200,8 @@ struct AgentsView: View {
                             selectedRunID = nil
                             selectedRunReplay = nil
                             replayStatusMessage = "Replay not loaded."
+                            selectedRunDiagnostics = nil
+                            diagnosticsStatusMessage = "Diagnostics not loaded."
                             replaySearchQuery = ""
                             replayStageFilter = "all"
                             replayAttemptFilter = "all"
@@ -444,11 +455,23 @@ struct AgentsView: View {
                             }
                             .buttonStyle(AmaryllisSecondaryButtonStyle())
                             .disabled(isLoadingReplay || isRunActionLoading)
+                            Button {
+                                Task { await loadDiagnostics(runID: run.id) }
+                            } label: {
+                                if isLoadingDiagnostics {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Text("Load Diagnostics")
+                                }
+                            }
+                            .buttonStyle(AmaryllisSecondaryButtonStyle())
+                            .disabled(isLoadingDiagnostics || isRunActionLoading)
                             Button("Export Package") {
                                 Task { await exportDiagnosticPackage(run: run) }
                             }
                             .buttonStyle(AmaryllisSecondaryButtonStyle())
-                            .disabled(isLoadingReplay)
+                            .disabled(isLoadingReplay || isLoadingDiagnostics)
                         }
                         Text("id: \(run.id)")
                             .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
@@ -467,6 +490,114 @@ struct AgentsView: View {
                         Text(replayStatusMessage)
                             .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
                             .foregroundStyle(AmaryllisTheme.textSecondary)
+                        Text(diagnosticsStatusMessage)
+                            .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                            .foregroundStyle(AmaryllisTheme.textSecondary)
+
+                        if let diagnostics = selectedRunDiagnostics, diagnostics.runId == run.id {
+                            Text("Mission Diagnostics")
+                                .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                                .foregroundStyle(AmaryllisTheme.textSecondary)
+                            Text(
+                                "status: \(diagnostics.status) | failure: \(diagnostics.failureClass) | stop: \(diagnostics.stopReason)"
+                            )
+                            .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                            .lineLimit(1)
+                            Text(
+                                "attempts: \(diagnostics.attempts)/\(diagnostics.maxAttempts) | checkpoints: \(diagnostics.timelineSummary.checkpointCount)"
+                            )
+                            .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                            .lineLimit(1)
+                            if !diagnostics.timelineSummary.stageBreakdown.isEmpty {
+                                Text("stages: \(renderStageCounts(diagnostics.timelineSummary.stageBreakdown))")
+                                    .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                    .foregroundStyle(AmaryllisTheme.textSecondary)
+                                    .lineLimit(2)
+                            }
+
+                            Text("Warnings")
+                                .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                                .foregroundStyle(AmaryllisTheme.textSecondary)
+                            if diagnostics.diagnostics.warnings.isEmpty {
+                                Text("No warning signals.")
+                                    .font(AmaryllisTheme.bodyFont(size: 10, weight: .medium))
+                                    .foregroundStyle(Color.green)
+                            } else {
+                                ScrollView(.horizontal) {
+                                    HStack(spacing: 6) {
+                                        ForEach(diagnostics.diagnostics.warnings, id: \.self) { warning in
+                                            Text(diagnosticsWarningLabel(warning))
+                                                .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                                .foregroundStyle(diagnosticsWarningColor(warning))
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 4)
+                                                .background(
+                                                    RoundedRectangle(cornerRadius: 4)
+                                                        .fill(diagnosticsWarningColor(warning).opacity(0.12))
+                                                )
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 4)
+                                                        .stroke(diagnosticsWarningColor(warning).opacity(0.45), lineWidth: 1)
+                                                )
+                                        }
+                                    }
+                                }
+                                .frame(maxHeight: 32)
+                            }
+
+                            Text("Signals")
+                                .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                                .foregroundStyle(AmaryllisTheme.textSecondary)
+                            ScrollView(.horizontal) {
+                                HStack(spacing: 8) {
+                                    diagnosticsSignalBadge(
+                                        "blocked issues",
+                                        diagnostics.diagnostics.signals.blockedIssues,
+                                        tint: diagnostics.diagnostics.signals.blockedIssues > 0 ? AmaryllisTheme.accent : .green
+                                    )
+                                    diagnosticsSignalBadge(
+                                        "tool calls",
+                                        diagnostics.diagnostics.signals.toolCallsTotal,
+                                        tint: .blue
+                                    )
+                                    diagnosticsSignalBadge(
+                                        "tool failures",
+                                        diagnostics.diagnostics.signals.toolCallFailures,
+                                        tint: diagnostics.diagnostics.signals.toolCallFailures > 0 ? AmaryllisTheme.accent : .green
+                                    )
+                                    diagnosticsSignalBadge(
+                                        "retry count",
+                                        diagnostics.diagnostics.signals.retryCount,
+                                        tint: diagnostics.diagnostics.signals.retryCount > 0 ? .orange : .green
+                                    )
+                                }
+                            }
+                            .frame(maxHeight: 56)
+
+                            Text("Recommended Actions")
+                                .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                                .foregroundStyle(AmaryllisTheme.textSecondary)
+                            if diagnostics.diagnostics.recommendedActions.isEmpty {
+                                Text("No explicit corrective action provided.")
+                                    .font(AmaryllisTheme.bodyFont(size: 10, weight: .medium))
+                                    .foregroundStyle(AmaryllisTheme.textSecondary)
+                            } else {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    ForEach(diagnostics.diagnostics.recommendedActions, id: \.self) { action in
+                                        Text("• \(action)")
+                                            .font(AmaryllisTheme.bodyFont(size: 10, weight: .medium))
+                                            .foregroundStyle(AmaryllisTheme.textPrimary)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .lineLimit(3)
+                                    }
+                                }
+                                .padding(6)
+                                .background(AmaryllisTheme.surfaceAlt)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                            }
+                        }
 
                         if let replay = selectedRunReplay, replay.runId == run.id {
                             let filteredTimeline = filteredReplayTimeline(replay)
@@ -1115,6 +1246,8 @@ struct AgentsView: View {
             selectedRunReplay = nil
             runStatusMessage = "No agent selected."
             replayStatusMessage = "Replay not loaded."
+            selectedRunDiagnostics = nil
+            diagnosticsStatusMessage = "Diagnostics not loaded."
             replaySearchQuery = ""
             replayStageFilter = "all"
             replayAttemptFilter = "all"
@@ -1187,6 +1320,25 @@ struct AgentsView: View {
         }
     }
 
+    private func loadDiagnostics(runID: String, silent: Bool = false) async {
+        isLoadingDiagnostics = true
+        defer { isLoadingDiagnostics = false }
+
+        do {
+            let diagnostics = try await appState.apiClient.getAgentRunDiagnostics(runId: runID)
+            selectedRunDiagnostics = diagnostics
+            diagnosticsStatusMessage =
+                "Diagnostics loaded: \(diagnostics.diagnostics.warnings.count) warnings, \(diagnostics.diagnostics.recommendedActions.count) actions."
+            appState.clearError()
+        } catch {
+            selectedRunDiagnostics = nil
+            diagnosticsStatusMessage = "Diagnostics load failed."
+            if !silent {
+                appState.lastError = error.localizedDescription
+            }
+        }
+    }
+
     private func pollRunUntilTerminal(runID: String, timeoutSec: Double) async {
         let terminalStates: Set<String> = ["succeeded", "failed", "canceled"]
         let maxTicks = max(1, Int(timeoutSec / 1.2))
@@ -1211,6 +1363,7 @@ struct AgentsView: View {
                         chatHistory.append("RUN CANCELED")
                     }
                     await loadReplay(runID: run.id, silent: true)
+                    await loadDiagnostics(runID: run.id, silent: true)
                     return
                 }
             } catch {
@@ -1318,6 +1471,36 @@ struct AgentsView: View {
         default:
             return AmaryllisTheme.textSecondary
         }
+    }
+
+    private func diagnosticsWarningLabel(_ warning: String) -> String {
+        warning.replacingOccurrences(of: "_", with: " ")
+    }
+
+    private func diagnosticsWarningColor(_ warning: String) -> Color {
+        switch warning {
+        case "run_terminal_non_success", "budget_exceeded", "issues_blocked", "tool_failures_detected":
+            return AmaryllisTheme.accent
+        case "transient_infra_failures", "max_attempts_exhausted", "run_required_retries":
+            return .orange
+        default:
+            return AmaryllisTheme.textSecondary
+        }
+    }
+
+    private func diagnosticsSignalBadge(_ label: String, _ value: Int, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                .foregroundStyle(AmaryllisTheme.textSecondary)
+            Text(String(value))
+                .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
+                .foregroundStyle(tint)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(AmaryllisTheme.surfaceAlt)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
     private func scheduleDebouncedInboxRefresh() {

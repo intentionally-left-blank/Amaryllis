@@ -57,6 +57,7 @@ from tools.tool_budget import ToolBudgetGuard
 from tools.tool_executor import ToolExecutor
 from tools.tool_registry import ToolRegistry
 from voice.session_manager import VoiceSessionManager
+from voice.stt_adapter import STTAdapter, create_stt_adapter_from_env
 
 
 @dataclass
@@ -69,6 +70,7 @@ class ServiceContainer:
     tool_registry: ToolRegistry
     browser_adapter: BrowserActionAdapter
     voice_session_manager: VoiceSessionManager
+    stt_adapter: STTAdapter
     tool_executor: ToolExecutor
     meta_controller: MetaController
     planner: Planner
@@ -226,6 +228,7 @@ def create_services() -> ServiceContainer:
         telemetry_emitter=telemetry.emit,
     )
     voice_session_manager = VoiceSessionManager(telemetry_emitter=telemetry.emit)
+    stt_adapter = create_stt_adapter_from_env()
 
     model_manager = ModelManager(config=config, database=database)
 
@@ -342,6 +345,7 @@ def create_services() -> ServiceContainer:
         tool_registry=tool_registry,
         browser_adapter=browser_adapter,
         voice_session_manager=voice_session_manager,
+        stt_adapter=stt_adapter,
         tool_executor=tool_executor,
         meta_controller=meta_controller,
         planner=planner,
