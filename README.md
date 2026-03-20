@@ -1274,7 +1274,7 @@ Run first 5 tasks against local runtime:
 python3 scripts/eval/run_golden_tasks.py --max-tasks 5 --strict
 ```
 
-Blocking performance smoke gate (p95 latency + error-rate budget):
+Blocking performance smoke gate (chat/run/voice/stream critical paths + p95/error-rate budget):
 
 ```bash
 python3 scripts/release/perf_smoke_gate.py --iterations 3 --max-p95-latency-ms 350 --max-error-rate-pct 0

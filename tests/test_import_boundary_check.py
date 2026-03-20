@@ -38,6 +38,7 @@ class ImportBoundaryCheckTests(unittest.TestCase):
             {
                 "agents/runner.py": "from storage.database import Database\n",
                 "api/chat.py": "from runtime.auth import auth_context_from_request\n",
+                "kernel/contracts.py": "from typing import Any\n",
                 "storage/repo.py": "from storage.migrations import apply_migrations\n",
             }
         )
@@ -62,6 +63,15 @@ class ImportBoundaryCheckTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertIn("forbidden import orchestration->api", proc.stderr)
 
+    def test_fails_for_api_to_orchestration_import(self) -> None:
+        proc = self._run(
+            {
+                "api/chat.py": "from tasks.task_executor import TaskExecutor\n",
+            }
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("forbidden import api->orchestration", proc.stderr)
+
     def test_fails_for_storage_to_orchestration_import(self) -> None:
         proc = self._run(
             {
@@ -70,6 +80,15 @@ class ImportBoundaryCheckTests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 1)
         self.assertIn("forbidden import storage->orchestration", proc.stderr)
+
+    def test_fails_for_kernel_to_orchestration_import(self) -> None:
+        proc = self._run(
+            {
+                "kernel/contracts.py": "from agents.agent import Agent\n",
+            }
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("forbidden import kernel->orchestration", proc.stderr)
 
 
 if __name__ == "__main__":

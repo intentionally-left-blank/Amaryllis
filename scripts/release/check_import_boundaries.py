@@ -11,17 +11,39 @@ import sys
 LAYER_PACKAGES: dict[str, tuple[str, ...]] = {
     "api": ("api",),
     "orchestration": ("agents", "automation", "controller", "planner", "tasks"),
+    "kernel": ("kernel",),
     "storage": ("storage",),
+    "ui": ("macos",),
 }
 
 FORBIDDEN_LAYER_IMPORTS: set[tuple[str, str]] = {
     ("api", "storage"),
+    ("api", "orchestration"),
     ("orchestration", "api"),
     ("storage", "api"),
     ("storage", "orchestration"),
+    ("storage", "kernel"),
+    ("kernel", "api"),
+    ("kernel", "orchestration"),
+    ("kernel", "storage"),
+    ("kernel", "ui"),
+    ("ui", "api"),
+    ("ui", "orchestration"),
+    ("ui", "kernel"),
+    ("ui", "storage"),
 }
 
-CHECKED_LAYER_DIRS: tuple[str, ...] = ("api", "agents", "automation", "controller", "planner", "tasks", "storage")
+CHECKED_LAYER_DIRS: tuple[str, ...] = (
+    "api",
+    "agents",
+    "automation",
+    "controller",
+    "planner",
+    "tasks",
+    "kernel",
+    "storage",
+    "macos",
+)
 
 
 @dataclass(frozen=True)

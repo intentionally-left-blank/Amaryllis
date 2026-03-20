@@ -25,7 +25,7 @@ Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reprodu
 | P2-A01 | done | Define cognitive kernel module contracts | ADR + `kernel/` contract interfaces | Planner/executor/memory/tool-router contracts are versioned and consumed via interfaces only |
 | P2-A02 | todo | Extract orchestration core into modular kernel package | `kernel/orchestration/` + adapters | Runtime/API layers call kernel adapters, not internal orchestration classes directly |
 | P2-A03 | todo | Add backend cognition adapter abstraction (LLM/post-LLM swappable) | backend adapter contract + compatibility tests | At least two backends pass same contract suite with no API-layer changes |
-| P2-A04 | todo | Enforce architecture boundaries in CI for kernel stack | boundary-check rules + workflow gate | CI blocks forbidden imports across API/kernel/storage/UI layers |
+| P2-A04 | done | Enforce architecture boundaries in CI for kernel stack | boundary-check rules + workflow gate | CI blocks forbidden imports across API/kernel/storage/UI layers |
 
 ### Epic B - Deterministic Reproducibility Chain
 
@@ -41,7 +41,7 @@ Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reprodu
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
 | P2-C01 | done | Version SLO profiles and quality budgets | `slo_profiles/*.json` + docs | SLO targets and error-budget policy are versioned and environment-scoped |
-| P2-C02 | todo | Add blocking perf gate for critical paths (chat/run/voice/stream) | CI perf workflow + thresholds | PR fails on p95/error regressions above budget for critical paths |
+| P2-C02 | done | Add blocking perf gate for critical paths (chat/run/voice/stream) | CI perf workflow + thresholds | PR fails on p95/error regressions above budget for critical paths |
 | P2-C03 | todo | Add fault-injection reliability gate | chaos test suite + report | Retry/recovery behavior is validated for provider/tool/network fault classes |
 | P2-C04 | todo | Add concurrency/load gate for mission queue | load test harness + SLO assertions | Queue stability and success-rate gates pass at target concurrent load |
 | P2-C05 | todo | Add SLO burn-rate regression gate for nightly runs | nightly burn-rate trend job | Nightly pipeline flags sustained error-budget burn anomalies automatically |
@@ -68,10 +68,10 @@ Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reprodu
 | ID | Status | Scope |
 |---|---|---|
 | P2-A01 | done | cognitive kernel interface contracts and ADR |
-| P2-A04 | todo | kernel boundary rules + CI enforcement |
+| P2-A04 | done | kernel boundary rules + CI enforcement |
 | P2-B02 | done | runtime profile schema (`dev/ci/release`) and fail-fast validation |
 | P2-C01 | done | versioned SLO profiles and quality budget policy |
-| P2-C02 | todo | blocking perf gate for chat/run/voice/stream critical paths |
+| P2-C02 | done | blocking perf gate for chat/run/voice/stream critical paths |
 | P2-E01 | todo | Linux parity matrix and acceptance smoke gates |
 
 ## Next Checkpoint
