@@ -811,6 +811,36 @@ struct APIAgentRunDiagnosticsResponse: Codable {
     }
 }
 
+struct APIAgentRunStreamEvent: Codable, Identifiable {
+    let event: String
+    let runId: String
+    let status: String?
+    let attempts: Int?
+    let maxAttempts: Int?
+    let checkpointCount: Int?
+    let nextIndex: Int?
+    let index: Int?
+    let checkpoint: [String: JSONValue]?
+    let message: String?
+
+    var id: String {
+        "\(event):\(index ?? nextIndex ?? checkpointCount ?? -1):\(runId)"
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case event
+        case runId = "run_id"
+        case status
+        case attempts
+        case maxAttempts = "max_attempts"
+        case checkpointCount = "checkpoint_count"
+        case nextIndex = "next_index"
+        case index
+        case checkpoint
+        case message
+    }
+}
+
 struct APICreateAutomationRequest: Encodable {
     let agentId: String
     let userId: String

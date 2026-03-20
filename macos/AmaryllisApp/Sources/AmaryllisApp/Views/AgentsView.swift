@@ -1230,7 +1230,7 @@ struct AgentsView: View {
             selectedRunID = run.id
             runStatusMessage = "Run queued: \(run.id)"
             await refreshRuns()
-            await pollRunUntilTerminal(runID: run.id, timeoutSec: 120)
+            await watchRunUntilTerminal(runID: run.id, timeoutSec: 120)
             appState.clearError()
         } catch {
             chatHistory.append("RUN ERROR: \(error.localizedDescription)")
@@ -1339,35 +1339,131 @@ struct AgentsView: View {
         }
     }
 
+    private func watchRunUntilTerminal(runID: String, timeoutSec: Double) async {
+        runStatusMessage = "Run \(runID) live stream started..."
+        do {
+            try await streamRunUntilTerminal(runID: runID, timeoutSec: timeoutSec)
+        } catch {
+            runStatusMessage = "Run stream interrupted, switching to polling fallback..."
+            await pollRunUntilTerminal(runID: runID, timeoutSec: timeoutSec)
+        }
+    }
+
+    private func streamRunUntilTerminal(runID: String, timeoutSec: Double) async throws {
+        let startedAt = Date()
+        var fromIndex = 0
+
+        while true {
+            let elapsedSec = Date().timeIntervalSince(startedAt)
+            let remainingSec = timeoutSec - elapsedSec
+            if remainingSec <= 0 {
+                runStatusMessage = "Run watch timeout reached. Use Refresh Runs."
+                return
+            }
+
+            let streamTimeoutSec = min(30.0, max(2.0, remainingSec))
+            let stream = appState.apiClient.streamAgentRunEvents(
+                runId: runID,
+                fromIndex: fromIndex,
+                pollIntervalMs: 250,
+                timeoutSec: streamTimeoutSec,
+                includeSnapshot: true,
+                includeHeartbeat: false
+            )
+
+            var reachedTerminal = false
+            for try await event in stream {
+                if let nextIndex = event.nextIndex {
+                    fromIndex = max(fromIndex, nextIndex)
+                }
+                if let index = event.index {
+                    fromIndex = max(fromIndex, index)
+                }
+                let done = try await handleRunStreamEvent(event, runID: runID)
+                if done {
+                    reachedTerminal = true
+                    break
+                }
+            }
+
+            if reachedTerminal {
+                return
+            }
+        }
+    }
+
+    private func handleRunStreamEvent(_ event: APIAgentRunStreamEvent, runID: String) async throws -> Bool {
+        let eventType = event.event.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let status = event.status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "unknown"
+
+        switch eventType {
+        case "snapshot":
+            let checkpoints = event.checkpointCount ?? event.nextIndex ?? 0
+            runStatusMessage = "Run \(runID) status: \(status) | checkpoints \(checkpoints)"
+            _ = await fetchRunForWatch(runID: runID, silent: true)
+            return false
+        case "checkpoint":
+            let index = event.index ?? event.nextIndex ?? event.checkpointCount ?? 0
+            runStatusMessage = "Run \(runID) status: \(status) | event \(index)"
+            if index > 0, index % 8 == 0 {
+                _ = await fetchRunForWatch(runID: runID, silent: true)
+            }
+            return false
+        case "heartbeat":
+            runStatusMessage = "Run \(runID) status: \(status)"
+            return false
+        case "timeout":
+            runStatusMessage = "Run stream window elapsed, reconnecting..."
+            return false
+        case "done":
+            if let run = await fetchRunForWatch(runID: runID, silent: true) {
+                await handleTerminalRun(run)
+            } else {
+                runStatusMessage = "Run \(runID) reached terminal status: \(status)"
+                await loadReplay(runID: runID, silent: true)
+                await loadDiagnostics(runID: runID, silent: true)
+            }
+            return true
+        case "error":
+            let message = event.message?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = (message?.isEmpty == false) ? message! : "Run stream error."
+            throw NSError(
+                domain: "amaryllis.run.stream",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: text]
+            )
+        default:
+            return false
+        }
+    }
+
+    private func fetchRunForWatch(runID: String, silent: Bool) async -> APIAgentRunRecord? {
+        do {
+            let run = try await appState.apiClient.getAgentRun(runId: runID)
+            upsertRun(run)
+            selectedRunID = run.id
+            return run
+        } catch {
+            if !silent {
+                appState.lastError = error.localizedDescription
+            }
+            return nil
+        }
+    }
+
     private func pollRunUntilTerminal(runID: String, timeoutSec: Double) async {
         let terminalStates: Set<String> = ["succeeded", "failed", "canceled"]
         let maxTicks = max(1, Int(timeoutSec / 1.2))
 
         for _ in 0..<maxTicks {
-            do {
-                let run = try await appState.apiClient.getAgentRun(runId: runID)
-                upsertRun(run)
-                selectedRunID = run.id
-                runStatusMessage = "Run \(run.id) status: \(run.status)"
+            guard let run = await fetchRunForWatch(runID: runID, silent: false) else {
+                return
+            }
 
-                if terminalStates.contains(run.status) {
-                    if run.status == "succeeded",
-                       !consumedRunResponses.contains(run.id),
-                       let response = runResponseText(from: run),
-                       !response.isEmpty {
-                        chatHistory.append("AGENT (run): \(response)")
-                        consumedRunResponses.insert(run.id)
-                    } else if run.status == "failed", let error = run.errorMessage, !error.isEmpty {
-                        chatHistory.append("RUN FAILED: \(error)")
-                    } else if run.status == "canceled" {
-                        chatHistory.append("RUN CANCELED")
-                    }
-                    await loadReplay(runID: run.id, silent: true)
-                    await loadDiagnostics(runID: run.id, silent: true)
-                    return
-                }
-            } catch {
-                appState.lastError = error.localizedDescription
+            let status = run.status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            runStatusMessage = "Run \(run.id) status: \(status)"
+            if terminalStates.contains(status) {
+                await handleTerminalRun(run)
                 return
             }
 
@@ -1379,6 +1475,25 @@ struct AgentsView: View {
         }
 
         runStatusMessage = "Run watch timeout reached. Use Refresh Runs."
+    }
+
+    private func handleTerminalRun(_ run: APIAgentRunRecord) async {
+        let status = run.status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if status == "succeeded",
+           !consumedRunResponses.contains(run.id),
+           let response = runResponseText(from: run),
+           !response.isEmpty {
+            chatHistory.append("AGENT (run): \(response)")
+            consumedRunResponses.insert(run.id)
+        } else if status == "failed", let error = run.errorMessage, !error.isEmpty {
+            chatHistory.append("RUN FAILED: \(error)")
+        } else if status == "canceled" {
+            chatHistory.append("RUN CANCELED")
+        }
+
+        runStatusMessage = "Run \(run.id) status: \(status)"
+        await loadReplay(runID: run.id, silent: true)
+        await loadDiagnostics(runID: run.id, silent: true)
     }
 
     private func cancelRun(id: String) async {
@@ -1407,7 +1522,7 @@ struct AgentsView: View {
             selectedRunID = id
             runStatusMessage = "Run resumed: \(id)"
             await refreshRuns()
-            await pollRunUntilTerminal(runID: id, timeoutSec: 120)
+            await watchRunUntilTerminal(runID: id, timeoutSec: 120)
             appState.clearError()
         } catch {
             appState.lastError = error.localizedDescription

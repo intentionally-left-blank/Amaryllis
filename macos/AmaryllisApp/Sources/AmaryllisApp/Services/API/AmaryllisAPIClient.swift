@@ -328,6 +328,79 @@ final class AmaryllisAPIClient {
         return response.diagnostics
     }
 
+    func streamAgentRunEvents(
+        runId: String,
+        fromIndex: Int = 0,
+        pollIntervalMs: Int = 250,
+        timeoutSec: Double = 30,
+        includeSnapshot: Bool = true,
+        includeHeartbeat: Bool = false
+    ) -> AsyncThrowingStream<APIAgentRunStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    let normalizedFromIndex = max(0, fromIndex)
+                    let normalizedPollMs = max(50, min(pollIntervalMs, 2_000))
+                    let normalizedTimeout = max(1.0, min(timeoutSec, 300.0))
+                    let queryItems: [URLQueryItem] = [
+                        URLQueryItem(name: "from_index", value: String(normalizedFromIndex)),
+                        URLQueryItem(name: "poll_interval_ms", value: String(normalizedPollMs)),
+                        URLQueryItem(name: "timeout_sec", value: String(normalizedTimeout)),
+                        URLQueryItem(name: "include_snapshot", value: includeSnapshot ? "true" : "false"),
+                        URLQueryItem(name: "include_heartbeat", value: includeHeartbeat ? "true" : "false")
+                    ]
+                    let path = buildPath(path: "/agents/runs/\(runId)/events", queryItems: queryItems)
+                    let request = try makeURLRequest(path: path, method: "GET", body: Optional<Data>.none)
+
+                    let (bytes, response) = try await session.bytes(for: request)
+                    guard let http = response as? HTTPURLResponse else {
+                        throw APIClientError.invalidResponse
+                    }
+                    guard (200 ... 299).contains(http.statusCode) else {
+                        var chunks: [String] = []
+                        for try await line in bytes.lines {
+                            chunks.append(line)
+                        }
+                        let text = chunks.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+                        if let data = text.data(using: .utf8),
+                           let detail = parseErrorDetail(from: data) {
+                            throw APIClientError.server(detail)
+                        }
+                        if !text.isEmpty {
+                            throw APIClientError.server(text)
+                        }
+                        throw APIClientError.server("Run stream request failed with status \(http.statusCode)")
+                    }
+
+                    for try await line in bytes.lines {
+                        guard line.hasPrefix("data: ") else { continue }
+                        let payloadLine = String(line.dropFirst(6)).trimmingCharacters(in: .whitespacesAndNewlines)
+                        if payloadLine.isEmpty {
+                            continue
+                        }
+                        if payloadLine == "[DONE]" {
+                            break
+                        }
+
+                        guard let data = payloadLine.data(using: .utf8) else {
+                            continue
+                        }
+                        do {
+                            let event = try jsonDecoder.decode(APIAgentRunStreamEvent.self, from: data)
+                            continuation.yield(event)
+                        } catch {
+                            throw APIClientError.decoding(error.localizedDescription)
+                        }
+                    }
+
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+
     func cancelAgentRun(runId: String) async throws -> APIAgentRunRecord {
         let response: APIAgentRunSingleResponse = try await request(
             path: "/agents/runs/\(runId)/cancel",

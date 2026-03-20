@@ -881,7 +881,7 @@ Implemented now:
 - status validation for run filters in API (`queued|running|succeeded|failed|canceled`)
 - desktop Agents tab run monitor:
   - queue run from message input
-  - live polling until terminal state
+  - live SSE event stream until terminal state (polling fallback on stream interruption)
   - cancel/resume actions
   - checkpoint timeline and result preview
   - mission diagnostics pane with warning chips, signal badges, and recommended actions
