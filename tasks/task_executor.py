@@ -11,10 +11,10 @@ import httpx
 
 from agents.agent import Agent
 from controller.meta_controller import MetaController
+from kernel.orchestration import execute_task_run
 from memory.memory_manager import MemoryManager
 from models.model_manager import ModelManager
 from planner.planner import Planner
-from tasks.execution.orchestrator import execute_task_run
 from tasks.execution.step_executors import execute_step_general, register_default_step_executors
 from tasks.step_registry import StepExecutionContext, StepExecutionResult, StepExecutorRegistry
 from tools.tool_executor import PermissionRequiredError, ToolExecutionError, ToolExecutor

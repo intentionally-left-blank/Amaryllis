@@ -4,15 +4,15 @@ from typing import Any
 
 from agents.agent import Agent
 from agents.agent_run_manager import AgentRunManager
+from kernel.contracts import ExecutorContract
 from storage.database import Database
-from tasks.task_executor import TaskExecutor
 
 
 class AgentManager:
     def __init__(
         self,
         database: Database,
-        task_executor: TaskExecutor,
+        task_executor: ExecutorContract,
         run_manager: AgentRunManager | None = None,
     ) -> None:
         self.database = database

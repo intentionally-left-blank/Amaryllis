@@ -82,10 +82,42 @@ jobs:
             --max-p95-latency-ms "${AMARYLLIS_PERF_SMOKE_MAX_P95_MS:-350}" \
             --max-error-rate-pct "${AMARYLLIS_PERF_SMOKE_MAX_ERROR_RATE_PCT:-0}"
 
+  linux-parity-gate:
+    name: Linux Parity Gate
+    runs-on: ubuntu-latest
+    needs: canary-smoke
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.11"
+
+      - name: Install dependencies for Linux parity checks
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.lock
+
+      - name: Run Linux parity smoke checks (blocking)
+        run: |
+          python scripts/release/linux_parity_smoke.py \
+            --iterations "${AMARYLLIS_LINUX_PARITY_ITERATIONS:-1}" \
+            --require-linux \
+            --output "artifacts/linux-parity-smoke-report.json"
+
+      - name: Upload Linux parity smoke report
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-parity-smoke-report
+          path: artifacts/linux-parity-smoke-report.json
+          if-no-files-found: error
+
   disaster-recovery-gate:
     name: Disaster Recovery Gate
     runs-on: ubuntu-latest
-    needs: canary-smoke
+    needs: linux-parity-gate
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -1280,6 +1280,12 @@ Blocking performance smoke gate (chat/run/voice/stream critical paths + p95/erro
 python3 scripts/release/perf_smoke_gate.py --iterations 3 --max-p95-latency-ms 350 --max-error-rate-pct 0
 ```
 
+Linux parity smoke gate (run/voice/tools/observability acceptance on Linux target):
+
+```bash
+python3 scripts/release/linux_parity_smoke.py --iterations 1 --output artifacts/linux-parity-smoke-report.json
+```
+
 Nightly extended reliability run (success/latency/stability + trend deltas):
 
 ```bash
@@ -1552,6 +1558,12 @@ python scripts/release/api_compat_gate.py
 python scripts/release/canary_smoke.py
 ```
 
+- Linux parity smoke:
+
+```bash
+python scripts/release/linux_parity_smoke.py --iterations 1 --output artifacts/linux-parity-smoke-report.json
+```
+
 - Disaster recovery gate:
 
 ```bash
@@ -1571,6 +1583,7 @@ python scripts/release/check_runtime_profile_drift.py
 ```
 
 - Rollback playbook: `docs/release-playbook.md`
+- Linux parity matrix: `docs/linux-parity-matrix.md`
 - Local rollback helper:
 
 ```bash

@@ -16,13 +16,13 @@ from agents.run_policy import (
     resolve_retry_decision,
     retry_delay_seconds,
 )
+from kernel.contracts import ExecutorContract
 from models.provider_errors import ProviderOperationError, classify_provider_error
 from storage.database import Database
 from tasks.task_executor import (
     STEP_PERSIST,
     STEP_PREPARE_CONTEXT,
     STEP_REASONING,
-    TaskExecutor,
     TaskGuardrailError,
     TaskTimeoutError,
 )
@@ -78,7 +78,7 @@ class AgentRunManager:
     def __init__(
         self,
         database: Database,
-        task_executor: TaskExecutor,
+        task_executor: ExecutorContract,
         worker_count: int = 2,
         recover_pending_on_start: bool = True,
         default_max_attempts: int = 2,

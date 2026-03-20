@@ -27,6 +27,7 @@ from api.tool_api import router as tool_router
 from api.voice_api import router as voice_router
 from automation.automation_scheduler import AutomationScheduler
 from controller.meta_controller import MetaController
+from kernel.orchestration import KernelExecutorAdapter
 from memory.episodic_memory import EpisodicMemory
 from memory.consolidation_worker import MemoryConsolidationWorker
 from memory.memory_manager import MemoryManager
@@ -256,10 +257,11 @@ def create_services() -> ServiceContainer:
         step_max_retries_default=config.task_step_max_retries_default,
         step_replan_max_attempts=config.task_step_replan_max_attempts,
     )
+    kernel_executor = KernelExecutorAdapter(task_executor)
 
     agent_run_manager = AgentRunManager(
         database=database,
-        task_executor=task_executor,
+        task_executor=kernel_executor,
         worker_count=config.run_workers,
         recover_pending_on_start=config.run_recover_pending_on_start,
         default_max_attempts=config.run_max_attempts,
@@ -277,7 +279,7 @@ def create_services() -> ServiceContainer:
     agent_run_manager.start()
     agent_manager = AgentManager(
         database=database,
-        task_executor=task_executor,
+        task_executor=kernel_executor,
         run_manager=agent_run_manager,
     )
     automation_scheduler = AutomationScheduler(
