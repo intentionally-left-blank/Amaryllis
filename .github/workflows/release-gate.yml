@@ -180,6 +180,14 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.lock
 
+      - name: Run Linux installer/channel contract tests
+        run: |
+          python -m unittest \
+            tests.test_linux_installer_script \
+            tests.test_linux_installer_smoke \
+            tests.test_linux_channel_rollback \
+            -v
+
       - name: Run Linux parity smoke checks (blocking)
         run: |
           python scripts/release/linux_parity_smoke.py \
@@ -192,6 +200,19 @@ jobs:
         with:
           name: linux-parity-smoke-report
           path: artifacts/linux-parity-smoke-report.json
+          if-no-files-found: error
+
+      - name: Run Linux installer smoke checks (blocking)
+        run: |
+          python scripts/release/linux_installer_smoke.py \
+            --require-linux \
+            --output "artifacts/linux-installer-smoke-report.json"
+
+      - name: Upload Linux installer smoke report
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-installer-smoke-report
+          path: artifacts/linux-installer-smoke-report.json
           if-no-files-found: error
 
   disaster-recovery-gate:

@@ -60,8 +60,8 @@ Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reprodu
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
 | P2-E01 | done | Define Linux parity matrix and acceptance tests | parity checklist + CI smoke | Linux runtime passes mandatory parity checks for run/voice/tools/observability |
-| P2-E02 | in_progress | Package Linux runtime with reproducible installer path | installer scripts + docs | Fresh Linux machine can install/run/upgrade via documented deterministic path |
-| P2-E03 | todo | Add release channels and safe upgrade/rollback flow | channel strategy + rollback tests | Stable/canary channels support verified rollback without data loss |
+| P2-E02 | done | Package Linux runtime with reproducible installer path | installer scripts + docs | Fresh Linux machine can install/run/upgrade via documented deterministic path |
+| P2-E03 | done | Add release channels and safe upgrade/rollback flow | channel strategy + rollback tests | Stable/canary channels support verified rollback without data loss |
 
 ## Current Sprint (Sprint P2-S1)
 
@@ -85,7 +85,8 @@ Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reprodu
 | P2-D03 | done | deterministic budget guardrail escalation in `AgentRunManager` + API integration coverage (`tests/test_agent_run_budget_guardrail_api.py`) |
 | P2-D04 | done | mission audit panel (`AgentsView`) + `/agents/runs/{run_id}/audit` + export (`json/csv`) with owner enforcement and API tests |
 | P2-E01 | done | Linux parity matrix and acceptance smoke gates |
-| P2-E02 | in_progress | Linux installer path (`scripts/install_linux.sh`) + deterministic install/upgrade docs + installer contract tests |
+| P2-E02 | done | Linux installer path (`scripts/install_linux.sh`) + deterministic install/upgrade docs + installer contract tests + blocking CI smoke report (`scripts/release/linux_installer_smoke.py`) |
+| P2-E03 | done | Linux release channels (`stable/canary`) + rollback CLI (`scripts/release/linux_channel_rollback.py`) + rollback contract tests (`tests/test_linux_channel_rollback.py`) |
 
 ## Next Checkpoint
 - Deliver sprint result with:
@@ -102,4 +103,5 @@ Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reprodu
   - blocking mission queue concurrency/load gate with queue-drain + p95 latency + success-rate assertions,
   - nightly SLO burn-rate regression gate with sustained anomaly detection,
   - autonomy policy-pack contract and strict validator gate for L2/L3 behavior (policy-driven, not hardcoded),
-  - Linux parity checklist with automated smoke report artifact.
+  - Linux parity checklist with automated smoke report artifact,
+  - deterministic Linux installer path with release-channel rollout (`stable/canary`) and verified rollback smoke.

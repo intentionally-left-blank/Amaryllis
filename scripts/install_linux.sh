@@ -2,28 +2,60 @@
 set -euo pipefail
 
 usage() {
-  cat <<'EOF'
+  cat <<'USAGE'
 Usage: scripts/install_linux.sh [options]
 
 Deterministic Linux runtime installer/upgrade path for Amaryllis.
 
 Options:
   --release-id <id>      Use explicit release identifier.
+  --channel <name>       Release channel to update (stable|canary, default: stable).
   --skip-bootstrap       Skip bootstrap checks/install step (not recommended).
   --dry-run              Print actions without changing filesystem.
   --help                 Show this help.
 
 Environment:
-  AMARYLLIS_LINUX_INSTALL_ROOT  Install root (default: $HOME/.local/share/amaryllis)
-  AMARYLLIS_LINUX_BIN_DIR       Launcher dir (default: $HOME/.local/bin)
-  AMARYLLIS_BOOTSTRAP_PYTHON    Python executable for bootstrap (default: python3.11)
-  AMARYLLIS_KEEP_RELEASES       Number of releases to keep (default: 3)
-EOF
+  AMARYLLIS_LINUX_INSTALL_ROOT      Install root (default: $HOME/.local/share/amaryllis)
+  AMARYLLIS_LINUX_BIN_DIR           Launcher dir (default: $HOME/.local/bin)
+  AMARYLLIS_BOOTSTRAP_PYTHON        Python executable for bootstrap (default: python3.11)
+  AMARYLLIS_KEEP_RELEASES           Number of releases to keep (default: 3)
+  AMARYLLIS_LINUX_RELEASE_CHANNEL   Default channel when --channel is omitted (stable|canary)
+USAGE
+}
+
+validate_channel() {
+  local value="$1"
+  case "${value}" in
+    stable|canary)
+      return 0
+      ;;
+    *)
+      echo "[linux-installer] invalid channel: ${value} (expected stable|canary)" >&2
+      exit 2
+      ;;
+  esac
+}
+
+append_history() {
+  local history_path="$1"
+  local release_id="$2"
+  local last_entry=""
+
+  if [[ -f "${history_path}" ]]; then
+    last_entry="$(tail -n 1 "${history_path}" 2>/dev/null || true)"
+  fi
+
+  if [[ "${last_entry}" == "${release_id}" ]]; then
+    return 0
+  fi
+
+  printf '%s\n' "${release_id}" >> "${history_path}"
 }
 
 DRY_RUN=0
 SKIP_BOOTSTRAP=0
 RELEASE_ID=""
+CHANNEL="${AMARYLLIS_LINUX_RELEASE_CHANNEL:-stable}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -33,6 +65,14 @@ while [[ $# -gt 0 ]]; do
         exit 2
       fi
       RELEASE_ID="$2"
+      shift 2
+      ;;
+    --channel)
+      if [[ $# -lt 2 ]]; then
+        echo "[linux-installer] --channel requires a value" >&2
+        exit 2
+      fi
+      CHANNEL="$2"
       shift 2
       ;;
     --skip-bootstrap)
@@ -54,6 +94,8 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+validate_channel "${CHANNEL}"
 
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "[linux-installer] this installer only supports Linux hosts" >&2
@@ -93,6 +135,9 @@ if [[ -z "${RELEASE_ID}" ]]; then
 fi
 
 RELEASES_DIR="${INSTALL_ROOT}/releases"
+CHANNELS_DIR="${INSTALL_ROOT}/channels"
+CHANNEL_LINK="${CHANNELS_DIR}/${CHANNEL}"
+CHANNEL_HISTORY="${CHANNELS_DIR}/${CHANNEL}.history"
 RELEASE_DIR="${RELEASES_DIR}/${RELEASE_ID}"
 SRC_DIR="${RELEASE_DIR}/src"
 VENV_DIR="${RELEASE_DIR}/venv"
@@ -110,6 +155,7 @@ run_cmd() {
 echo "[linux-installer] root: ${ROOT_DIR}"
 echo "[linux-installer] install root: ${INSTALL_ROOT}"
 echo "[linux-installer] release id: ${RELEASE_ID}"
+echo "[linux-installer] channel: ${CHANNEL}"
 echo "[linux-installer] dry run: ${DRY_RUN}"
 
 if [[ "${DRY_RUN}" != "1" && -e "${RELEASE_DIR}" ]]; then
@@ -117,7 +163,7 @@ if [[ "${DRY_RUN}" != "1" && -e "${RELEASE_DIR}" ]]; then
   exit 1
 fi
 
-run_cmd mkdir -p "${RELEASES_DIR}" "${BIN_DIR}" "${SRC_DIR}"
+run_cmd mkdir -p "${RELEASES_DIR}" "${CHANNELS_DIR}" "${BIN_DIR}" "${SRC_DIR}"
 run_cmd rsync -a --delete \
   --exclude '.git' \
   --exclude '.venv' \
@@ -146,12 +192,20 @@ fi
 if [[ "${DRY_RUN}" == "1" ]]; then
   echo "+ write launcher ${LAUNCHER}"
 else
-  cat > "${LAUNCHER}" <<'EOF'
+  cat > "${LAUNCHER}" <<'LAUNCHER'
 #!/usr/bin/env bash
 set -euo pipefail
 
 INSTALL_ROOT="${AMARYLLIS_LINUX_INSTALL_ROOT:-${HOME}/.local/share/amaryllis}"
-CURRENT="${INSTALL_ROOT}/current"
+CHANNEL="${AMARYLLIS_LINUX_RELEASE_CHANNEL:-stable}"
+CHANNEL_LINK="${INSTALL_ROOT}/channels/${CHANNEL}"
+
+if [[ -L "${CHANNEL_LINK}" ]]; then
+  CURRENT="${CHANNEL_LINK}"
+else
+  CURRENT="${INSTALL_ROOT}/current"
+fi
+
 SRC_DIR="${CURRENT}/src"
 VENV_DIR="${CURRENT}/venv"
 
@@ -168,19 +222,55 @@ exec "${VENV_DIR}/bin/uvicorn" runtime.server:app \
   --host "${HOST}" \
   --port "${PORT}" \
   "$@"
-EOF
+LAUNCHER
   chmod +x "${LAUNCHER}"
 fi
 
-run_cmd ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
+run_cmd ln -sfn "${RELEASE_DIR}" "${CHANNEL_LINK}"
+
+if [[ "${DRY_RUN}" == "1" ]]; then
+  echo "+ append ${RELEASE_ID} to ${CHANNEL_HISTORY}"
+else
+  append_history "${CHANNEL_HISTORY}" "${RELEASE_ID}"
+fi
+
+if [[ "${DRY_RUN}" == "1" ]]; then
+  if [[ "${CHANNEL}" == "stable" ]]; then
+    echo "+ ln -sfn ${RELEASE_DIR} ${CURRENT_LINK}"
+  else
+    echo "+ preserve ${CURRENT_LINK} (stable stays active by default)"
+  fi
+else
+  if [[ "${CHANNEL}" == "stable" ]]; then
+    ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
+  elif [[ ! -e "${CURRENT_LINK}" ]]; then
+    ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
+  fi
+fi
 
 if [[ "${DRY_RUN}" != "1" ]]; then
   if [[ "${KEEP_RELEASES}" =~ ^[0-9]+$ ]] && [[ "${KEEP_RELEASES}" -ge 1 ]]; then
     mapfile -t all_releases < <(ls -1dt "${RELEASES_DIR}"/* 2>/dev/null || true)
+    declare -A protected_targets=()
+    for link_path in "${CURRENT_LINK}" "${CHANNELS_DIR}/stable" "${CHANNELS_DIR}/canary"; do
+      if [[ -L "${link_path}" ]]; then
+        resolved="$(readlink -f "${link_path}" 2>/dev/null || true)"
+        if [[ -n "${resolved}" ]]; then
+          protected_targets["${resolved}"]=1
+        fi
+      fi
+    done
+
     if [[ "${#all_releases[@]}" -gt "${KEEP_RELEASES}" ]]; then
       for ((i=KEEP_RELEASES; i<${#all_releases[@]}; i++)); do
-        echo "[linux-installer] pruning old release: ${all_releases[$i]}"
-        rm -rf "${all_releases[$i]}"
+        candidate="${all_releases[$i]}"
+        resolved_candidate="$(readlink -f "${candidate}" 2>/dev/null || true)"
+        if [[ -n "${resolved_candidate}" && -n "${protected_targets[${resolved_candidate}]:-}" ]]; then
+          echo "[linux-installer] preserving active release: ${candidate}"
+          continue
+        fi
+        echo "[linux-installer] pruning old release: ${candidate}"
+        rm -rf "${candidate}"
       done
     fi
   else
@@ -190,5 +280,12 @@ fi
 
 echo "[linux-installer] install complete"
 echo "[linux-installer] launcher: ${LAUNCHER}"
-echo "[linux-installer] current release: ${CURRENT_LINK} -> ${RELEASE_DIR}"
+if [[ -L "${CHANNEL_LINK}" ]]; then
+  echo "[linux-installer] channel ${CHANNEL}: ${CHANNEL_LINK} -> $(readlink -f "${CHANNEL_LINK}")"
+fi
+if [[ -L "${CURRENT_LINK}" ]]; then
+  echo "[linux-installer] current release: ${CURRENT_LINK} -> $(readlink -f "${CURRENT_LINK}")"
+else
+  echo "[linux-installer] current release link not set"
+fi
 echo "[linux-installer] start runtime: ${LAUNCHER}"

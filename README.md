@@ -278,6 +278,7 @@ Reference:
 - `docs/mission-simulation-mode.md`
 - `docs/dynamic-mission-budgets.md`
 - `docs/linux-runtime-installer.md`
+- `docs/linux-release-channels.md`
 
 ## Run
 
