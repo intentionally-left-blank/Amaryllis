@@ -79,6 +79,20 @@ def _percentile(values: list[float], p: int) -> float:
     return float(sorted_values[rank])
 
 
+def _as_float(value: Any) -> float | None:
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            return None
+    return None
+
+
 def _shutdown_app(app: Any) -> None:
     services = getattr(getattr(app, "state", None), "services", None)
     if services is None:
@@ -162,6 +176,134 @@ def _summarize(latencies_ms: list[float], failures_count: int) -> dict[str, Any]
     }
 
 
+def _extract_burn_rate_sample(*, response_payload: Any, round_number: int) -> dict[str, Any] | None:
+    if not isinstance(response_payload, dict):
+        return None
+    quality_budget = response_payload.get("quality_budget")
+    snapshot = response_payload.get("snapshot")
+    if not isinstance(quality_budget, dict) or not isinstance(snapshot, dict):
+        return None
+
+    error_budget = snapshot.get("error_budget")
+    sli = snapshot.get("sli")
+    if not isinstance(error_budget, dict) or not isinstance(sli, dict):
+        return None
+
+    requests_budget = error_budget.get("requests")
+    runs_budget = error_budget.get("runs")
+    requests_sli = sli.get("requests")
+    runs_sli = sli.get("runs")
+    if (
+        not isinstance(requests_budget, dict)
+        or not isinstance(runs_budget, dict)
+        or not isinstance(requests_sli, dict)
+        or not isinstance(runs_sli, dict)
+    ):
+        return None
+
+    request_burn_rate = _as_float(requests_budget.get("burn_rate"))
+    run_burn_rate = _as_float(runs_budget.get("burn_rate"))
+    request_budget = _as_float(quality_budget.get("request_burn_rate"))
+    run_budget = _as_float(quality_budget.get("run_burn_rate"))
+    request_total = _as_float(requests_sli.get("total"))
+    run_total = _as_float(runs_sli.get("total"))
+    if (
+        request_burn_rate is None
+        or run_burn_rate is None
+        or request_budget is None
+        or run_budget is None
+        or request_total is None
+        or run_total is None
+    ):
+        return None
+
+    return {
+        "round": int(round_number),
+        "request_burn_rate": round(request_burn_rate, 6),
+        "run_burn_rate": round(run_burn_rate, 6),
+        "request_budget": round(request_budget, 6),
+        "run_budget": round(run_budget, 6),
+        "request_samples": int(request_total),
+        "run_samples": int(run_total),
+    }
+
+
+def _max_consecutive_breach(values: list[float], *, budget: float) -> int:
+    if not values:
+        return 0
+    streak = 0
+    max_streak = 0
+    for value in values:
+        if float(value) > float(budget):
+            streak += 1
+            max_streak = max(max_streak, streak)
+            continue
+        streak = 0
+    return max_streak
+
+
+def _summarize_burn_rate(samples: list[dict[str, Any]]) -> dict[str, Any]:
+    request_values: list[float] = []
+    run_values: list[float] = []
+    request_budget = 0.0
+    run_budget = 0.0
+
+    for item in samples:
+        request_value = _as_float(item.get("request_burn_rate"))
+        run_value = _as_float(item.get("run_burn_rate"))
+        if request_value is not None:
+            request_values.append(request_value)
+        if run_value is not None:
+            run_values.append(run_value)
+
+        sample_request_budget = _as_float(item.get("request_budget"))
+        sample_run_budget = _as_float(item.get("run_budget"))
+        if sample_request_budget is not None:
+            request_budget = sample_request_budget
+        if sample_run_budget is not None:
+            run_budget = sample_run_budget
+
+    request_breach_rounds = [
+        int(item.get("round", 0))
+        for item in samples
+        if _as_float(item.get("request_burn_rate")) is not None
+        and _as_float(item.get("request_burn_rate")) > request_budget
+    ]
+    run_breach_rounds = [
+        int(item.get("round", 0))
+        for item in samples
+        if _as_float(item.get("run_burn_rate")) is not None and _as_float(item.get("run_burn_rate")) > run_budget
+    ]
+
+    return {
+        "sample_count": len(samples),
+        "request": {
+            "budget": round(float(request_budget), 6),
+            "avg": round(statistics.mean(request_values), 6) if request_values else 0.0,
+            "p95": round(_percentile(request_values, 95), 6),
+            "max": round(max(request_values), 6) if request_values else 0.0,
+            "breach_samples": len(request_breach_rounds),
+            "max_consecutive_breach_samples": _max_consecutive_breach(
+                request_values,
+                budget=float(request_budget),
+            ),
+            "breach_rounds": request_breach_rounds,
+        },
+        "runs": {
+            "budget": round(float(run_budget), 6),
+            "avg": round(statistics.mean(run_values), 6) if run_values else 0.0,
+            "p95": round(_percentile(run_values, 95), 6),
+            "max": round(max(run_values), 6) if run_values else 0.0,
+            "breach_samples": len(run_breach_rounds),
+            "max_consecutive_breach_samples": _max_consecutive_breach(
+                run_values,
+                budget=float(run_budget),
+            ),
+            "breach_rounds": run_breach_rounds,
+        },
+    }
+
+
 def _load_baseline(path: Path) -> dict[str, float] | None:
     if not path.exists():
         return None
@@ -225,6 +367,7 @@ def main() -> int:
     checks = _request_checks()
     failures: list[dict[str, Any]] = []
     latencies_ms: list[float] = []
+    burn_rate_samples: list[dict[str, Any]] = []
 
     with tempfile.TemporaryDirectory(prefix="amaryllis-nightly-reliability-") as tmp:
         support_dir = Path(tmp) / "support"
@@ -277,10 +420,24 @@ def main() -> int:
                                 "latency_ms": round(duration_ms, 2),
                             }
                         )
+                        continue
+
+                    if str(check["path"]) == "/service/observability/slo":
+                        try:
+                            payload = response.json()
+                        except Exception:
+                            payload = None
+                        sample = _extract_burn_rate_sample(
+                            response_payload=payload,
+                            round_number=round_number,
+                        )
+                        if sample is not None:
+                            burn_rate_samples.append(sample)
 
         _shutdown_app(app)
 
     summary = _summarize(latencies_ms=latencies_ms, failures_count=len(failures))
+    burn_rate_summary = _summarize_burn_rate(burn_rate_samples)
 
     baseline_path = Path(str(args.baseline).strip()) if str(args.baseline).strip() else None
     if baseline_path is not None and not baseline_path.is_absolute():
@@ -304,6 +461,10 @@ def main() -> int:
             "metrics": baseline_metrics or {},
         },
         "trend_deltas": trend_deltas or {},
+        "burn_rate": {
+            "samples": burn_rate_samples,
+            "summary": burn_rate_summary,
+        },
         "failures": failures,
     }
 
@@ -317,6 +478,8 @@ def main() -> int:
     print(json.dumps(report["summary"], ensure_ascii=False))
     if trend_deltas:
         print(json.dumps(report["trend_deltas"], ensure_ascii=False))
+    if burn_rate_samples:
+        print(json.dumps(report["burn_rate"]["summary"], ensure_ascii=False))
 
     breaches: list[str] = []
     if float(summary["success_rate_pct"]) < float(args.min_success_rate_pct):

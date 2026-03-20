@@ -5,7 +5,8 @@
 Nightly run validates non-functional reliability regressions and publishes a machine-readable report with trend deltas for:
 - success rate,
 - latency (p95),
-- stability (latency jitter + stability score).
+- stability (latency jitter + stability score),
+- SLO burn-rate samples (requests/runs) for downstream regression gate.
 
 ## Workflow
 
@@ -13,6 +14,8 @@ Nightly run validates non-functional reliability regressions and publishes a mac
 - Triggers:
   - nightly schedule (`cron: 0 2 * * *`, UTC),
   - manual dispatch.
+- Includes blocking follow-up gate:
+  - `scripts/release/nightly_slo_burn_rate_gate.py`
 
 ## Local Run
 
@@ -40,9 +43,17 @@ Workflow output artifact:
 artifacts/nightly-reliability-report.json
 ```
 
+Burn-rate gate output artifact:
+
+```text
+artifacts/nightly-burn-rate-gate-report.json
+```
+
 Report includes:
 - `summary`: total/failed requests, success/error rate, avg/p95 latency, jitter, stability score.
 - `trend_deltas`: deltas vs baseline metrics.
+- `burn_rate.samples`: per-round request/run burn-rate samples + active burn-rate budgets.
+- `burn_rate.summary`: p95/max/breach streaks for request/run burn-rate.
 - `failures`: per-request mismatch details (expected vs actual status, round, latency).
 
 ## Baseline

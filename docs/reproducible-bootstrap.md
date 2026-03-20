@@ -16,7 +16,8 @@ The script will:
 - install deterministic dependencies from `requirements.lock`,
 - run dependency drift guard (`scripts/release/check_dependency_drift.py`),
 - run runtime/SLO profile drift guard (`scripts/release/check_runtime_profile_drift.py`),
-- validate golden task suite schema (`scripts/eval/run_golden_tasks.py --validate-only`).
+- validate autonomy policy-pack contract (`scripts/release/check_autonomy_policy_pack.py`),
+- validate golden task suite schema (`scripts/eval/run_golden_tasks.py --validate-only`),
 - validate deterministic eval/replay fixtures (`scripts/release/check_eval_replay_determinism.py`).
 
 Reference:

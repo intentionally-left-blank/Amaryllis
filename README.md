@@ -1291,6 +1291,12 @@ Blocking fault-injection reliability gate (provider/network/tool fault classes +
 python3 scripts/release/fault_injection_reliability_gate.py --retry-max-attempts 2 --scenario-timeout-sec 8 --min-pass-rate-pct 100 --output artifacts/fault-injection-reliability-report.json
 ```
 
+Blocking mission queue concurrency/load gate (queue-drain + p95 queue wait/end-to-end + success-rate SLO):
+
+```bash
+python3 scripts/release/mission_queue_load_gate.py --runs-total 40 --submit-concurrency 8 --worker-count 4 --task-latency-ms 35 --scenario-timeout-sec 30 --min-success-rate-pct 99 --max-failed-runs 0 --max-p95-queue-wait-ms 1500 --max-p95-end-to-end-ms 5000 --output artifacts/mission-queue-load-report.json
+```
+
 Linux parity smoke gate (run/voice/tools/observability acceptance on Linux target):
 
 ```bash
@@ -1303,9 +1309,17 @@ Nightly extended reliability run (success/latency/stability + trend deltas):
 python3 scripts/release/nightly_reliability_run.py --iterations 12 --baseline eval/baselines/reliability/nightly_smoke_baseline.json --strict
 ```
 
+Blocking nightly SLO burn-rate gate (flags sustained error-budget burn anomalies):
+
+```bash
+python3 scripts/release/nightly_slo_burn_rate_gate.py --report artifacts/nightly-reliability-report.json --max-consecutive-request-breach-samples 2 --max-consecutive-run-breach-samples 2 --output artifacts/nightly-burn-rate-gate-report.json
+```
+
 Reference:
 - `docs/nightly-reliability.md`
+- `docs/nightly-slo-burn-rate-gate.md`
 - `docs/fault-injection-reliability.md`
+- `docs/mission-queue-load-gate.md`
 
 Autonomy level contract (L0-L5):
 
@@ -1313,8 +1327,16 @@ Autonomy level contract (L0-L5):
 export AMARYLLIS_AUTONOMY_LEVEL=l3
 ```
 
+Autonomy policy-pack contract (schema validation gate):
+
+```bash
+export AMARYLLIS_AUTONOMY_POLICY_PACK_PATH=policies/autonomy/default.json
+python3 scripts/release/check_autonomy_policy_pack.py
+```
+
 Reference:
 - `docs/autonomy-levels.md`
+- `docs/autonomy-policy-pack.md`
 
 ## Security CI Gate
 

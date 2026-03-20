@@ -42,6 +42,10 @@ jobs:
         run: |
           python scripts/release/check_runtime_profile_drift.py
 
+      - name: Check autonomy policy-pack contract
+        run: |
+          python scripts/release/check_autonomy_policy_pack.py
+
       - name: Check architectural import boundaries
         run: |
           python scripts/release/check_import_boundaries.py
@@ -57,9 +61,24 @@ jobs:
             --output "artifacts/nightly-reliability-report.json" \
             --strict
 
+      - name: Run nightly SLO burn-rate gate (blocking)
+        run: |
+          python scripts/release/nightly_slo_burn_rate_gate.py \
+            --report "artifacts/nightly-reliability-report.json" \
+            --max-consecutive-request-breach-samples "${AMARYLLIS_NIGHTLY_MAX_CONSECUTIVE_REQUEST_BURN_BREACHES:-2}" \
+            --max-consecutive-run-breach-samples "${AMARYLLIS_NIGHTLY_MAX_CONSECUTIVE_RUN_BURN_BREACHES:-2}" \
+            --output "artifacts/nightly-burn-rate-gate-report.json"
+
       - name: Upload nightly reliability report
         uses: actions/upload-artifact@v4
         with:
           name: nightly-reliability-report
           path: artifacts/nightly-reliability-report.json
+          if-no-files-found: error
+
+      - name: Upload nightly burn-rate gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-burn-rate-gate-report
+          path: artifacts/nightly-burn-rate-gate-report.json
           if-no-files-found: error

@@ -217,7 +217,10 @@ def create_services() -> ServiceContainer:
         permission_manager=tool_permission_manager,
         budget_guard=tool_budget_guard,
         approval_enforcement_mode=config.tool_approval_enforcement,
-        autonomy_policy=AutonomyPolicy(level=config.autonomy_level),
+        autonomy_policy=AutonomyPolicy(
+            level=config.autonomy_level,
+            policy_pack_path=config.autonomy_policy_pack_path,
+        ),
         sandbox_runner=(
             ToolSandboxRunner(
                 config=ToolSandboxConfig(

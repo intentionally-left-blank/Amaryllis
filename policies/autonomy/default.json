@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "pack": "default_l0_l5_v1",
+  "description": "Default autonomy policy pack for L0-L5 tool risk gating.",
+  "rules": {
+    "l0": {
+      "low": {
+        "allow": false,
+        "requires_approval": false,
+        "reason": "Autonomy level L0 blocks all tool execution."
+      },
+      "medium": {
+        "allow": false,
+        "requires_approval": false,
+        "reason": "Autonomy level L0 blocks all tool execution."
+      },
+      "high": {
+        "allow": false,
+        "requires_approval": false,
+        "reason": "Autonomy level L0 blocks all tool execution."
+      },
+      "critical": {
+        "allow": false,
+        "requires_approval": false,
+        "reason": "Autonomy level L0 blocks all tool execution."
+      }
+    },
+    "l1": {
+      "low": {
+        "allow": true,
+        "requires_approval": true,
+        "reason": "Autonomy level L1 requires approval for low-risk tool execution.",
+        "approval_scope": "request",
+        "approval_ttl_sec": 180
+      },
+      "medium": {
+        "allow": false,
+        "requires_approval": false,
+        "reason": "Autonomy level L1 blocks non-low-risk tool execution."
+      },
+      "high": {
+        "allow": false,
+        "requires_approval": false,
+        "reason": "Autonomy level L1 blocks non-low-risk tool execution."
+      },
+      "critical": {
+        "allow": false,
+        "requires_approval": false,
+        "reason": "Autonomy level L1 blocks non-low-risk tool execution."
+      }
+    },
+    "l2": {
+      "low": {
+        "allow": true,
+        "requires_approval": false
+      },
+      "medium": {
+        "allow": true,
+        "requires_approval": true,
+        "reason": "Autonomy level L2 requires approval for medium-risk tool execution.",
+        "approval_scope": "request",
+        "approval_ttl_sec": 300
+      },
+      "high": {
+        "allow": false,
+        "requires_approval": false,
+        "reason": "Autonomy level L2 blocks high/critical-risk tool execution."
+      },
+      "critical": {
+        "allow": false,
+        "requires_approval": false,
+        "reason": "Autonomy level L2 blocks high/critical-risk tool execution."
+      }
+    },
+    "l3": {
+      "low": {
+        "allow": true,
+        "requires_approval": false
+      },
+      "medium": {
+        "allow": true,
+        "requires_approval": false
+      },
+      "high": {
+        "allow": true,
+        "requires_approval": true,
+        "reason": "Autonomy level L3 requires approval for high-risk tool execution.",
+        "approval_scope": "request",
+        "approval_ttl_sec": 300
+      },
+      "critical": {
+        "allow": false,
+        "requires_approval": false,
+        "reason": "Autonomy level L3 blocks critical-risk tool execution."
+      }
+    },
+    "l4": {
+      "low": {
+        "allow": true,
+        "requires_approval": false
+      },
+      "medium": {
+        "allow": true,
+        "requires_approval": false
+      },
+      "high": {
+        "allow": true,
+        "requires_approval": true,
+        "reason": "Autonomy level L4 requires approval for high-risk tool execution.",
+        "approval_scope": "session",
+        "approval_ttl_sec": 600
+      },
+      "critical": {
+        "allow": true,
+        "requires_approval": true,
+        "reason": "Autonomy level L4 requires approval for critical-risk tool execution.",
+        "approval_scope": "session",
+        "approval_ttl_sec": 900
+      }
+    },
+    "l5": {
+      "low": {
+        "allow": true,
+        "requires_approval": false
+      },
+      "medium": {
+        "allow": true,
+        "requires_approval": false
+      },
+      "high": {
+        "allow": true,
+        "requires_approval": false
+      },
+      "critical": {
+        "allow": true,
+        "requires_approval": false
+      }
+    }
+  }
+}

@@ -43,6 +43,10 @@ jobs:
         run: |
           python scripts/release/check_runtime_profile_drift.py
 
+      - name: Check autonomy policy-pack contract
+        run: |
+          python scripts/release/check_autonomy_policy_pack.py
+
       - name: Check architectural import boundaries
         run: |
           python scripts/release/check_import_boundaries.py
@@ -110,6 +114,10 @@ jobs:
       - name: Check runtime/SLO profile drift
         run: |
           python scripts/release/check_runtime_profile_drift.py
+
+      - name: Check autonomy policy-pack contract
+        run: |
+          python scripts/release/check_autonomy_policy_pack.py
 
       - name: SAST (Bandit, high severity/high confidence)
         run: |

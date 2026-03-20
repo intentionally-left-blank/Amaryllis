@@ -46,6 +46,10 @@ jobs:
         run: |
           python scripts/release/check_runtime_profile_drift.py
 
+      - name: Check autonomy policy-pack contract
+        run: |
+          python scripts/release/check_autonomy_policy_pack.py
+
       - name: Generate release provenance + SBOM (blocking)
         env:
           AMARYLLIS_PROVENANCE_SIGNING_KEY: ${{ secrets.AMARYLLIS_PROVENANCE_SIGNING_KEY }}
@@ -135,6 +139,27 @@ jobs:
         with:
           name: fault-injection-reliability-report
           path: artifacts/fault-injection-reliability-report.json
+          if-no-files-found: error
+
+      - name: Run mission queue concurrency/load gate (blocking)
+        run: |
+          python scripts/release/mission_queue_load_gate.py \
+            --runs-total "${AMARYLLIS_QUEUE_LOAD_RUNS_TOTAL:-40}" \
+            --submit-concurrency "${AMARYLLIS_QUEUE_LOAD_SUBMIT_CONCURRENCY:-8}" \
+            --worker-count "${AMARYLLIS_QUEUE_LOAD_WORKER_COUNT:-4}" \
+            --task-latency-ms "${AMARYLLIS_QUEUE_LOAD_TASK_LATENCY_MS:-35}" \
+            --scenario-timeout-sec "${AMARYLLIS_QUEUE_LOAD_TIMEOUT_SEC:-30}" \
+            --min-success-rate-pct "${AMARYLLIS_QUEUE_LOAD_MIN_SUCCESS_RATE_PCT:-99}" \
+            --max-failed-runs "${AMARYLLIS_QUEUE_LOAD_MAX_FAILED_RUNS:-0}" \
+            --max-p95-queue-wait-ms "${AMARYLLIS_QUEUE_LOAD_MAX_P95_QUEUE_WAIT_MS:-1500}" \
+            --max-p95-end-to-end-ms "${AMARYLLIS_QUEUE_LOAD_MAX_P95_END_TO_END_MS:-5000}" \
+            --output "artifacts/mission-queue-load-report.json"
+
+      - name: Upload mission queue load report
+        uses: actions/upload-artifact@v4
+        with:
+          name: mission-queue-load-report
+          path: artifacts/mission-queue-load-report.json
           if-no-files-found: error
 
   linux-parity-gate:

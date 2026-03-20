@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
+from tools.autonomy_policy_pack import (
+    VALID_AUTONOMY_LEVELS as _PACK_VALID_AUTONOMY_LEVELS,
+    VALID_RISK_LEVELS as _PACK_VALID_RISK_LEVELS,
+    default_policy_pack_path,
+    load_autonomy_policy_pack,
+)
 
-VALID_AUTONOMY_LEVELS: tuple[str, ...] = ("l0", "l1", "l2", "l3", "l4", "l5")
-_VALID_RISKS = {"low", "medium", "high", "critical"}
+
+VALID_AUTONOMY_LEVELS: tuple[str, ...] = _PACK_VALID_AUTONOMY_LEVELS
+_VALID_RISKS = set(_PACK_VALID_RISK_LEVELS)
 
 
 def normalize_autonomy_level(value: str | None) -> str:
@@ -32,111 +40,79 @@ class AutonomyDecision:
 
 
 class AutonomyPolicy:
-    def __init__(self, level: str = "l3") -> None:
+    def __init__(self, level: str = "l3", policy_pack_path: str | Path | None = None) -> None:
         self.level = normalize_autonomy_level(level)
+        self.policy_pack_path = self._resolve_policy_pack_path(policy_pack_path)
+        self.policy_pack = load_autonomy_policy_pack(self.policy_pack_path)
+
+    @staticmethod
+    def _resolve_policy_pack_path(policy_pack_path: str | Path | None) -> Path:
+        if policy_pack_path is None:
+            return default_policy_pack_path()
+        candidate = Path(policy_pack_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = Path.cwd() / candidate
+        return candidate.resolve()
 
     def evaluate(self, *, tool_name: str, risk_level: str) -> AutonomyDecision:
         normalized_risk = normalize_risk_level(risk_level)
-        level = self.level
-        label = level.upper()
+        rule = self.policy_pack.rule(level=self.level, risk_level=normalized_risk)
+        reason = self._render_reason(
+            template=rule.reason,
+            tool_name=tool_name,
+            risk_level=normalized_risk,
+            allow=rule.allow,
+        )
+        return AutonomyDecision(
+            allow=rule.allow,
+            requires_approval=rule.requires_approval,
+            reason=reason,
+            approval_scope=rule.approval_scope,
+            approval_ttl_sec=rule.approval_ttl_sec,
+        )
 
-        if level == "l0":
-            return AutonomyDecision(
-                allow=False,
-                requires_approval=False,
-                reason=f"Autonomy level {label} blocks all tool execution.",
-            )
-
-        if level == "l1":
-            if normalized_risk != "low":
-                return AutonomyDecision(
-                    allow=False,
-                    requires_approval=False,
-                    reason=(
-                        f"Autonomy level {label} blocks non-low-risk tool '{tool_name}' "
-                        f"(risk={normalized_risk})."
-                    ),
+    def _render_reason(
+        self,
+        *,
+        template: str | None,
+        tool_name: str,
+        risk_level: str,
+        allow: bool,
+    ) -> str | None:
+        if template:
+            try:
+                return template.format(
+                    level=self.level.upper(),
+                    tool_name=str(tool_name),
+                    risk_level=str(risk_level),
                 )
-            return AutonomyDecision(
-                allow=True,
-                requires_approval=True,
-                reason=f"Autonomy level {label} requires approval for low-risk tool execution.",
-                approval_scope="request",
-                approval_ttl_sec=180,
-            )
-
-        if level == "l2":
-            if normalized_risk in {"high", "critical"}:
-                return AutonomyDecision(
-                    allow=False,
-                    requires_approval=False,
-                    reason=(
-                        f"Autonomy level {label} blocks high-risk tool '{tool_name}' "
-                        f"(risk={normalized_risk})."
-                    ),
-                )
-            if normalized_risk == "medium":
-                return AutonomyDecision(
-                    allow=True,
-                    requires_approval=True,
-                    reason=f"Autonomy level {label} requires approval for medium-risk tool execution.",
-                    approval_scope="request",
-                    approval_ttl_sec=300,
-                )
-            return AutonomyDecision(allow=True, requires_approval=False)
-
-        if level == "l3":
-            if normalized_risk == "critical":
-                return AutonomyDecision(
-                    allow=False,
-                    requires_approval=False,
-                    reason=(
-                        f"Autonomy level {label} blocks critical-risk tool '{tool_name}' "
-                        f"(risk={normalized_risk})."
-                    ),
-                )
-            if normalized_risk == "high":
-                return AutonomyDecision(
-                    allow=True,
-                    requires_approval=True,
-                    reason=f"Autonomy level {label} requires approval for high-risk tool execution.",
-                    approval_scope="request",
-                    approval_ttl_sec=300,
-                )
-            return AutonomyDecision(allow=True, requires_approval=False)
-
-        if level == "l4":
-            if normalized_risk == "critical":
-                return AutonomyDecision(
-                    allow=True,
-                    requires_approval=True,
-                    reason=f"Autonomy level {label} requires approval for critical-risk tool execution.",
-                    approval_scope="session",
-                    approval_ttl_sec=900,
-                )
-            if normalized_risk == "high":
-                return AutonomyDecision(
-                    allow=True,
-                    requires_approval=True,
-                    reason=f"Autonomy level {label} requires approval for high-risk tool execution.",
-                    approval_scope="session",
-                    approval_ttl_sec=600,
-                )
-            return AutonomyDecision(allow=True, requires_approval=False)
-
-        # L5: bounded full autonomy by tool policy controls.
-        return AutonomyDecision(allow=True, requires_approval=False)
+            except Exception:
+                return template
+        if allow:
+            return None
+        return (
+            f"Autonomy level {self.level.upper()} blocks tool '{tool_name}' "
+            f"(risk={risk_level})."
+        )
 
     def describe(self) -> dict[str, Any]:
-        rules = {
-            "l0": "all tools blocked",
-            "l1": "only low-risk tools with per-request approval",
-            "l2": "low-risk auto; medium with approval; high/critical blocked",
-            "l3": "low/medium auto; high with approval; critical blocked",
-            "l4": "low/medium auto; high/critical with approval",
-            "l5": "autonomy policy allows all; isolation/approval controls still apply",
-        }
+        rules: dict[str, dict[str, str]] = {}
+        for level, level_rules in self.policy_pack.levels.items():
+            decision_map: dict[str, str] = {}
+            for risk, rule in level_rules.items():
+                if not rule.allow:
+                    decision_map[risk] = "blocked"
+                elif rule.requires_approval:
+                    decision_map[risk] = "allow_with_approval"
+                else:
+                    decision_map[risk] = "allow"
+            rules[level] = decision_map
         return {
             "level": self.level,
+            "policy_pack": {
+                "pack": self.policy_pack.pack,
+                "schema_version": self.policy_pack.schema_version,
+                "source_path": str(self.policy_pack.source_path),
+            },
             "rules": rules,
         }

@@ -63,6 +63,11 @@ class NightlyReliabilityRunTests(unittest.TestCase):
             self.assertEqual(report.get("suite"), "nightly_reliability_smoke_v1")
             self.assertIn("summary", report)
             self.assertIn("trend_deltas", report)
+            burn_rate = report.get("burn_rate")
+            self.assertIsInstance(burn_rate, dict)
+            self.assertIn("samples", burn_rate)
+            self.assertIn("summary", burn_rate)
+            self.assertGreaterEqual(int(burn_rate.get("summary", {}).get("sample_count", 0)), 1)
 
     def test_nightly_reliability_strict_mode_fails_on_impossible_latency(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-nightly-test-") as tmp:

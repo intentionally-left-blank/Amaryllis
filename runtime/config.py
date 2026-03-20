@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from runtime.profile_loader import ProfileLoadError, build_profiled_env
+from tools.autonomy_policy_pack import AutonomyPolicyPackError, load_autonomy_policy_pack
 
 
 class AppConfigError(ValueError):
@@ -143,6 +144,7 @@ class AppConfig:
     chat_max_input_chars: int
     chat_max_tokens: int
     autonomy_level: str
+    autonomy_policy_pack_path: Path
     tool_approval_enforcement: str
     tool_isolation_profile: str
     tool_budget_window_sec: float
@@ -276,6 +278,19 @@ class AppConfig:
         ).strip().lower()
         if autonomy_level not in {"l0", "l1", "l2", "l3", "l4", "l5"}:
             autonomy_level = "l3"
+        autonomy_policy_pack_path = Path(
+            env.get(
+                "AMARYLLIS_AUTONOMY_POLICY_PACK_PATH",
+                str(Path.cwd() / "policies" / "autonomy" / "default.json"),
+            )
+        ).expanduser()
+        if not autonomy_policy_pack_path.is_absolute():
+            autonomy_policy_pack_path = Path.cwd() / autonomy_policy_pack_path
+        autonomy_policy_pack_path = autonomy_policy_pack_path.resolve()
+        try:
+            _ = load_autonomy_policy_pack(autonomy_policy_pack_path)
+        except AutonomyPolicyPackError as exc:
+            raise AppConfigError(f"Invalid autonomy policy pack configuration: {exc}") from exc
         api_release_channel = env.get(
             "AMARYLLIS_RELEASE_CHANNEL",
             "stable",
@@ -570,6 +585,7 @@ class AppConfig:
             chat_max_input_chars=max(2000, int(env.get("AMARYLLIS_CHAT_MAX_INPUT_CHARS", "50000"))),
             chat_max_tokens=max(64, int(env.get("AMARYLLIS_CHAT_MAX_TOKENS", "4096"))),
             autonomy_level=autonomy_level,
+            autonomy_policy_pack_path=autonomy_policy_pack_path,
             tool_approval_enforcement=tool_approval_enforcement,
             tool_isolation_profile=tool_isolation_profile,
             tool_budget_window_sec=max(1.0, float(env.get("AMARYLLIS_TOOL_BUDGET_WINDOW_SEC", "60"))),

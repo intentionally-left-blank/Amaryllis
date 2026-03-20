@@ -43,14 +43,14 @@ Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reprodu
 | P2-C01 | done | Version SLO profiles and quality budgets | `slo_profiles/*.json` + docs | SLO targets and error-budget policy are versioned and environment-scoped |
 | P2-C02 | done | Add blocking perf gate for critical paths (chat/run/voice/stream) | CI perf workflow + thresholds | PR fails on p95/error regressions above budget for critical paths |
 | P2-C03 | done | Add fault-injection reliability gate | chaos test suite + report | Retry/recovery behavior is validated for provider/tool/network fault classes |
-| P2-C04 | todo | Add concurrency/load gate for mission queue | load test harness + SLO assertions | Queue stability and success-rate gates pass at target concurrent load |
-| P2-C05 | todo | Add SLO burn-rate regression gate for nightly runs | nightly burn-rate trend job | Nightly pipeline flags sustained error-budget burn anomalies automatically |
+| P2-C04 | done | Add concurrency/load gate for mission queue | load test harness + SLO assertions | Queue stability and success-rate gates pass at target concurrent load |
+| P2-C05 | done | Add SLO burn-rate regression gate for nightly runs | nightly burn-rate trend job | Nightly pipeline flags sustained error-budget burn anomalies automatically |
 
 ### Epic D - Trust and Autonomy Controls (L2-L3)
 
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
-| P2-D01 | todo | Define policy-pack contract for autonomy levels | policy schema + validators | L2/L3 behavior is policy-driven, not hardcoded, with strict validation |
+| P2-D01 | done | Define policy-pack contract for autonomy levels | policy schema + validators | L2/L3 behavior is policy-driven, not hardcoded, with strict validation |
 | P2-D02 | todo | Add mission simulation mode before autonomous execution | simulation endpoint/UI + dry-run receipts | User can preview full action plan, risk tags, and rollback hints before apply |
 | P2-D03 | todo | Add dynamic mission budgets with guardrail escalations | budget controller + escalation policies | Budget breaches produce deterministic pause/escalation/kill-switch behavior |
 | P2-D04 | todo | Add audit timeline UX for autonomous actions | mission audit panel + export | Every autonomous action chain is inspectable/exportable with actor/policy context |
@@ -78,6 +78,9 @@ Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reprodu
 | P2-C01 | done | versioned SLO profiles and quality budget policy |
 | P2-C02 | done | blocking perf gate for chat/run/voice/stream critical paths |
 | P2-C03 | done | fault-injection reliability gate for provider/network/tool fault classes with blocking CI report |
+| P2-C04 | done | mission queue concurrency/load gate with blocking SLO assertions and report artifact |
+| P2-C05 | done | nightly SLO burn-rate regression gate with sustained anomaly detection and report artifact |
+| P2-D01 | done | autonomy policy-pack contract (`schema v1`) + strict validator gate + runtime fail-fast binding |
 | P2-E01 | done | Linux parity matrix and acceptance smoke gates |
 
 ## Next Checkpoint
@@ -92,4 +95,7 @@ Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reprodu
   - first versioned SLO profile set with budget policy documented,
   - baseline CI perf gate for at least run + stream paths,
   - blocking fault-injection reliability gate covering provider/network/tool fault classes,
+  - blocking mission queue concurrency/load gate with queue-drain + p95 latency + success-rate assertions,
+  - nightly SLO burn-rate regression gate with sustained anomaly detection,
+  - autonomy policy-pack contract and strict validator gate for L2/L3 behavior (policy-driven, not hardcoded),
   - Linux parity checklist with automated smoke report artifact.

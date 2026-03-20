@@ -211,6 +211,22 @@ class ConfigSecurityDefaultsTests(unittest.TestCase):
         self.assertEqual(by_token["token-user"].user_id, "user-1")
         self.assertEqual(set(by_token["token-service"].scopes), {"service"})
 
+    def test_invalid_autonomy_policy_pack_path_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="amaryllis-config-tests-") as tmp:
+            support_dir = Path(tmp) / "support"
+            missing_pack = Path(tmp) / "missing-policy-pack.json"
+            with patch.dict(
+                os.environ,
+                {
+                    "AMARYLLIS_SUPPORT_DIR": str(support_dir),
+                    "AMARYLLIS_AUTH_TOKENS": "token-1:user-1:user",
+                    "AMARYLLIS_AUTONOMY_POLICY_PACK_PATH": str(missing_pack),
+                },
+                clear=True,
+            ):
+                with self.assertRaisesRegex(AppConfigError, "autonomy policy pack"):
+                    AppConfig.from_env()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+import tempfile
 import unittest
 
 from tools.autonomy_policy import AutonomyPolicy, normalize_autonomy_level
+from tools.autonomy_policy_pack import default_policy_pack_path, load_autonomy_policy_pack
 from tools.policy import ToolIsolationPolicy
-from tools.tool_executor import ToolExecutionError, ToolExecutor
+from tools.tool_executor import PermissionRequiredError, ToolExecutionError, ToolExecutor
 from tools.tool_registry import ToolRegistry
 
 
@@ -63,7 +67,7 @@ class ToolAutonomyTests(unittest.TestCase):
         with self.assertRaises(ToolExecutionError) as ctx:
             executor.execute("high_echo", {"text": "x"})
 
-        self.assertIn("autonomy level l2 blocks high-risk", str(ctx.exception).lower())
+        self.assertIn("autonomy level l2 blocks", str(ctx.exception).lower())
 
     def test_l2_requires_approval_for_medium_risk_tool(self) -> None:
         registry = _build_registry_with_medium_and_high_tools()
@@ -92,6 +96,51 @@ class ToolAutonomyTests(unittest.TestCase):
         self.assertIsInstance(autonomy, dict)
         assert isinstance(autonomy, dict)
         self.assertEqual(autonomy.get("level"), "l4")
+
+    def test_custom_policy_pack_can_override_l2_high_risk_behavior(self) -> None:
+        base_pack = load_autonomy_policy_pack(default_policy_pack_path())
+        payload = {
+            "schema_version": base_pack.schema_version,
+            "pack": "test_override_l2_high",
+            "description": "Test pack overriding l2/high behavior.",
+            "rules": {},
+        }
+        for level, rules in base_pack.levels.items():
+            payload["rules"][level] = {}
+            for risk, rule in rules.items():
+                payload["rules"][level][risk] = {
+                    "allow": bool(rule.allow),
+                    "requires_approval": bool(rule.requires_approval),
+                    "reason": rule.reason,
+                    "approval_scope": rule.approval_scope,
+                    "approval_ttl_sec": rule.approval_ttl_sec,
+                }
+        payload["rules"]["l2"]["high"] = {
+            "allow": True,
+            "requires_approval": True,
+            "reason": "L2 override: high-risk tool requires approval.",
+            "approval_scope": "request",
+            "approval_ttl_sec": 60,
+        }
+
+        with tempfile.TemporaryDirectory(prefix="amaryllis-tool-autonomy-tests-") as tmp:
+            pack_path = Path(tmp) / "override-policy-pack.json"
+            pack_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+            registry = _build_registry_with_medium_and_high_tools()
+            executor = ToolExecutor(
+                registry=registry,
+                policy=ToolIsolationPolicy(profile="balanced"),
+                autonomy_policy=AutonomyPolicy(level="l2", policy_pack_path=pack_path),
+                approval_enforcement_mode="prompt_and_allow",
+            )
+
+            with self.assertRaises(PermissionRequiredError) as ctx:
+                executor.execute("high_echo", {"text": "override"})
+
+            self.assertIn("permission required for tool 'high_echo'", str(ctx.exception).lower())
+            pending = executor.list_permission_prompts(status="pending", limit=10)
+            self.assertTrue(any(str(item.get("tool_name")) == "high_echo" for item in pending))
 
 
 if __name__ == "__main__":

@@ -39,6 +39,9 @@ echo "[bootstrap] validating dependency drift guard"
 echo "[bootstrap] validating runtime/SLO profile drift guard"
 "${VENV_PYTHON}" "${ROOT_DIR}/scripts/release/check_runtime_profile_drift.py"
 
+echo "[bootstrap] validating autonomy policy-pack contract"
+"${VENV_PYTHON}" "${ROOT_DIR}/scripts/release/check_autonomy_policy_pack.py"
+
 echo "[bootstrap] validating golden task suite schema"
 "${VENV_PYTHON}" "${ROOT_DIR}/scripts/eval/run_golden_tasks.py" --validate-only
 
