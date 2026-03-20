@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "manifest_version": "2026-03-20",
+  "python": {
+    "version": "3.11.11",
+    "bootstrap_binary": "python3.11",
+    "setup_action": "actions/setup-python@v5"
+  },
+  "swift": {
+    "tools_version": "5.9"
+  },
+  "ci": {
+    "runner": "ubuntu-latest",
+    "workflows": [
+      ".github/workflows/release-gate.yml",
+      ".github/workflows/security-gate.yml",
+      ".github/workflows/nightly-reliability.yml"
+    ]
+  },
+  "checks": {
+    "swift_package_file": "macos/AmaryllisApp/Package.swift",
+    "bootstrap_script": "scripts/bootstrap/reproducible_local_bootstrap.sh"
+  },
+  "system_dependencies": {
+    "linux": {
+      "apt_packages": [
+        "python3.11",
+        "python3.11-venv",
+        "git",
+        "build-essential"
+      ]
+    },
+    "macos": {
+      "brew_packages": [
+        "python@3.11"
+      ],
+      "xcode_cli_tools_required": true
+    }
+  }
+}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -27,6 +28,7 @@ from api.tool_api import router as tool_router
 from api.voice_api import router as voice_router
 from automation.automation_scheduler import AutomationScheduler
 from controller.meta_controller import MetaController
+from kernel.contracts import CognitionBackendContract
 from kernel.orchestration import KernelExecutorAdapter
 from memory.episodic_memory import EpisodicMemory
 from memory.consolidation_worker import MemoryConsolidationWorker
@@ -34,6 +36,11 @@ from memory.memory_manager import MemoryManager
 from memory.semantic_memory import SemanticMemory
 from memory.user_memory import UserMemory
 from memory.working_memory import WorkingMemory
+from models.cognition_backends import (
+    DeterministicCognitionBackend,
+    ModelManagerCognitionBackend,
+    ensure_cognition_backend_contract,
+)
 from models.model_manager import ModelManager
 from planner.planner import Planner
 from runtime.backup import BackupManager, BackupScheduler
@@ -66,7 +73,7 @@ class ServiceContainer:
     config: AppConfig
     database: Database
     vector_store: VectorStore
-    model_manager: ModelManager
+    model_manager: CognitionBackendContract
     memory_manager: MemoryManager
     tool_registry: ToolRegistry
     browser_adapter: BrowserActionAdapter
@@ -231,7 +238,14 @@ def create_services() -> ServiceContainer:
     voice_session_manager = VoiceSessionManager(telemetry_emitter=telemetry.emit)
     stt_adapter = create_stt_adapter_from_env()
 
-    model_manager = ModelManager(config=config, database=database)
+    raw_model_manager = ModelManager(config=config, database=database)
+    backend_mode = str(os.getenv("AMARYLLIS_COGNITION_BACKEND", "model_manager")).strip().lower()
+    if backend_mode in {"deterministic", "synthetic"}:
+        model_manager = ensure_cognition_backend_contract(DeterministicCognitionBackend())
+        logger.info("cognition_backend_selected backend=deterministic")
+    else:
+        model_manager = ensure_cognition_backend_contract(ModelManagerCognitionBackend(raw_model_manager))
+        logger.info("cognition_backend_selected backend=model_manager")
 
     meta_controller = MetaController()
     planner = Planner()

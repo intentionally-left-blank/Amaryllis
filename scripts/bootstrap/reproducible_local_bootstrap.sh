@@ -3,26 +3,21 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VENV_DIR="${AMARYLLIS_BOOTSTRAP_VENV:-${ROOT_DIR}/.venv}"
-PYTHON_BIN="${AMARYLLIS_BOOTSTRAP_PYTHON:-}"
-
-if [[ -z "${PYTHON_BIN}" ]]; then
-  if command -v python3.11 >/dev/null 2>&1; then
-    PYTHON_BIN="python3.11"
-  elif command -v python3 >/dev/null 2>&1; then
-    PYTHON_BIN="python3"
-  else
-    echo "[bootstrap] python3.11 or python3 is required" >&2
-    exit 2
-  fi
-fi
+PYTHON_BIN="${AMARYLLIS_BOOTSTRAP_PYTHON:-python3.11}"
 
 if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
   echo "[bootstrap] python executable not found: ${PYTHON_BIN}" >&2
+  echo "[bootstrap] install pinned toolchain python first or set AMARYLLIS_BOOTSTRAP_PYTHON explicitly" >&2
   exit 2
 fi
 
 echo "[bootstrap] project root: ${ROOT_DIR}"
 echo "[bootstrap] python: $(${PYTHON_BIN} --version)"
+echo "[bootstrap] validating toolchain drift guard"
+"${PYTHON_BIN}" "${ROOT_DIR}/scripts/release/check_toolchain_drift.py" \
+  --repo-root "${ROOT_DIR}" \
+  --check-python-executable "${PYTHON_BIN}"
+
 echo "[bootstrap] creating virtualenv: ${VENV_DIR}"
 "${PYTHON_BIN}" -m venv "${VENV_DIR}"
 

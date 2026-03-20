@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Protocol, runtime_checkable
+from typing import Any, Callable, Iterator, Protocol, runtime_checkable
 
 # Versioned cognitive-kernel contract surface.
 KERNEL_CONTRACTS_VERSION = "kernel.contracts.v1"
@@ -92,4 +92,100 @@ class ToolRouterContract(Protocol):
         ...
 
     def openai_schemas(self, selected: list[str] | None = None) -> list[dict[str, Any]]:
+        ...
+
+
+@runtime_checkable
+class CognitionBackendContract(Protocol):
+    """Backend cognition facade used by chat/runtime/model API layers."""
+
+    active_provider: str
+    active_model: str
+
+    def list_models(
+        self,
+        *,
+        include_suggested: bool = True,
+        include_remote_providers: bool = True,
+        max_items_per_provider: int | None = None,
+    ) -> dict[str, Any]:
+        ...
+
+    def provider_capabilities(self) -> dict[str, Any]:
+        ...
+
+    def provider_health(self) -> dict[str, Any]:
+        ...
+
+    def model_capability_matrix(
+        self,
+        *,
+        include_suggested: bool = True,
+        limit_per_provider: int = 120,
+    ) -> dict[str, Any]:
+        ...
+
+    def choose_route(
+        self,
+        *,
+        mode: str = "balanced",
+        provider: str | None = None,
+        model: str | None = None,
+        require_stream: bool = True,
+        require_tools: bool = False,
+        prefer_local: bool | None = None,
+        min_params_b: float | None = None,
+        max_params_b: float | None = None,
+        include_suggested: bool = False,
+        limit_per_provider: int = 120,
+    ) -> dict[str, Any]:
+        ...
+
+    def debug_failover_state(
+        self,
+        *,
+        session_id: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        ...
+
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        provider: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+        routing: dict[str, Any] | None = None,
+        fallback_targets: list[tuple[str, str]] | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        ...
+
+    def stream_chat(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        provider: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+        routing: dict[str, Any] | None = None,
+        fallback_targets: list[tuple[str, str]] | None = None,
+        session_id: str | None = None,
+    ) -> tuple[Iterator[str], str, str, dict[str, Any] | None]:
+        ...
+
+    def download_model(self, model_id: str, provider: str | None = None) -> dict[str, Any]:
+        ...
+
+    def start_model_download(self, model_id: str, provider: str | None = None) -> dict[str, Any]:
+        ...
+
+    def get_model_download_job(self, job_id: str) -> dict[str, Any]:
+        ...
+
+    def list_model_download_jobs(self, limit: int = 100) -> dict[str, Any]:
+        ...
+
+    def load_model(self, model_id: str, provider: str | None = None) -> dict[str, Any]:
         ...

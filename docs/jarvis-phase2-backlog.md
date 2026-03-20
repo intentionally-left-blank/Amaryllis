@@ -24,14 +24,14 @@ Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reprodu
 |---|---|---|---|---|
 | P2-A01 | done | Define cognitive kernel module contracts | ADR + `kernel/` contract interfaces | Planner/executor/memory/tool-router contracts are versioned and consumed via interfaces only |
 | P2-A02 | done | Extract orchestration core into modular kernel package | `kernel/orchestration/` + adapters | Runtime/API layers call kernel adapters, not internal orchestration classes directly |
-| P2-A03 | todo | Add backend cognition adapter abstraction (LLM/post-LLM swappable) | backend adapter contract + compatibility tests | At least two backends pass same contract suite with no API-layer changes |
+| P2-A03 | done | Add backend cognition adapter abstraction (LLM/post-LLM swappable) | backend adapter contract + compatibility tests | At least two backends pass same contract suite with no API-layer changes |
 | P2-A04 | done | Enforce architecture boundaries in CI for kernel stack | boundary-check rules + workflow gate | CI blocks forbidden imports across API/kernel/storage/UI layers |
 
 ### Epic B - Deterministic Reproducibility Chain
 
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
-| P2-B01 | todo | Pin full toolchain matrix (Python/Swift/system deps) | versioned toolchain manifest | Local bootstrap and CI resolve the same toolchain versions deterministically |
+| P2-B01 | done | Pin full toolchain matrix (Python/Swift/system deps) | versioned toolchain manifest | Local bootstrap and CI resolve the same toolchain versions deterministically |
 | P2-B02 | done | Introduce runtime profile manifests (`dev/ci/release`) | profile schema + validation | Runtime fails fast on missing/invalid profile values; profile drift check in CI |
 | P2-B03 | todo | Make eval/replay deterministic via seeds and fixture snapshots | deterministic eval mode + fixture policy | Same commit/profile yields same eval output within declared tolerance |
 | P2-B04 | todo | Add release provenance and SBOM generation | provenance artifact + SBOM in release pipeline | Each release artifact has signed provenance and dependency inventory |
@@ -69,7 +69,9 @@ Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reprodu
 |---|---|---|
 | P2-A01 | done | cognitive kernel interface contracts and ADR |
 | P2-A02 | done | orchestration core extracted into `kernel/orchestration` and runtime adapter wiring |
+| P2-A03 | done | cognition backend contract + swappable adapters (`model_manager`, `deterministic`) with compatibility tests |
 | P2-A04 | done | kernel boundary rules + CI enforcement |
+| P2-B01 | done | toolchain manifest (`runtime/toolchains/core.json`) + drift gate wiring in bootstrap/CI |
 | P2-B02 | done | runtime profile schema (`dev/ci/release`) and fail-fast validation |
 | P2-C01 | done | versioned SLO profiles and quality budget policy |
 | P2-C02 | done | blocking perf gate for chat/run/voice/stream critical paths |
@@ -79,6 +81,8 @@ Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reprodu
 - Deliver sprint result with:
   - approved kernel contract ADR and initial `kernel` interface package,
   - orchestration core extraction under `kernel/orchestration` with adapter wiring at runtime boundaries,
+  - backend cognition adapter contract with at least two interchangeable implementations,
+  - pinned toolchain manifest (Python/Swift/system deps) with blocking drift checks for bootstrap + CI workflows,
   - profile schema and validation path wired into runtime startup,
   - first versioned SLO profile set with budget policy documented,
   - baseline CI perf gate for at least run + stream paths,

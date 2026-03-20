@@ -11,9 +11,9 @@ import httpx
 
 from agents.agent import Agent
 from controller.meta_controller import MetaController
+from kernel.contracts import CognitionBackendContract
 from kernel.orchestration import execute_task_run
 from memory.memory_manager import MemoryManager
-from models.model_manager import ModelManager
 from planner.planner import Planner
 from tasks.execution.step_executors import execute_step_general, register_default_step_executors
 from tasks.step_registry import StepExecutionContext, StepExecutionResult, StepExecutorRegistry
@@ -49,7 +49,7 @@ class TaskBudgetError(TaskGuardrailError):
 class TaskExecutor:
     def __init__(
         self,
-        model_manager: ModelManager,
+        model_manager: CognitionBackendContract,
         memory_manager: MemoryManager,
         tool_registry: ToolRegistry,
         tool_executor: ToolExecutor,

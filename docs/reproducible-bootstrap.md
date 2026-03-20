@@ -11,6 +11,7 @@ From repository root:
 ```
 
 The script will:
+- validate toolchain manifest drift (`scripts/release/check_toolchain_drift.py`) and pinned Python runtime,
 - create a virtual environment (`.venv` by default),
 - install deterministic dependencies from `requirements.lock`,
 - run dependency drift guard (`scripts/release/check_dependency_drift.py`),
@@ -20,7 +21,7 @@ The script will:
 ## Environment Variables
 
 - `AMARYLLIS_BOOTSTRAP_VENV`: custom venv directory (default: `<repo>/.venv`)
-- `AMARYLLIS_BOOTSTRAP_PYTHON`: explicit python executable (`python3.11`, `python3`, custom path)
+- `AMARYLLIS_BOOTSTRAP_PYTHON`: explicit python executable (default and pinned: `python3.11`)
 
 Examples:
 

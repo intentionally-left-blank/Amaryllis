@@ -254,6 +254,7 @@ Reproducible bootstrap path (recommended for clean machine / CI parity):
 Deterministic dependency path (manual):
 
 ```bash
+python scripts/release/check_toolchain_drift.py
 pip install -r requirements.lock
 python scripts/release/check_dependency_drift.py
 python scripts/release/check_runtime_profile_drift.py
@@ -263,6 +264,7 @@ python scripts/eval/run_golden_tasks.py --validate-only
 Reference:
 - `docs/reproducible-bootstrap.md`
 - `docs/runtime-profiles.md`
+- `docs/toolchain-manifest.md`
 
 ## Run
 
@@ -1326,6 +1328,7 @@ Release/pull-request gate is blocking and includes:
   - `openai/anthropic/openrouter -> mlx/ollama` when cloud calls fail (for example `429` quota/rate-limit)
 - You can optionally enable remote cloud providers: OpenAI, Anthropic and OpenRouter.
 - Configure runtime via env:
+  - `AMARYLLIS_COGNITION_BACKEND=model_manager|deterministic`
   - `AMARYLLIS_AUTH_ENABLED=true|false`
   - `AMARYLLIS_AUTH_TOKENS=token-user:user-001:user,token-admin:admin:admin|user,token-service:svc:service`
   - `AMARYLLIS_SECURITY_PROFILE=production|development`
@@ -1418,6 +1421,7 @@ export AMARYLLIS_HOST=localhost
 export AMARYLLIS_PORT=8000
 export AMARYLLIS_DEFAULT_PROVIDER=mlx
 export AMARYLLIS_DEFAULT_MODEL=mlx-community/Qwen2.5-1.5B-Instruct-4bit
+export AMARYLLIS_COGNITION_BACKEND=model_manager
 export AMARYLLIS_AUTH_ENABLED=true
 export AMARYLLIS_AUTH_TOKENS="token-user:user-001:user,token-admin:admin:admin|user,token-service:svc:service"
 export AMARYLLIS_SECURITY_PROFILE=production
@@ -1597,6 +1601,7 @@ scripts/release/rollback_local.sh <tag-or-commit>
 - Phase 1 implementation backlog (Developer Jarvis Alpha): `docs/jarvis-phase1-backlog.md`
 - Phase 2 implementation backlog (Tier-1 Operator Beta): `docs/jarvis-phase2-backlog.md`
 - ADR-0001 (kernel contract surface v1): `docs/adr-0001-cognitive-kernel-contracts.md`
+- Cognition backend abstraction and runtime switching: `docs/cognition-backends.md`
 - Runtime/SLO profiles and quality budgets: `docs/runtime-profiles.md`
 
 ## License
