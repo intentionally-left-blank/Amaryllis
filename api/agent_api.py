@@ -285,6 +285,9 @@ def get_agent_run(
 def replay_agent_run(
     request: Request,
     run_id: str = Path(..., min_length=1),
+    stage: list[str] | None = Query(default=None),
+    attempt: int | None = Query(default=None, ge=1, le=100),
+    timeline_limit: int = Query(default=0, ge=0, le=5000),
 ) -> dict[str, Any]:
     services = request.app.state.services
     auth = auth_context_from_request(request)
@@ -296,9 +299,70 @@ def replay_agent_run(
             resource_name="agent_run",
             resource_id=run_id,
         )
-        replay = services.agent_manager.replay_run(run_id=run_id)
+        replay = services.agent_manager.replay_run_filtered(
+            run_id=run_id,
+            stages=stage,
+            attempt=attempt,
+            timeline_limit=timeline_limit,
+        )
         return {
             "replay": replay,
+            "request_id": _request_id(request),
+        }
+    except ValueError as exc:
+        raise NotFoundError(str(exc)) from exc
+    except AmaryllisError:
+        raise
+    except Exception as exc:
+        raise ProviderError(str(exc)) from exc
+
+
+@router.get("/agents/runs/{run_id}/diagnostics")
+def diagnose_agent_run(
+    request: Request,
+    run_id: str = Path(..., min_length=1),
+) -> dict[str, Any]:
+    services = request.app.state.services
+    auth = auth_context_from_request(request)
+    try:
+        run = services.agent_manager.get_run(run_id=run_id)
+        assert_owner(
+            owner_user_id=str(run.get("user_id") or ""),
+            auth=auth,
+            resource_name="agent_run",
+            resource_id=run_id,
+        )
+        diagnostics = services.agent_manager.diagnose_run(run_id=run_id)
+        return {
+            "diagnostics": diagnostics,
+            "request_id": _request_id(request),
+        }
+    except ValueError as exc:
+        raise NotFoundError(str(exc)) from exc
+    except AmaryllisError:
+        raise
+    except Exception as exc:
+        raise ProviderError(str(exc)) from exc
+
+
+@router.get("/agents/runs/{run_id}/diagnostics/package")
+def diagnostics_package_agent_run(
+    request: Request,
+    run_id: str = Path(..., min_length=1),
+) -> dict[str, Any]:
+    services = request.app.state.services
+    auth = auth_context_from_request(request)
+    try:
+        run = services.agent_manager.get_run(run_id=run_id)
+        assert_owner(
+            owner_user_id=str(run.get("user_id") or ""),
+            auth=auth,
+            resource_name="agent_run",
+            resource_id=run_id,
+        )
+        package = services.agent_manager.build_run_diagnostics_package(run_id=run_id)
+        return {
+            "package": package,
             "request_id": _request_id(request),
         }
     except ValueError as exc:

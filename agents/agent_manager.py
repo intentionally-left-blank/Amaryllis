@@ -149,6 +149,33 @@ class AgentManager:
             raise ValueError("Run manager is not configured")
         return self.run_manager.replay_run(run_id)
 
+    def replay_run_filtered(
+        self,
+        run_id: str,
+        *,
+        stages: list[str] | None = None,
+        attempt: int | None = None,
+        timeline_limit: int | None = None,
+    ) -> dict[str, Any]:
+        if self.run_manager is None:
+            raise ValueError("Run manager is not configured")
+        return self.run_manager.replay_run_filtered(
+            run_id,
+            stages=stages,
+            attempt=attempt,
+            timeline_limit=timeline_limit,
+        )
+
+    def diagnose_run(self, run_id: str) -> dict[str, Any]:
+        if self.run_manager is None:
+            raise ValueError("Run manager is not configured")
+        return self.run_manager.diagnose_run(run_id)
+
+    def build_run_diagnostics_package(self, run_id: str) -> dict[str, Any]:
+        if self.run_manager is None:
+            raise ValueError("Run manager is not configured")
+        return self.run_manager.build_run_diagnostics_package(run_id)
+
     def list_run_issues(self, run_id: str, limit: int = 200) -> list[dict[str, Any]]:
         if self.run_manager is None:
             raise ValueError("Run manager is not configured")

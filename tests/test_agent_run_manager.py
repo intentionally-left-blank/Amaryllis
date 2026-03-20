@@ -581,6 +581,155 @@ class AgentRunManagerTests(unittest.TestCase):
         self.assertIsInstance(status_breakdown, dict)
         self.assertGreaterEqual(int(status_breakdown.get("done", 0)), 1)
 
+    def test_replay_run_filtered_by_stage_and_attempt(self) -> None:
+        self.executor.fail_first = True
+        self.manager.start()
+        run = self.manager.create_run(
+            agent=self.agent,
+            user_id="user-1",
+            session_id="session-replay-filtered",
+            user_message="filtered replay",
+            max_attempts=2,
+        )
+        final = self._wait_for_status(run["id"], {"succeeded"})
+        self.assertIsNotNone(final)
+
+        replay_errors = self.manager.replay_run_filtered(
+            run["id"],
+            stages=["error"],
+            timeline_limit=20,
+        )
+        timeline_errors = replay_errors.get("timeline", [])
+        self.assertIsInstance(timeline_errors, list)
+        self.assertGreaterEqual(len(timeline_errors), 1)
+        self.assertTrue(all(str(item.get("stage")) == "error" for item in timeline_errors))
+
+        replay_attempt_one = self.manager.replay_run_filtered(
+            run["id"],
+            attempt=1,
+            timeline_limit=200,
+        )
+        timeline_attempt_one = replay_attempt_one.get("timeline", [])
+        self.assertIsInstance(timeline_attempt_one, list)
+        self.assertGreaterEqual(len(timeline_attempt_one), 1)
+        self.assertTrue(all(int(item.get("attempt", 0)) == 1 for item in timeline_attempt_one))
+
+        self.assertGreaterEqual(
+            int(replay_attempt_one.get("timeline_total_count", 0)),
+            int(replay_attempt_one.get("timeline_filtered_count", 0)),
+        )
+
+    def test_diagnose_run_returns_compact_summary_for_success(self) -> None:
+        self.manager.start()
+        run = self.manager.create_run(
+            agent=self.agent,
+            user_id="user-1",
+            session_id="session-diagnostics-success",
+            user_message="diagnose success",
+            max_attempts=2,
+        )
+        final = self._wait_for_status(run["id"], {"succeeded"})
+        self.assertIsNotNone(final)
+
+        diagnostics = self.manager.diagnose_run(run["id"])
+        self.assertEqual(str(diagnostics.get("status")), "succeeded")
+        self.assertEqual(str(diagnostics.get("failure_class")), "none")
+
+        diag_payload = diagnostics.get("diagnostics", {})
+        self.assertIsInstance(diag_payload, dict)
+        assert isinstance(diag_payload, dict)
+        warnings = diag_payload.get("warnings", [])
+        self.assertIsInstance(warnings, list)
+        assert isinstance(warnings, list)
+        self.assertNotIn("run_terminal_non_success", warnings)
+        actions = diag_payload.get("recommended_actions", [])
+        self.assertIn("No corrective action required.", actions)
+
+    def test_diagnose_run_detects_budget_failure(self) -> None:
+        self.executor = _FakeTaskExecutor(
+            emit_tool_finished_count=2,
+            emit_tool_error_count=0,
+        )
+        self.manager = AgentRunManager(
+            database=self.database,
+            task_executor=self.executor,  # type: ignore[arg-type]
+            worker_count=1,
+            default_max_attempts=1,
+            retry_backoff_sec=0.0,
+            retry_max_backoff_sec=0.0,
+            retry_jitter_sec=0.0,
+        )
+        self.manager.start()
+        run = self.manager.create_run(
+            agent=self.agent,
+            user_id="user-1",
+            session_id="session-diagnostics-budget",
+            user_message="tool budget failure",
+            max_attempts=1,
+            budget={
+                "max_tokens": 10_000,
+                "max_duration_sec": 60,
+                "max_tool_calls": 1,
+                "max_tool_errors": 2,
+            },
+        )
+        final = self._wait_for_status(run["id"], {"failed"})
+        self.assertIsNotNone(final)
+
+        diagnostics = self.manager.diagnose_run(run["id"])
+        self.assertEqual(str(diagnostics.get("status")), "failed")
+        self.assertEqual(str(diagnostics.get("failure_class")), "budget_exceeded")
+        self.assertEqual(str(diagnostics.get("stop_reason")), "budget_exceeded")
+
+        diag_payload = diagnostics.get("diagnostics", {})
+        self.assertIsInstance(diag_payload, dict)
+        assert isinstance(diag_payload, dict)
+        warnings = diag_payload.get("warnings", [])
+        self.assertIn("budget_exceeded", warnings)
+        self.assertIn("run_terminal_non_success", warnings)
+        actions = diag_payload.get("recommended_actions", [])
+        self.assertTrue(
+            any("Increase run budget limits" in str(item) for item in actions),
+        )
+
+    def test_build_run_diagnostics_package_contains_replay_and_evidence(self) -> None:
+        self.manager.start()
+        run = self.manager.create_run(
+            agent=self.agent,
+            user_id="user-1",
+            session_id="session-diagnostics-package",
+            user_message="diagnostics package",
+            max_attempts=2,
+        )
+        final = self._wait_for_status(run["id"], {"succeeded"})
+        self.assertIsNotNone(final)
+
+        package = self.manager.build_run_diagnostics_package(run["id"])
+        self.assertEqual(str(package.get("package_version")), "run-diagnostics.v1")
+        self.assertTrue(str(package.get("generated_at") or "").strip())
+
+        run_payload = package.get("run", {})
+        self.assertIsInstance(run_payload, dict)
+        assert isinstance(run_payload, dict)
+        self.assertEqual(str(run_payload.get("run_id")), run["id"])
+
+        diagnostics = package.get("diagnostics", {})
+        self.assertIsInstance(diagnostics, dict)
+        assert isinstance(diagnostics, dict)
+        self.assertEqual(str(diagnostics.get("run_id")), run["id"])
+
+        replay = package.get("replay", {})
+        self.assertIsInstance(replay, dict)
+        assert isinstance(replay, dict)
+        self.assertGreaterEqual(int(replay.get("checkpoint_count", 0)), 1)
+
+        evidence = package.get("evidence", {})
+        self.assertIsInstance(evidence, dict)
+        assert isinstance(evidence, dict)
+        self.assertIn("issues", evidence)
+        self.assertIn("issue_artifacts", evidence)
+        self.assertIn("tool_calls", evidence)
+
     def test_list_run_issues_returns_persisted_states(self) -> None:
         self.manager.start()
         run = self.manager.create_run(

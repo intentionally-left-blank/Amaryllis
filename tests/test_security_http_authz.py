@@ -282,6 +282,48 @@ class SecurityHTTPAuthzTests(unittest.TestCase):
         self.assertEqual(foreign_cancel.status_code, 403)
         self.assertEqual(foreign_cancel.json()["error"]["type"], "permission_denied")
 
+        foreign_diagnostics = self.client.get(
+            f"/agents/runs/{run_id}/diagnostics",
+            headers=self._auth("user2-token"),
+        )
+        self.assertEqual(foreign_diagnostics.status_code, 403)
+        self.assertEqual(foreign_diagnostics.json()["error"]["type"], "permission_denied")
+
+        own_diagnostics = self.client.get(
+            f"/agents/runs/{run_id}/diagnostics",
+            headers=self._auth("user-token"),
+        )
+        self.assertEqual(own_diagnostics.status_code, 200)
+        own_payload = own_diagnostics.json()
+        self.assertEqual(str(own_payload.get("diagnostics", {}).get("run_id")), run_id)
+
+        foreign_package = self.client.get(
+            f"/agents/runs/{run_id}/diagnostics/package",
+            headers=self._auth("user2-token"),
+        )
+        self.assertEqual(foreign_package.status_code, 403)
+        self.assertEqual(foreign_package.json()["error"]["type"], "permission_denied")
+
+        own_package = self.client.get(
+            f"/agents/runs/{run_id}/diagnostics/package",
+            headers=self._auth("user-token"),
+        )
+        self.assertEqual(own_package.status_code, 200)
+        own_package_payload = own_package.json()
+        self.assertEqual(str(own_package_payload.get("package", {}).get("run", {}).get("run_id")), run_id)
+
+        own_replay_filtered = self.client.get(
+            f"/agents/runs/{run_id}/replay",
+            headers=self._auth("user-token"),
+            params={"stage": "running", "timeline_limit": 10},
+        )
+        self.assertEqual(own_replay_filtered.status_code, 200)
+        replay_payload = own_replay_filtered.json().get("replay", {})
+        self.assertEqual(
+            replay_payload.get("timeline_filters", {}).get("stages"),
+            ["running"],
+        )
+
     def test_high_risk_tool_receipts_include_policy_and_rollback_context(self) -> None:
         session_id = "security-http-authz-high-risk-session"
         arguments = {"echo": "receipt-check"}

@@ -640,6 +640,188 @@ class AgentRunManager:
             "error_message": run.get("error_message"),
         }
 
+    def replay_run_filtered(
+        self,
+        run_id: str,
+        *,
+        stages: list[str] | None = None,
+        attempt: int | None = None,
+        timeline_limit: int | None = None,
+    ) -> dict[str, Any]:
+        replay = self.replay_run(run_id)
+        raw_timeline = replay.get("timeline")
+        timeline = [item for item in raw_timeline if isinstance(item, dict)] if isinstance(raw_timeline, list) else []
+        total_count = len(timeline)
+
+        stage_filter = {
+            str(item).strip().lower()
+            for item in (stages or [])
+            if str(item).strip()
+        }
+        filtered = timeline
+        if stage_filter:
+            filtered = [item for item in filtered if str(item.get("stage") or "").strip().lower() in stage_filter]
+
+        attempt_filter = int(attempt) if attempt is not None else None
+        if attempt_filter is not None and attempt_filter > 0:
+            filtered = [item for item in filtered if self._normalize_attempt(item.get("attempt")) == attempt_filter]
+
+        limit = max(0, int(timeline_limit or 0))
+        if limit > 0 and len(filtered) > limit:
+            filtered = filtered[-limit:]
+
+        replay_filtered = dict(replay)
+        replay_filtered["timeline"] = filtered
+        replay_filtered["timeline_total_count"] = total_count
+        replay_filtered["timeline_filtered_count"] = len(filtered)
+        replay_filtered["timeline_filters"] = {
+            "stages": sorted(stage_filter),
+            "attempt": attempt_filter,
+            "timeline_limit": limit,
+        }
+        return replay_filtered
+
+    def diagnose_run(self, run_id: str) -> dict[str, Any]:
+        replay = self.replay_run(run_id)
+        metrics = replay.get("metrics")
+        metrics_dict = dict(metrics) if isinstance(metrics, dict) else {}
+
+        attempts = max(0, int(replay.get("attempts", 0)))
+        max_attempts = max(0, int(replay.get("max_attempts", 0)))
+        status = str(replay.get("status") or "").strip().lower() or "unknown"
+        stop_reason = str(replay.get("stop_reason") or "").strip().lower() or "none"
+        failure_class = str(replay.get("failure_class") or "").strip().lower() or "none"
+
+        checkpoint_count = max(0, int(replay.get("checkpoint_count", 0)))
+        timeline = replay.get("timeline")
+        stage_breakdown: dict[str, int] = {}
+        if isinstance(timeline, list):
+            for event in timeline:
+                if not isinstance(event, dict):
+                    continue
+                stage = str(event.get("stage") or "").strip().lower() or "unknown"
+                stage_breakdown[stage] = int(stage_breakdown.get(stage, 0)) + 1
+
+        issue_summary = replay.get("issue_summary")
+        issue_summary_dict = dict(issue_summary) if isinstance(issue_summary, dict) else {}
+        status_breakdown_raw = issue_summary_dict.get("status_breakdown")
+        status_breakdown = dict(status_breakdown_raw) if isinstance(status_breakdown_raw, dict) else {}
+        blocked_issues = max(0, int(status_breakdown.get("blocked", 0)))
+
+        tool_status_breakdown_raw = issue_summary_dict.get("tool_call_status_breakdown")
+        tool_status_breakdown = (
+            dict(tool_status_breakdown_raw) if isinstance(tool_status_breakdown_raw, dict) else {}
+        )
+        tool_call_total = 0
+        tool_call_failures = 0
+        for key, value in tool_status_breakdown.items():
+            count = max(0, self._safe_int(value, 0))
+            tool_call_total += count
+            normalized_key = str(key or "").strip().lower()
+            if normalized_key not in {"succeeded"}:
+                tool_call_failures += count
+
+        warnings: list[str] = []
+        if attempts > 1:
+            warnings.append("run_required_retries")
+        if status in {"failed", "canceled"}:
+            warnings.append("run_terminal_non_success")
+        if blocked_issues > 0:
+            warnings.append("issues_blocked")
+        if tool_call_failures > 0:
+            warnings.append("tool_failures_detected")
+        if stop_reason == "max_attempts_exhausted":
+            warnings.append("max_attempts_exhausted")
+        if failure_class in {"timeout", "rate_limit", "network", "server", "unavailable", "circuit_open"}:
+            warnings.append("transient_infra_failures")
+        if failure_class == "budget_exceeded":
+            warnings.append("budget_exceeded")
+
+        recommendations: list[str] = []
+        if stop_reason == "max_attempts_exhausted":
+            recommendations.append("Increase max_attempts or reduce upstream/provider instability.")
+        if failure_class == "budget_exceeded":
+            recommendations.append("Increase run budget limits or reduce token/tool usage per attempt.")
+        if failure_class == "invalid_request":
+            recommendations.append("Validate run input, tool schemas, and prompt contract before execution.")
+        if failure_class == "guardrail":
+            recommendations.append("Review guardrail thresholds and adjust policy only with explicit risk sign-off.")
+        if stop_reason == KILL_SWITCH_STOP_REASON:
+            recommendations.append("Inspect kill-switch trigger source and restart mission with updated constraints.")
+        if tool_call_failures > 0:
+            recommendations.append("Inspect tool failure details and stabilize tool dependencies before rerun.")
+        if not recommendations and status == "succeeded" and attempts == 1:
+            recommendations.append("No corrective action required.")
+
+        return {
+            "run_id": str(replay.get("run_id") or run_id),
+            "status": status,
+            "stop_reason": stop_reason,
+            "failure_class": failure_class,
+            "attempts": attempts,
+            "max_attempts": max_attempts,
+            "metrics": metrics_dict,
+            "issue_summary": issue_summary_dict,
+            "timeline_summary": {
+                "checkpoint_count": checkpoint_count,
+                "stage_breakdown": stage_breakdown,
+            },
+            "diagnostics": {
+                "warnings": warnings,
+                "recommended_actions": recommendations,
+                "signals": {
+                    "blocked_issues": blocked_issues,
+                    "tool_calls_total": tool_call_total,
+                    "tool_call_failures": tool_call_failures,
+                    "retry_count": max(0, attempts - 1),
+                },
+            },
+        }
+
+    def build_run_diagnostics_package(self, run_id: str) -> dict[str, Any]:
+        replay = self.replay_run(run_id)
+        diagnostics = self.diagnose_run(run_id)
+        run_id_normalized = str(replay.get("run_id") or run_id)
+        run_snapshot = {
+            "run_id": run_id_normalized,
+            "agent_id": replay.get("agent_id"),
+            "user_id": replay.get("user_id"),
+            "session_id": replay.get("session_id"),
+            "status": replay.get("status"),
+            "stop_reason": replay.get("stop_reason"),
+            "failure_class": replay.get("failure_class"),
+            "attempts": replay.get("attempts"),
+            "max_attempts": replay.get("max_attempts"),
+            "budget": replay.get("budget", {}),
+            "metrics": replay.get("metrics", {}),
+            "has_result": bool(replay.get("has_result")),
+            "error_message": replay.get("error_message"),
+        }
+
+        replay_bundle = {
+            "checkpoint_count": max(0, int(replay.get("checkpoint_count", 0))),
+            "timeline": replay.get("timeline", []),
+            "attempt_summary": replay.get("attempt_summary", []),
+            "resume_snapshots": replay.get("resume_snapshots", []),
+            "latest_resume_state": replay.get("latest_resume_state"),
+        }
+
+        evidence_bundle = {
+            "issues": replay.get("issues", []),
+            "issue_artifacts": replay.get("issue_artifacts", []),
+            "tool_calls": replay.get("tool_calls", []),
+            "issue_summary": replay.get("issue_summary", {}),
+        }
+
+        return {
+            "package_version": "run-diagnostics.v1",
+            "generated_at": self._utc_now(),
+            "run": run_snapshot,
+            "diagnostics": diagnostics,
+            "replay": replay_bundle,
+            "evidence": evidence_bundle,
+        }
+
     def get_run_health(
         self,
         *,

@@ -54,6 +54,7 @@ Implemented in this version:
 - versioned API aliases for core routes under `/v1/*` with compatibility contract gate
 - release gate assets: compatibility script, canary smoke script, disaster-recovery gate, compliance gate, rollback playbook
 - lease/CAS ownership for agent runs (single-owner execution under concurrent workers)
+- compact run diagnostics endpoint for mission postmortem (`GET /agents/runs/{run_id}/diagnostics`)
 - typed planner step execution with step contracts (pre/post conditions), verifier, retry and replan
 - modular step executor package (`tasks/execution/step_executors.py`) separated from run orchestration
 - production-grade backup and DR foundation (scheduled backups, retention, verification, restore drills)
@@ -646,6 +647,24 @@ curl "http://localhost:8000/agents/runs/<run_id>"
 curl "http://localhost:8000/agents/runs/<run_id>/replay"
 ```
 
+Filtered replay (server-side timeline filtering for HUD):
+
+```bash
+curl "http://localhost:8000/agents/runs/<run_id>/replay?stage=error&attempt=1&timeline_limit=50"
+```
+
+### Work Mode: run diagnostics summary (warnings + actions)
+
+```bash
+curl "http://localhost:8000/agents/runs/<run_id>/diagnostics"
+```
+
+### Work Mode: export run diagnostics package (replay + evidence bundle)
+
+```bash
+curl "http://localhost:8000/agents/runs/<run_id>/diagnostics/package"
+```
+
 ### Work Mode: list issue states for run
 
 ```bash
@@ -767,6 +786,8 @@ Implemented now:
 - manual cancel and resume APIs
 - emergency run kill-switch API (`POST /service/runs/kill-switch`)
 - checkpoint replay API (`GET /agents/runs/{run_id}/replay`) with timeline + attempt summary
+- run diagnostics API (`GET /agents/runs/{run_id}/diagnostics`) with compact warnings and remediation hints
+- run diagnostics package API (`GET /agents/runs/{run_id}/diagnostics/package`) with replay and evidence bundle
 - run issues API (`GET /agents/runs/{run_id}/issues`)
 - run artifacts API (`GET /agents/runs/{run_id}/artifacts`)
 - run health/SLO debug API (`GET /debug/agents/runs/health`)
@@ -1417,6 +1438,7 @@ scripts/release/rollback_local.sh <tag-or-commit>
 
 - Strategy and phased execution plan: `docs/jarvis-roadmap.md`
 - Phase 0 implementation backlog (with DoD and sprint status): `docs/jarvis-phase0-backlog.md`
+- Phase 1 implementation backlog (Developer Jarvis Alpha): `docs/jarvis-phase1-backlog.md`
 
 ## License
 
