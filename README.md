@@ -55,6 +55,7 @@ Implemented in this version:
 - release gate assets: compatibility script, canary smoke script, disaster-recovery gate, compliance gate, rollback playbook
 - lease/CAS ownership for agent runs (single-owner execution under concurrent workers)
 - compact run diagnostics endpoint for mission postmortem (`GET /agents/runs/{run_id}/diagnostics`)
+- voice push-to-talk session contract with explicit state transitions (`created -> listening -> stopping -> stopped`)
 - typed planner step execution with step contracts (pre/post conditions), verifier, retry and replan
 - modular step executor package (`tasks/execution/step_executors.py`) separated from run orchestration
 - production-grade backup and DR foundation (scheduled backups, retention, verification, restore drills)
@@ -212,6 +213,8 @@ Service backup/DR endpoints:
 │   ├── sandboxed_tools.py
 │   ├── tool_executor.py
 │   └── tool_registry.py
+├── voice
+│   └── session_manager.py
 ├── LICENSE
 ├── README.md
 └── requirements.txt
@@ -555,6 +558,41 @@ curl -X POST http://localhost:8000/v1/chat/completions \
     "routing": {"mode": "balanced", "require_stream": false},
     "stream": false
   }'
+```
+
+## Voice API (PTT Foundation)
+
+Start voice session:
+
+```bash
+curl -X POST http://localhost:8000/voice/sessions/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user-001",
+    "mode": "ptt",
+    "sample_rate_hz": 16000,
+    "input_device": "default"
+  }'
+```
+
+Get voice session:
+
+```bash
+curl "http://localhost:8000/voice/sessions/<session_id>"
+```
+
+List voice sessions (owner scoped):
+
+```bash
+curl "http://localhost:8000/voice/sessions?user_id=user-001&state=listening&limit=50"
+```
+
+Stop voice session:
+
+```bash
+curl -X POST "http://localhost:8000/voice/sessions/<session_id>/stop" \
+  -H "Content-Type: application/json" \
+  -d '{"reason":"user_done"}'
 ```
 
 ## Agent API
@@ -1025,6 +1063,21 @@ Invoke MCP tool:
 curl -X POST "http://localhost:8000/mcp/tools/<tool_name>/invoke" \
   -H "Content-Type: application/json" \
   -d '{"arguments":{},"session_id":"session-001"}'
+```
+
+Browser action adapter tool (provider-agnostic contract, default runtime is stub):
+
+```bash
+curl -X POST "http://localhost:8000/mcp/tools/browser_action/invoke" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id":"session-001",
+    "arguments":{
+      "action":"extract",
+      "selector":"main",
+      "timeout_ms":5000
+    }
+  }'
 ```
 
 Note: high/critical tool success responses include `high_risk_action` (`actor`, `policy_level`, `rollback_hint`) and are persisted into `/security/audit` as `high_risk_action_receipt`.

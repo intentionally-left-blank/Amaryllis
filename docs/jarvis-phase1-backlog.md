@@ -25,7 +25,7 @@ Deliver Developer Jarvis Alpha with reliable async missions, actionable diagnost
 |---|---|---|---|---|
 | P1-B01 | done | Add terminal action receipt model | persisted terminal action records | Every terminal command action has audit receipt, actor, policy level, and rollback hint |
 | P1-B02 | done | Add filesystem patch preview mode | dry-run patch planner | File mutations can be previewed and approved as structured diff before execution |
-| P1-B03 | todo | Add browser action adapter contract | browser tool interface + stub implementation | Orchestration can call browser actions through typed adapter without coupling to provider implementation |
+| P1-B03 | done | Add browser action adapter contract | browser tool interface + stub implementation | Orchestration can call browser actions through typed adapter without coupling to provider implementation |
 
 ### Epic C - Visual Mission HUD Foundation
 
@@ -38,7 +38,7 @@ Deliver Developer Jarvis Alpha with reliable async missions, actionable diagnost
 
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
-| P1-D01 | todo | Add voice session contract | runtime voice session API schema | Start/stop PTT session with explicit state transitions and telemetry |
+| P1-D01 | done | Add voice session contract | runtime voice session API schema | Start/stop PTT session with explicit state transitions and telemetry |
 | P1-D02 | todo | Integrate local STT adapter (pluggable) | `voice/stt_adapter.py` + tests | Adapter interface supports at least one local backend with graceful unavailable mode |
 
 ## Current Sprint (Sprint P1-S1)
@@ -50,11 +50,15 @@ Deliver Developer Jarvis Alpha with reliable async missions, actionable diagnost
 | P1-A03 | done | replay filter API options for low-latency HUD integration |
 | P1-B01 | done | terminal action receipts persistence and owner-scoped API |
 | P1-B02 | done | filesystem patch preview/approve/apply workflow with structured diff |
+| P1-B03 | done | provider-agnostic browser action adapter contract + stub tool integration |
 | P1-C01 | done | event-stream contract for mission HUD |
+| P1-D01 | done | voice session API contract with explicit state transitions and telemetry hooks |
 
 ## Next Checkpoint
 - Deliver sprint result with:
   - run replay filter API contract with preset/stage/status/failure/retryable selectors,
   - run SSE event stream contract for mission HUD with ownership enforcement and regression tests,
   - terminal action receipt persistence with owner-scoped retrieval,
-  - filesystem patch preview/approval flow with structured diff and apply gate.
+  - filesystem patch preview/approval flow with structured diff and apply gate,
+  - provider-agnostic browser action adapter contract with stub runtime implementation,
+  - voice session contract (`start/get/list/stop`) with explicit state transitions and telemetry emission.

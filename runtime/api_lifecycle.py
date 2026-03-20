@@ -26,6 +26,7 @@ class APILifecyclePolicy:
         "/automations",
         "/inbox",
         "/tools",
+        "/voice",
         "/mcp",
         "/debug",
     )
@@ -87,4 +88,3 @@ class APILifecyclePolicy:
                 "doc_path": self.deprecation_doc_path,
             },
         }
-

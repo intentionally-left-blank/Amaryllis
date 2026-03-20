@@ -24,6 +24,7 @@ from api.memory_api import router as memory_router
 from api.model_api import router as model_router
 from api.security_api import router as security_router
 from api.tool_api import router as tool_router
+from api.voice_api import router as voice_router
 from automation.automation_scheduler import AutomationScheduler
 from controller.meta_controller import MetaController
 from memory.episodic_memory import EpisodicMemory
@@ -48,12 +49,14 @@ from storage.vector_store import VectorStore
 from tasks.task_executor import TaskExecutor
 from tools.mcp_client_registry import MCPClientRegistry
 from tools.autonomy_policy import AutonomyPolicy
+from tools.browser_action_adapter import BrowserActionAdapter, StubBrowserActionAdapter, register_browser_action_tool
 from tools.permission_manager import ToolPermissionManager
 from tools.policy import ToolIsolationPolicy
 from tools.sandbox_runner import ToolSandboxConfig, ToolSandboxRunner
 from tools.tool_budget import ToolBudgetGuard
 from tools.tool_executor import ToolExecutor
 from tools.tool_registry import ToolRegistry
+from voice.session_manager import VoiceSessionManager
 
 
 @dataclass
@@ -64,6 +67,8 @@ class ServiceContainer:
     model_manager: ModelManager
     memory_manager: MemoryManager
     tool_registry: ToolRegistry
+    browser_adapter: BrowserActionAdapter
+    voice_session_manager: VoiceSessionManager
     tool_executor: ToolExecutor
     meta_controller: MetaController
     planner: Planner
@@ -167,6 +172,8 @@ def create_services() -> ServiceContainer:
         plugin_runtime_mode=config.plugin_runtime_mode,
     )
     tool_registry.load_builtin_tools()
+    browser_adapter: BrowserActionAdapter = StubBrowserActionAdapter()
+    register_browser_action_tool(tool_registry, browser_adapter)
     tool_registry.discover_plugins(config.plugins_dir)
     mcp_registry: MCPClientRegistry | None = None
     if config.mcp_endpoints:
@@ -218,6 +225,7 @@ def create_services() -> ServiceContainer:
         ),
         telemetry_emitter=telemetry.emit,
     )
+    voice_session_manager = VoiceSessionManager(telemetry_emitter=telemetry.emit)
 
     model_manager = ModelManager(config=config, database=database)
 
@@ -332,6 +340,8 @@ def create_services() -> ServiceContainer:
         model_manager=model_manager,
         memory_manager=memory_manager,
         tool_registry=tool_registry,
+        browser_adapter=browser_adapter,
+        voice_session_manager=voice_session_manager,
         tool_executor=tool_executor,
         meta_controller=meta_controller,
         planner=planner,
@@ -646,6 +656,7 @@ def create_app() -> FastAPI:
     app.include_router(inbox_router)
     app.include_router(memory_router)
     app.include_router(tool_router)
+    app.include_router(voice_router)
     app.include_router(backup_router)
     # Versioned API aliases for lifecycle-managed stable contract.
     app.include_router(model_router, prefix="/v1")
@@ -654,6 +665,7 @@ def create_app() -> FastAPI:
     app.include_router(inbox_router, prefix="/v1")
     app.include_router(memory_router, prefix="/v1")
     app.include_router(tool_router, prefix="/v1")
+    app.include_router(voice_router, prefix="/v1")
     app.include_router(security_router)
 
     @app.get("/health")
