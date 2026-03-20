@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "status": "failed",
+  "stop_reason": "max_attempts_exhausted",
+  "failure_class": "timeout",
+  "attempts": 2,
+  "max_attempts": 2,
+  "checkpoint_count": 4,
+  "has_result": false,
+  "error_message": "provider timeout after retries",
+  "timeline": [
+    {
+      "seq": 1,
+      "stage": "running",
+      "attempt": 1,
+      "status": "",
+      "retryable": null,
+      "failure_class": "",
+      "stop_reason": "",
+      "message": "attempt started"
+    },
+    {
+      "seq": 2,
+      "stage": "error",
+      "attempt": 1,
+      "status": "failed",
+      "retryable": true,
+      "failure_class": "timeout",
+      "stop_reason": "",
+      "message": "provider timeout"
+    },
+    {
+      "seq": 3,
+      "stage": "running",
+      "attempt": 2,
+      "status": "",
+      "retryable": null,
+      "failure_class": "",
+      "stop_reason": "",
+      "message": "retry attempt"
+    },
+    {
+      "seq": 4,
+      "stage": "failed",
+      "attempt": 2,
+      "status": "failed",
+      "retryable": false,
+      "failure_class": "timeout",
+      "stop_reason": "max_attempts_exhausted",
+      "message": "terminal timeout"
+    }
+  ],
+  "attempt_summary": [
+    {
+      "attempt": 1,
+      "stage_counts": {
+        "error": 1,
+        "running": 1
+      },
+      "tool_rounds": 1,
+      "verification_repairs": 0,
+      "error_count": 1,
+      "errors": [
+        "provider timeout"
+      ]
+    },
+    {
+      "attempt": 2,
+      "stage_counts": {
+        "failed": 1,
+        "running": 1
+      },
+      "tool_rounds": 1,
+      "verification_repairs": 1,
+      "error_count": 1,
+      "errors": [
+        "terminal timeout"
+      ]
+    }
+  ],
+  "resume_snapshots": [
+    {
+      "attempt": 1,
+      "completed_steps": [
+        "fetch",
+        "plan"
+      ]
+    },
+    {
+      "attempt": 2,
+      "completed_steps": [
+        "fetch",
+        "plan",
+        "verify"
+      ]
+    }
+  ],
+  "issue_summary": {
+    "count": 2,
+    "status_breakdown": {
+      "blocked": 1,
+      "completed": 1
+    },
+    "artifact_count": 3,
+    "artifact_breakdown": {
+      "issue-1": 2,
+      "issue-2": 1
+    },
+    "tool_call_count": 4,
+    "tool_call_status_breakdown": {
+      "failed": 2,
+      "succeeded": 2
+    }
+  }
+}

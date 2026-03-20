@@ -1,0 +1,112 @@
+{
+  "run_id": "run-9f5a",
+  "agent_id": "agent-42",
+  "user_id": "user-1",
+  "session_id": "session-abc",
+  "status": "failed",
+  "stop_reason": "max_attempts_exhausted",
+  "failure_class": "timeout",
+  "attempts": 2,
+  "max_attempts": 2,
+  "has_result": false,
+  "error_message": "provider timeout after retries",
+  "timeline": [
+    {
+      "index": 1,
+      "timestamp": "2026-03-20T10:00:00Z",
+      "stage": "running",
+      "attempt": 1,
+      "message": "attempt started"
+    },
+    {
+      "index": 2,
+      "timestamp": "2026-03-20T10:00:01Z",
+      "stage": "error",
+      "attempt": 1,
+      "status": "failed",
+      "retryable": true,
+      "failure_class": "timeout",
+      "message": "provider timeout"
+    },
+    {
+      "index": 3,
+      "timestamp": "2026-03-20T10:00:02Z",
+      "stage": "running",
+      "attempt": 2,
+      "message": "retry attempt"
+    },
+    {
+      "index": 4,
+      "timestamp": "2026-03-20T10:00:03Z",
+      "stage": "failed",
+      "attempt": 2,
+      "status": "failed",
+      "retryable": false,
+      "failure_class": "timeout",
+      "stop_reason": "max_attempts_exhausted",
+      "message": "terminal timeout"
+    }
+  ],
+  "attempt_summary": [
+    {
+      "attempt": 1,
+      "stage_counts": {
+        "running": 1,
+        "error": 1
+      },
+      "tool_rounds": 1,
+      "verification_repairs": 0,
+      "errors": [
+        "provider timeout"
+      ]
+    },
+    {
+      "attempt": 2,
+      "stage_counts": {
+        "running": 1,
+        "failed": 1
+      },
+      "tool_rounds": 1,
+      "verification_repairs": 1,
+      "errors": [
+        "terminal timeout"
+      ]
+    }
+  ],
+  "resume_snapshots": [
+    {
+      "timestamp": "2026-03-20T10:00:01Z",
+      "attempt": 1,
+      "completed_steps": [
+        "plan",
+        "fetch"
+      ]
+    },
+    {
+      "timestamp": "2026-03-20T10:00:03Z",
+      "attempt": 2,
+      "completed_steps": [
+        "plan",
+        "fetch",
+        "verify"
+      ]
+    }
+  ],
+  "issue_summary": {
+    "count": 2,
+    "status_breakdown": {
+      "blocked": 1,
+      "completed": 1
+    },
+    "artifact_count": 3,
+    "artifact_breakdown": {
+      "issue-1": 2,
+      "issue-2": 1
+    },
+    "tool_call_count": 4,
+    "tool_call_status_breakdown": {
+      "succeeded": 2,
+      "failed": 2
+    }
+  }
+}

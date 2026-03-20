@@ -29,6 +29,10 @@ jobs:
         run: |
           python scripts/release/check_toolchain_drift.py
 
+      - name: Check deterministic eval/replay fixture drift
+        run: |
+          python scripts/release/check_eval_replay_determinism.py
+
       - name: Install dependencies for contract checks
         run: |
           python -m pip install --upgrade pip
@@ -42,9 +46,41 @@ jobs:
         run: |
           python scripts/release/check_runtime_profile_drift.py
 
+      - name: Generate release provenance + SBOM (blocking)
+        env:
+          AMARYLLIS_PROVENANCE_SIGNING_KEY: ${{ secrets.AMARYLLIS_PROVENANCE_SIGNING_KEY }}
+          AMARYLLIS_PROVENANCE_KEY_ID: ${{ secrets.AMARYLLIS_PROVENANCE_KEY_ID }}
+        run: |
+          mkdir -p artifacts
+          git archive --format=tar.gz HEAD -o artifacts/release-source.tar.gz
+
+          SIGNING_MODE_ARGS=""
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            SIGNING_MODE_ARGS="--require-signing-key"
+          fi
+
+          python scripts/release/generate_release_provenance.py \
+            --repo-root . \
+            --artifact artifacts/release-source.tar.gz \
+            --sbom-output artifacts/release-sbom.json \
+            --provenance-output artifacts/release-provenance.json \
+            --signature-output artifacts/release-provenance.sig \
+            ${SIGNING_MODE_ARGS}
+
       - name: Check architectural import boundaries
         run: |
           python scripts/release/check_import_boundaries.py
+
+      - name: Upload release provenance artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-provenance
+          path: |
+            artifacts/release-source.tar.gz
+            artifacts/release-sbom.json
+            artifacts/release-provenance.json
+            artifacts/release-provenance.sig
+          if-no-files-found: error
 
       - name: Run API lifecycle and compatibility tests
         run: |
@@ -85,6 +121,21 @@ jobs:
             --iterations "${AMARYLLIS_PERF_SMOKE_ITERATIONS:-3}" \
             --max-p95-latency-ms "${AMARYLLIS_PERF_SMOKE_MAX_P95_MS:-350}" \
             --max-error-rate-pct "${AMARYLLIS_PERF_SMOKE_MAX_ERROR_RATE_PCT:-0}"
+
+      - name: Run fault-injection reliability gate (blocking)
+        run: |
+          python scripts/release/fault_injection_reliability_gate.py \
+            --retry-max-attempts "${AMARYLLIS_FAULT_INJECTION_MAX_ATTEMPTS:-2}" \
+            --scenario-timeout-sec "${AMARYLLIS_FAULT_INJECTION_TIMEOUT_SEC:-8}" \
+            --min-pass-rate-pct "${AMARYLLIS_FAULT_INJECTION_MIN_PASS_RATE_PCT:-100}" \
+            --output "artifacts/fault-injection-reliability-report.json"
+
+      - name: Upload fault-injection reliability report
+        uses: actions/upload-artifact@v4
+        with:
+          name: fault-injection-reliability-report
+          path: artifacts/fault-injection-reliability-report.json
+          if-no-files-found: error
 
   linux-parity-gate:
     name: Linux Parity Gate

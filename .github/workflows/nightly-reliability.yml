@@ -25,6 +25,10 @@ jobs:
         run: |
           python scripts/release/check_toolchain_drift.py
 
+      - name: Check deterministic eval/replay fixture drift
+        run: |
+          python scripts/release/check_eval_replay_determinism.py
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip

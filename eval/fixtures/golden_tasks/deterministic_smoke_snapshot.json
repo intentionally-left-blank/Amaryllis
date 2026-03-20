@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "suite": "deterministic_smoke",
+  "suite_version": "1.0",
+  "seed": 1337,
+  "task_count": 3,
+  "summary": {
+    "total": 3,
+    "passed": 3,
+    "failed": 0,
+    "pass_rate": 100.0
+  },
+  "results": [
+    {
+      "id": "DET-001",
+      "passed": true,
+      "status_code": 200,
+      "response_chars": 124,
+      "checks": [
+        {
+          "name": "min_response_chars",
+          "ok": true
+        },
+        {
+          "name": "required_keyword:requirements.lock",
+          "ok": true
+        },
+        {
+          "name": "required_keyword:toolchain",
+          "ok": true
+        },
+        {
+          "name": "requires_bullets",
+          "ok": true
+        }
+      ],
+      "error": ""
+    },
+    {
+      "id": "DET-002",
+      "passed": true,
+      "status_code": 200,
+      "response_chars": 72,
+      "checks": [
+        {
+          "name": "min_response_chars",
+          "ok": true
+        },
+        {
+          "name": "required_keyword:error rate",
+          "ok": true
+        },
+        {
+          "name": "required_keyword:p95",
+          "ok": true
+        },
+        {
+          "name": "requires_numbered_list",
+          "ok": true
+        }
+      ],
+      "error": ""
+    },
+    {
+      "id": "DET-003",
+      "passed": true,
+      "status_code": 200,
+      "response_chars": 59,
+      "checks": [
+        {
+          "name": "min_response_chars",
+          "ok": true
+        },
+        {
+          "name": "required_keyword:check_toolchain_drift.py",
+          "ok": true
+        },
+        {
+          "name": "requires_code_block",
+          "ok": true
+        }
+      ],
+      "error": ""
+    }
+  ]
+}

@@ -33,8 +33,8 @@ Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reprodu
 |---|---|---|---|---|
 | P2-B01 | done | Pin full toolchain matrix (Python/Swift/system deps) | versioned toolchain manifest | Local bootstrap and CI resolve the same toolchain versions deterministically |
 | P2-B02 | done | Introduce runtime profile manifests (`dev/ci/release`) | profile schema + validation | Runtime fails fast on missing/invalid profile values; profile drift check in CI |
-| P2-B03 | todo | Make eval/replay deterministic via seeds and fixture snapshots | deterministic eval mode + fixture policy | Same commit/profile yields same eval output within declared tolerance |
-| P2-B04 | todo | Add release provenance and SBOM generation | provenance artifact + SBOM in release pipeline | Each release artifact has signed provenance and dependency inventory |
+| P2-B03 | done | Make eval/replay deterministic via seeds and fixture snapshots | deterministic eval mode + fixture policy | Same commit/profile yields same eval output within declared tolerance |
+| P2-B04 | done | Add release provenance and SBOM generation | provenance artifact + SBOM in release pipeline | Each release artifact has signed provenance and dependency inventory |
 
 ### Epic C - Performance, SLO, and Reliability Gates
 
@@ -42,7 +42,7 @@ Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reprodu
 |---|---|---|---|---|
 | P2-C01 | done | Version SLO profiles and quality budgets | `slo_profiles/*.json` + docs | SLO targets and error-budget policy are versioned and environment-scoped |
 | P2-C02 | done | Add blocking perf gate for critical paths (chat/run/voice/stream) | CI perf workflow + thresholds | PR fails on p95/error regressions above budget for critical paths |
-| P2-C03 | todo | Add fault-injection reliability gate | chaos test suite + report | Retry/recovery behavior is validated for provider/tool/network fault classes |
+| P2-C03 | done | Add fault-injection reliability gate | chaos test suite + report | Retry/recovery behavior is validated for provider/tool/network fault classes |
 | P2-C04 | todo | Add concurrency/load gate for mission queue | load test harness + SLO assertions | Queue stability and success-rate gates pass at target concurrent load |
 | P2-C05 | todo | Add SLO burn-rate regression gate for nightly runs | nightly burn-rate trend job | Nightly pipeline flags sustained error-budget burn anomalies automatically |
 
@@ -73,8 +73,11 @@ Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reprodu
 | P2-A04 | done | kernel boundary rules + CI enforcement |
 | P2-B01 | done | toolchain manifest (`runtime/toolchains/core.json`) + drift gate wiring in bootstrap/CI |
 | P2-B02 | done | runtime profile schema (`dev/ci/release`) and fail-fast validation |
+| P2-B03 | done | seeded golden eval + canonical replay fixture snapshots with blocking drift gate |
+| P2-B04 | done | signed release provenance + dependency inventory SBOM artifact generation in release gate |
 | P2-C01 | done | versioned SLO profiles and quality budget policy |
 | P2-C02 | done | blocking perf gate for chat/run/voice/stream critical paths |
+| P2-C03 | done | fault-injection reliability gate for provider/network/tool fault classes with blocking CI report |
 | P2-E01 | done | Linux parity matrix and acceptance smoke gates |
 
 ## Next Checkpoint
@@ -84,6 +87,9 @@ Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reprodu
   - backend cognition adapter contract with at least two interchangeable implementations,
   - pinned toolchain manifest (Python/Swift/system deps) with blocking drift checks for bootstrap + CI workflows,
   - profile schema and validation path wired into runtime startup,
+  - deterministic eval/replay seed + fixture snapshot policy with blocking drift check in CI/bootstrap,
+  - signed release provenance + SBOM artifact generation with release-gate enforcement,
   - first versioned SLO profile set with budget policy documented,
   - baseline CI perf gate for at least run + stream paths,
+  - blocking fault-injection reliability gate covering provider/network/tool fault classes,
   - Linux parity checklist with automated smoke report artifact.

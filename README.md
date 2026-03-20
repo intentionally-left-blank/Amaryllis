@@ -259,12 +259,15 @@ pip install -r requirements.lock
 python scripts/release/check_dependency_drift.py
 python scripts/release/check_runtime_profile_drift.py
 python scripts/eval/run_golden_tasks.py --validate-only
+python scripts/release/check_eval_replay_determinism.py
 ```
 
 Reference:
 - `docs/reproducible-bootstrap.md`
 - `docs/runtime-profiles.md`
 - `docs/toolchain-manifest.md`
+- `docs/eval-replay-determinism.md`
+- `docs/release-provenance-sbom.md`
 
 ## Run
 
@@ -1282,6 +1285,12 @@ Blocking performance smoke gate (chat/run/voice/stream critical paths + p95/erro
 python3 scripts/release/perf_smoke_gate.py --iterations 3 --max-p95-latency-ms 350 --max-error-rate-pct 0
 ```
 
+Blocking fault-injection reliability gate (provider/network/tool fault classes + retry/recovery assertions):
+
+```bash
+python3 scripts/release/fault_injection_reliability_gate.py --retry-max-attempts 2 --scenario-timeout-sec 8 --min-pass-rate-pct 100 --output artifacts/fault-injection-reliability-report.json
+```
+
 Linux parity smoke gate (run/voice/tools/observability acceptance on Linux target):
 
 ```bash
@@ -1296,6 +1305,7 @@ python3 scripts/release/nightly_reliability_run.py --iterations 12 --baseline ev
 
 Reference:
 - `docs/nightly-reliability.md`
+- `docs/fault-injection-reliability.md`
 
 Autonomy level contract (L0-L5):
 
@@ -1319,6 +1329,11 @@ Release/pull-request gate is blocking and includes:
 - SAST (`bandit`) at high severity/high confidence
 - dependency vulnerability audit (`pip-audit`)
 - SBOM generation (`CycloneDX`)
+
+Release-gate workflow additionally generates:
+- signed release provenance (`artifacts/release-provenance.json` + `artifacts/release-provenance.sig`)
+- release dependency inventory SBOM (`artifacts/release-sbom.json`)
+- source candidate archive with digest coverage (`artifacts/release-source.tar.gz`)
 
 ## Notes on MLX and Ollama
 
@@ -1603,6 +1618,7 @@ scripts/release/rollback_local.sh <tag-or-commit>
 - ADR-0001 (kernel contract surface v1): `docs/adr-0001-cognitive-kernel-contracts.md`
 - Cognition backend abstraction and runtime switching: `docs/cognition-backends.md`
 - Runtime/SLO profiles and quality budgets: `docs/runtime-profiles.md`
+- Eval/replay deterministic seeds and fixture snapshot policy: `docs/eval-replay-determinism.md`
 
 ## License
 

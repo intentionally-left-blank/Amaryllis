@@ -1,0 +1,7 @@
+{
+  "responses": {
+    "DET-001": "- Install from requirements.lock for pinned dependencies.\n- Validate toolchain manifest drift before running runtime checks.",
+    "DET-002": "1. Enforce p95 latency budget in CI.\n2. Enforce error rate budget in CI.",
+    "DET-003": "```bash\npython scripts/release/check_toolchain_drift.py\n```"
+  }
+}

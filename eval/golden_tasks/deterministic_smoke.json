@@ -1,0 +1,51 @@
+{
+  "suite": "deterministic_smoke",
+  "version": "1.0",
+  "description": "Deterministic fixture-driven golden tasks for reproducibility gate.",
+  "tasks": [
+    {
+      "id": "DET-001",
+      "title": "Bootstrap reproducibility bullets",
+      "category": "reproducibility",
+      "prompt": "Explain deterministic local bootstrap in two bullets.",
+      "expected": {
+        "min_response_chars": 40,
+        "required_keywords": [
+          "requirements.lock",
+          "toolchain"
+        ],
+        "forbidden_keywords": [],
+        "requires_bullets": true
+      }
+    },
+    {
+      "id": "DET-002",
+      "title": "SLO gate numbered list",
+      "category": "observability",
+      "prompt": "List two quality gates as numbered list.",
+      "expected": {
+        "min_response_chars": 30,
+        "required_keywords": [
+          "p95",
+          "error rate"
+        ],
+        "forbidden_keywords": [],
+        "requires_numbered_list": true
+      }
+    },
+    {
+      "id": "DET-003",
+      "title": "Command snippet",
+      "category": "operations",
+      "prompt": "Provide a command snippet for deterministic checks.",
+      "expected": {
+        "min_response_chars": 20,
+        "required_keywords": [
+          "check_toolchain_drift.py"
+        ],
+        "forbidden_keywords": [],
+        "requires_code_block": true
+      }
+    }
+  ]
+}

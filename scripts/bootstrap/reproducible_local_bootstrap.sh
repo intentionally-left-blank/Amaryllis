@@ -42,6 +42,9 @@ echo "[bootstrap] validating runtime/SLO profile drift guard"
 echo "[bootstrap] validating golden task suite schema"
 "${VENV_PYTHON}" "${ROOT_DIR}/scripts/eval/run_golden_tasks.py" --validate-only
 
+echo "[bootstrap] validating deterministic eval/replay fixture drift guard"
+"${VENV_PYTHON}" "${ROOT_DIR}/scripts/release/check_eval_replay_determinism.py"
+
 echo "[bootstrap] OK"
 echo "[bootstrap] activate environment: source \"${VENV_DIR}/bin/activate\""
 echo "[bootstrap] run runtime: uvicorn runtime.server:app --host localhost --port 8000 --reload"

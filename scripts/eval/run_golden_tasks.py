@@ -7,13 +7,12 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import random
 import re
 import statistics
 import sys
 import time
 from typing import Any
-
-import httpx
 
 
 def _utc_now_iso() -> str:
@@ -75,6 +74,35 @@ def _parse_args() -> argparse.Namespace:
         "--output",
         default="",
         help="Optional output report path. Default: eval/reports/golden_tasks_<timestamp>.json",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=int(os.getenv("AMARYLLIS_EVAL_SEED", "1337")),
+        help="Deterministic seed for eval run metadata and fixture-driven flows.",
+    )
+    parser.add_argument(
+        "--fixture-responses",
+        default="",
+        help=(
+            "Optional fixture JSON with task responses. If set, eval runs without network calls. "
+            "Format: either {\"TASK-ID\": \"response\"} or {\"responses\": {...}}"
+        ),
+    )
+    parser.add_argument(
+        "--snapshot-output",
+        default="",
+        help="Optional path to write canonical deterministic snapshot.",
+    )
+    parser.add_argument(
+        "--snapshot-expected",
+        default="",
+        help="Optional path to expected canonical snapshot for drift checking.",
+    )
+    parser.add_argument(
+        "--update-snapshot",
+        action="store_true",
+        help="Update --snapshot-expected file instead of failing on drift.",
     )
     return parser.parse_args()
 
@@ -231,9 +259,107 @@ def _default_output_path() -> Path:
     return Path("eval/reports") / f"golden_tasks_{stamp}.json"
 
 
+def _resolve_path(raw: str, *, cwd: Path) -> Path:
+    candidate = Path(str(raw or "")).expanduser()
+    if not candidate.is_absolute():
+        candidate = cwd / candidate
+    return candidate.resolve()
+
+
+def _load_fixture_responses(path: Path) -> dict[str, str]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    source: Any = payload
+    if isinstance(payload, dict) and isinstance(payload.get("responses"), dict):
+        source = payload.get("responses")
+
+    if not isinstance(source, dict):
+        raise ValueError("fixture responses must be object or object with 'responses' field")
+
+    normalized: dict[str, str] = {}
+    for key, value in source.items():
+        task_id = str(key).strip()
+        if not task_id:
+            continue
+        if isinstance(value, str):
+            normalized[task_id] = value
+        else:
+            normalized[task_id] = str(value)
+
+    if not normalized:
+        raise ValueError("fixture responses are empty")
+    return normalized
+
+
+def _canonicalize_check(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": str(item.get("name") or ""),
+        "ok": bool(item.get("ok")),
+    }
+
+
+def _build_snapshot(report: dict[str, Any]) -> dict[str, Any]:
+    raw_results = report.get("results")
+    results = [item for item in raw_results if isinstance(item, dict)] if isinstance(raw_results, list) else []
+
+    snapshot_results: list[dict[str, Any]] = []
+    for item in results:
+        checks_raw = item.get("checks")
+        checks = [check for check in checks_raw if isinstance(check, dict)] if isinstance(checks_raw, list) else []
+        normalized_checks = sorted(
+            (_canonicalize_check(check) for check in checks),
+            key=lambda check: str(check.get("name") or ""),
+        )
+        snapshot_results.append(
+            {
+                "id": str(item.get("id") or ""),
+                "passed": bool(item.get("passed")),
+                "status_code": int(item.get("status_code")) if item.get("status_code") is not None else None,
+                "response_chars": int(item.get("response_chars") or 0),
+                "checks": normalized_checks,
+                "error": str(item.get("error") or ""),
+            }
+        )
+
+    snapshot_results.sort(key=lambda item: str(item.get("id") or ""))
+    summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+
+    return {
+        "schema_version": 1,
+        "suite": report.get("suite"),
+        "suite_version": report.get("suite_version"),
+        "seed": int(report.get("seed") or 0),
+        "task_count": len(snapshot_results),
+        "summary": {
+            "total": int(summary.get("total") or 0),
+            "passed": int(summary.get("passed") or 0),
+            "failed": int(summary.get("failed") or 0),
+            "pass_rate": float(summary.get("pass_rate") or 0.0),
+        },
+        "results": snapshot_results,
+    }
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _load_json_object(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"JSON root must be object: {path}")
+    return payload
+
+
 def main() -> int:
     args = _parse_args()
-    tasks_file = Path(args.tasks_file)
+    cwd = Path.cwd()
+
+    if args.update_snapshot and not str(args.snapshot_expected).strip():
+        print("--update-snapshot requires --snapshot-expected", file=sys.stderr)
+        return 2
+
+    tasks_file = _resolve_path(args.tasks_file, cwd=cwd)
     if not tasks_file.exists():
         print(f"tasks file not found: {tasks_file}", file=sys.stderr)
         return 2
@@ -254,6 +380,21 @@ def main() -> int:
     if args.max_tasks and args.max_tasks > 0:
         tasks = tasks[: args.max_tasks]
 
+    random.seed(int(args.seed))
+
+    fixture_responses_path_raw = str(args.fixture_responses).strip()
+    fixture_responses: dict[str, str] | None = None
+    if fixture_responses_path_raw:
+        fixture_path = _resolve_path(fixture_responses_path_raw, cwd=cwd)
+        if not fixture_path.exists():
+            print(f"fixture responses file not found: {fixture_path}", file=sys.stderr)
+            return 2
+        try:
+            fixture_responses = _load_fixture_responses(fixture_path)
+        except Exception as exc:
+            print(f"invalid fixture responses: {exc}", file=sys.stderr)
+            return 2
+
     endpoint = str(args.endpoint).rstrip("/")
     headers = {"Content-Type": "application/json"}
     if str(args.token).strip():
@@ -263,52 +404,109 @@ def main() -> int:
     results: list[dict[str, Any]] = []
     latencies: list[float] = []
 
-    with httpx.Client(timeout=args.timeout_sec) as client:
-        for task in tasks:
-            task_id = str(task.get("id") or "")
-            prompt = str(task.get("prompt") or "")
-            mode = str(task.get("mode") or "balanced")
-
-            payload: dict[str, Any] = {
-                "messages": [{"role": "user", "content": prompt}],
-                "routing": {
-                    "mode": mode,
-                    "require_stream": False,
-                },
-                "stream": False,
+    def _append_failed_result(
+        *,
+        task_id: str,
+        title: Any,
+        status_code: int | None,
+        latency_ms: float,
+        error: str,
+    ) -> None:
+        summary.failed += 1
+        results.append(
+            {
+                "id": task_id,
+                "title": title,
+                "passed": False,
+                "status_code": status_code,
+                "latency_ms": latency_ms,
+                "response_chars": 0,
+                "error": error,
+                "checks": [],
             }
-            if str(args.model).strip():
-                payload["model"] = str(args.model).strip()
+        )
 
-            started = time.perf_counter()
-            response_text = ""
-            request_error = ""
-            status_code: int | None = None
-            try:
-                response = client.post(f"{endpoint}/v1/chat/completions", headers=headers, json=payload)
-                status_code = int(response.status_code)
-                response.raise_for_status()
-                response_json = response.json()
-                response_text = _extract_content(response_json)
-            except Exception as exc:
-                request_error = str(exc)
+    if fixture_responses is None:
+        try:
+            import httpx
+        except Exception as exc:  # pragma: no cover - dependency/environment
+            print(f"httpx unavailable for online eval mode: {exc}", file=sys.stderr)
+            return 2
+        with httpx.Client(timeout=args.timeout_sec) as client:
+            for task in tasks:
+                task_id = str(task.get("id") or "")
+                prompt = str(task.get("prompt") or "")
+                mode = str(task.get("mode") or "balanced")
 
-            latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
-            latencies.append(latency_ms)
+                payload: dict[str, Any] = {
+                    "messages": [{"role": "user", "content": prompt}],
+                    "routing": {
+                        "mode": mode,
+                        "require_stream": False,
+                    },
+                    "stream": False,
+                }
+                if str(args.model).strip():
+                    payload["model"] = str(args.model).strip()
 
-            if request_error:
-                summary.failed += 1
+                started = time.perf_counter()
+                response_text = ""
+                request_error = ""
+                status_code: int | None = None
+                try:
+                    response = client.post(f"{endpoint}/v1/chat/completions", headers=headers, json=payload)
+                    status_code = int(response.status_code)
+                    response.raise_for_status()
+                    response_json = response.json()
+                    response_text = _extract_content(response_json)
+                except Exception as exc:
+                    request_error = str(exc)
+
+                latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
+                latencies.append(latency_ms)
+
+                if request_error:
+                    _append_failed_result(
+                        task_id=task_id,
+                        title=task.get("title"),
+                        status_code=status_code,
+                        latency_ms=latency_ms,
+                        error=request_error,
+                    )
+                    continue
+
+                evaluation = _evaluate_response(task, response_text)
+                passed = bool(evaluation.get("passed"))
+                if passed:
+                    summary.passed += 1
+                else:
+                    summary.failed += 1
+
                 results.append(
                     {
                         "id": task_id,
                         "title": task.get("title"),
-                        "passed": False,
+                        "passed": passed,
                         "status_code": status_code,
                         "latency_ms": latency_ms,
-                        "error": request_error,
-                        "checks": [],
+                        "response_chars": len(response_text),
+                        "checks": evaluation.get("checks", []),
+                        "error": "",
                     }
                 )
+    else:
+        for task in tasks:
+            task_id = str(task.get("id") or "")
+            response_text = fixture_responses.get(task_id)
+            if response_text is None:
+                _append_failed_result(
+                    task_id=task_id,
+                    title=task.get("title"),
+                    status_code=200,
+                    latency_ms=0.0,
+                    error=f"fixture response missing for task id: {task_id}",
+                )
+                latencies.append(0.0)
                 continue
 
             evaluation = _evaluate_response(task, response_text)
@@ -318,15 +516,17 @@ def main() -> int:
             else:
                 summary.failed += 1
 
+            latencies.append(0.0)
             results.append(
                 {
                     "id": task_id,
                     "title": task.get("title"),
                     "passed": passed,
-                    "status_code": status_code,
-                    "latency_ms": latency_ms,
+                    "status_code": 200,
+                    "latency_ms": 0.0,
                     "response_chars": len(response_text),
                     "checks": evaluation.get("checks", []),
+                    "error": "",
                 }
             )
 
@@ -340,6 +540,8 @@ def main() -> int:
         "tasks_file": str(tasks_file),
         "endpoint": endpoint,
         "strict": bool(args.strict),
+        "seed": int(args.seed),
+        "fixture_responses": bool(fixture_responses is not None),
         "summary": {
             "total": len(results),
             "passed": summary.passed,
@@ -352,11 +554,45 @@ def main() -> int:
         "results": results,
     }
 
-    output_path = Path(args.output) if str(args.output).strip() else _default_output_path()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output_path = _resolve_path(args.output, cwd=cwd) if str(args.output).strip() else _default_output_path()
+    _write_json(output_path, report)
     print(f"report: {output_path}")
     print(json.dumps(report["summary"], ensure_ascii=False))
+
+    snapshot = _build_snapshot(report)
+    snapshot_output_raw = str(args.snapshot_output).strip()
+    if snapshot_output_raw:
+        snapshot_output_path = _resolve_path(snapshot_output_raw, cwd=cwd)
+        _write_json(snapshot_output_path, snapshot)
+        print(f"snapshot: {snapshot_output_path}")
+
+    snapshot_expected_raw = str(args.snapshot_expected).strip()
+    if snapshot_expected_raw:
+        snapshot_expected_path = _resolve_path(snapshot_expected_raw, cwd=cwd)
+        if args.update_snapshot:
+            _write_json(snapshot_expected_path, snapshot)
+            print(f"snapshot updated: {snapshot_expected_path}")
+        else:
+            if not snapshot_expected_path.exists():
+                print(f"snapshot expected file not found: {snapshot_expected_path}", file=sys.stderr)
+                return 1
+            try:
+                expected_snapshot = _load_json_object(snapshot_expected_path)
+            except Exception as exc:
+                print(f"snapshot expected is invalid JSON: {exc}", file=sys.stderr)
+                return 1
+            if expected_snapshot != snapshot:
+                expected_summary = expected_snapshot.get("summary") if isinstance(expected_snapshot, dict) else {}
+                actual_summary = snapshot.get("summary") if isinstance(snapshot, dict) else {}
+                print("snapshot drift detected", file=sys.stderr)
+                print(f"- expected: {snapshot_expected_path}", file=sys.stderr)
+                print(
+                    f"- summary expected={json.dumps(expected_summary, ensure_ascii=False)} "
+                    f"actual={json.dumps(actual_summary, ensure_ascii=False)}",
+                    file=sys.stderr,
+                )
+                return 1
+            print(f"snapshot check OK: {snapshot_expected_path}")
 
     if args.strict and summary.failed > 0:
         return 1
