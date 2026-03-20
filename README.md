@@ -237,6 +237,12 @@ One command (inside cloned repo):
 ./scripts/install_macos.sh
 ```
 
+Linux runtime install (inside cloned repo):
+
+```bash
+./scripts/install_linux.sh
+```
+
 Manual backend setup:
 
 ```bash
@@ -271,6 +277,7 @@ Reference:
 - `docs/release-provenance-sbom.md`
 - `docs/mission-simulation-mode.md`
 - `docs/dynamic-mission-budgets.md`
+- `docs/linux-runtime-installer.md`
 
 ## Run
 

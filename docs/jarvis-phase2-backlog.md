@@ -52,7 +52,7 @@ Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reprodu
 |---|---|---|---|---|
 | P2-D01 | done | Define policy-pack contract for autonomy levels | policy schema + validators | L2/L3 behavior is policy-driven, not hardcoded, with strict validation |
 | P2-D02 | done | Add mission simulation mode before autonomous execution | simulation endpoint/UI + dry-run receipts | User can preview full action plan, risk tags, and rollback hints before apply |
-| P2-D03 | in_progress | Add dynamic mission budgets with guardrail escalations | budget controller + escalation policies | Budget breaches produce deterministic pause/escalation/kill-switch behavior |
+| P2-D03 | done | Add dynamic mission budgets with guardrail escalations | budget controller + escalation policies | Budget breaches produce deterministic pause/escalation/kill-switch behavior |
 | P2-D04 | done | Add audit timeline UX for autonomous actions | mission audit panel + export | Every autonomous action chain is inspectable/exportable with actor/policy context |
 
 ### Epic E - Linux-First Productization
@@ -60,7 +60,7 @@ Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reprodu
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
 | P2-E01 | done | Define Linux parity matrix and acceptance tests | parity checklist + CI smoke | Linux runtime passes mandatory parity checks for run/voice/tools/observability |
-| P2-E02 | todo | Package Linux runtime with reproducible installer path | installer scripts + docs | Fresh Linux machine can install/run/upgrade via documented deterministic path |
+| P2-E02 | in_progress | Package Linux runtime with reproducible installer path | installer scripts + docs | Fresh Linux machine can install/run/upgrade via documented deterministic path |
 | P2-E03 | todo | Add release channels and safe upgrade/rollback flow | channel strategy + rollback tests | Stable/canary channels support verified rollback without data loss |
 
 ## Current Sprint (Sprint P2-S1)
@@ -82,9 +82,10 @@ Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reprodu
 | P2-C05 | done | nightly SLO burn-rate regression gate with sustained anomaly detection and report artifact |
 | P2-D01 | done | autonomy policy-pack contract (`schema v1`) + strict validator gate + runtime fail-fast binding |
 | P2-D02 | done | mission simulation endpoint (`POST /agents/{agent_id}/runs/simulate`) + dry-run signed receipt + risk/rollback preview payload |
-| P2-D03 | in_progress | deterministic budget guardrail escalation in `AgentRunManager` (pause on first breach, agent-scope kill-switch on repeated breach) |
+| P2-D03 | done | deterministic budget guardrail escalation in `AgentRunManager` + API integration coverage (`tests/test_agent_run_budget_guardrail_api.py`) |
 | P2-D04 | done | mission audit panel (`AgentsView`) + `/agents/runs/{run_id}/audit` + export (`json/csv`) with owner enforcement and API tests |
 | P2-E01 | done | Linux parity matrix and acceptance smoke gates |
+| P2-E02 | in_progress | Linux installer path (`scripts/install_linux.sh`) + deterministic install/upgrade docs + installer contract tests |
 
 ## Next Checkpoint
 - Deliver sprint result with:
