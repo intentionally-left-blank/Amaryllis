@@ -12,7 +12,7 @@ This matrix defines the minimum Linux acceptance surface for Tier-1 runtime pari
 
 | Domain | Required capability | Acceptance signal | Smoke path(s) |
 |---|---|---|---|
-| `run` | Agent lifecycle + run lifecycle are callable | Agent create + run create/list/get + diagnostics return `200` and API version headers | `/agents/create`, `/agents/{id}/runs`, `/agents/runs/{run_id}`, `/agents/runs/{run_id}/diagnostics` |
+| `run` | Agent lifecycle + run lifecycle are callable | Agent create + run create/list/get + diagnostics/audit/export return `200` and API version headers | `/agents/create`, `/agents/{id}/runs`, `/agents/runs/{run_id}`, `/agents/runs/{run_id}/diagnostics`, `/agents/runs/{run_id}/audit`, `/agents/runs/{run_id}/audit/export?format=json` |
 | `voice` | Voice session control + STT health | STT health + session start/list/get/stop return `200` | `/voice/stt/health`, `/voice/sessions/start`, `/voice/sessions`, `/voice/sessions/{id}`, `/voice/sessions/{id}/stop` |
 | `tools` | Tool catalog + permission prompt listing + debug health | Tool and MCP listings + guardrail/debug health return `200` | `/tools`, `/tools/permissions/prompts`, `/mcp/tools`, `/debug/tools/guardrails`, `/debug/tools/mcp-health` |
 | `observability` | Service health/SLO/lifecycle/metrics endpoints | All service observability endpoints return `200`, `/service/observability/metrics` returns `text/plain` | `/health`, `/service/health`, `/service/observability/slo`, `/service/observability/metrics`, `/service/api/lifecycle` |

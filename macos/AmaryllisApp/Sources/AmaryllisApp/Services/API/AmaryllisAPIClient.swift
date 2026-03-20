@@ -346,6 +346,67 @@ final class AmaryllisAPIClient {
         return response.diagnostics
     }
 
+    func getAgentRunAudit(
+        runId: String,
+        includeToolCalls: Bool = true,
+        includeSecurityActions: Bool = true,
+        limit: Int = 2_000
+    ) async throws -> APIAgentRunAuditPayload {
+        let queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "include_tool_calls", value: includeToolCalls ? "true" : "false"),
+            URLQueryItem(name: "include_security_actions", value: includeSecurityActions ? "true" : "false"),
+            URLQueryItem(name: "limit", value: String(max(1, min(limit, 20_000))))
+        ]
+        let path = buildPath(path: "/agents/runs/\(runId)/audit", queryItems: queryItems)
+        let response: APIAgentRunAuditResponse = try await request(
+            path: path,
+            method: "GET",
+            body: Optional<Data>.none
+        )
+        return response.audit
+    }
+
+    func exportAgentRunAuditJSON(
+        runId: String,
+        includeToolCalls: Bool = true,
+        includeSecurityActions: Bool = true,
+        limit: Int = 2_000
+    ) async throws -> APIAgentRunAuditExportJSONResponse {
+        let queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "format", value: "json"),
+            URLQueryItem(name: "include_tool_calls", value: includeToolCalls ? "true" : "false"),
+            URLQueryItem(name: "include_security_actions", value: includeSecurityActions ? "true" : "false"),
+            URLQueryItem(name: "limit", value: String(max(1, min(limit, 20_000))))
+        ]
+        let path = buildPath(path: "/agents/runs/\(runId)/audit/export", queryItems: queryItems)
+        return try await request(path: path, method: "GET", body: Optional<Data>.none)
+    }
+
+    func exportAgentRunAuditCSV(
+        runId: String,
+        includeToolCalls: Bool = true,
+        includeSecurityActions: Bool = true,
+        limit: Int = 2_000
+    ) async throws -> APIAgentRunAuditCSVExport {
+        let queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "format", value: "csv"),
+            URLQueryItem(name: "include_tool_calls", value: includeToolCalls ? "true" : "false"),
+            URLQueryItem(name: "include_security_actions", value: includeSecurityActions ? "true" : "false"),
+            URLQueryItem(name: "limit", value: String(max(1, min(limit, 20_000))))
+        ]
+        let path = buildPath(path: "/agents/runs/\(runId)/audit/export", queryItems: queryItems)
+        let (data, response) = try await requestRaw(path: path, method: "GET", body: Optional<Data>.none)
+        let content = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
+        let contentType = response.value(forHTTPHeaderField: "Content-Type") ?? "text/csv; charset=utf-8"
+        let disposition = response.value(forHTTPHeaderField: "Content-Disposition")
+        let filename = parseAttachmentFilename(contentDisposition: disposition) ?? "run-audit-\(runId).csv"
+        return APIAgentRunAuditCSVExport(
+            filename: filename,
+            contentType: contentType,
+            content: content
+        )
+    }
+
     func streamAgentRunEvents(
         runId: String,
         fromIndex: Int = 0,
@@ -662,6 +723,11 @@ final class AmaryllisAPIClient {
     }
 
     private func requestData(path: String, method: String, body: Data?) async throws -> Data {
+        let (data, _) = try await requestRaw(path: path, method: method, body: body)
+        return data
+    }
+
+    private func requestRaw(path: String, method: String, body: Data?) async throws -> (Data, HTTPURLResponse) {
         let request = try makeURLRequest(path: path, method: method, body: body)
         let (data, response) = try await session.data(for: request)
 
@@ -678,7 +744,7 @@ final class AmaryllisAPIClient {
             throw APIClientError.server(text)
         }
 
-        return data
+        return (data, http)
     }
 
     private func buildPath(path: String, queryItems: [URLQueryItem]) -> String {
@@ -727,6 +793,25 @@ final class AmaryllisAPIClient {
             return message
         }
 
+        return nil
+    }
+
+    private func parseAttachmentFilename(contentDisposition: String?) -> String? {
+        guard let contentDisposition else {
+            return nil
+        }
+        let sections = contentDisposition.split(separator: ";")
+        for section in sections {
+            let trimmed = section.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.lowercased().hasPrefix("filename=") else {
+                continue
+            }
+            let raw = String(trimmed.dropFirst("filename=".count))
+            let filename = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            if !filename.isEmpty {
+                return filename
+            }
+        }
         return nil
     }
 }

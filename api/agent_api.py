@@ -5,7 +5,7 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, Path, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from runtime.auth import assert_owner, auth_context_from_request, resolve_user_id
@@ -588,6 +588,99 @@ def diagnostics_package_agent_run(
             "request_id": _request_id(request),
         }
     except ValueError as exc:
+        raise NotFoundError(str(exc)) from exc
+    except AmaryllisError:
+        raise
+    except Exception as exc:
+        raise ProviderError(str(exc)) from exc
+
+
+@router.get("/agents/runs/{run_id}/audit")
+def audit_timeline_agent_run(
+    request: Request,
+    run_id: str = Path(..., min_length=1),
+    include_tool_calls: bool = Query(default=True),
+    include_security_actions: bool = Query(default=True),
+    limit: int = Query(default=2000, ge=1, le=20000),
+) -> dict[str, Any]:
+    services = request.app.state.services
+    auth = auth_context_from_request(request)
+    try:
+        run = services.agent_manager.get_run(run_id=run_id)
+        assert_owner(
+            owner_user_id=str(run.get("user_id") or ""),
+            auth=auth,
+            resource_name="agent_run",
+            resource_id=run_id,
+        )
+        audit = services.agent_manager.build_run_audit_timeline(
+            run_id=run_id,
+            include_tool_calls=include_tool_calls,
+            include_security_actions=include_security_actions,
+            limit=limit,
+        )
+        return {
+            "audit": audit,
+            "request_id": _request_id(request),
+        }
+    except ValueError as exc:
+        raise NotFoundError(str(exc)) from exc
+    except AmaryllisError:
+        raise
+    except Exception as exc:
+        raise ProviderError(str(exc)) from exc
+
+
+@router.get("/agents/runs/{run_id}/audit/export", response_model=None)
+def export_audit_timeline_agent_run(
+    request: Request,
+    run_id: str = Path(..., min_length=1),
+    format: str = Query(default="json"),
+    include_tool_calls: bool = Query(default=True),
+    include_security_actions: bool = Query(default=True),
+    limit: int = Query(default=2000, ge=1, le=20000),
+) -> Any:
+    services = request.app.state.services
+    auth = auth_context_from_request(request)
+    normalized_format = str(format or "json").strip().lower() or "json"
+    if normalized_format not in {"json", "csv"}:
+        raise ValidationError("Unsupported export format. Allowed values: json, csv.")
+    try:
+        run = services.agent_manager.get_run(run_id=run_id)
+        assert_owner(
+            owner_user_id=str(run.get("user_id") or ""),
+            auth=auth,
+            resource_name="agent_run",
+            resource_id=run_id,
+        )
+        exported = services.agent_manager.export_run_audit_timeline(
+            run_id=run_id,
+            export_format=normalized_format,
+            include_tool_calls=include_tool_calls,
+            include_security_actions=include_security_actions,
+            limit=limit,
+        )
+        if str(exported.get("format") or "") == "csv":
+            filename = str(exported.get("filename") or f"run-audit-{run_id}.csv")
+            content = str(exported.get("content") or "")
+            return PlainTextResponse(
+                content=content,
+                media_type=str(exported.get("content_type") or "text/csv; charset=utf-8"),
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+        payload = exported.get("payload")
+        return {
+            "audit": payload if isinstance(payload, dict) else {},
+            "export": {
+                "format": str(exported.get("format") or "json"),
+                "filename": str(exported.get("filename") or f"run-audit-{run_id}.json"),
+                "content_type": str(exported.get("content_type") or "application/json"),
+            },
+            "request_id": _request_id(request),
+        }
+    except ValueError as exc:
+        if "unsupported export format" in str(exc).lower():
+            raise ValidationError(str(exc)) from exc
         raise NotFoundError(str(exc)) from exc
     except AmaryllisError:
         raise

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+from io import StringIO
 import logging
 from queue import Empty, Queue
 from threading import Event, Thread
@@ -935,6 +937,223 @@ class AgentRunManager:
             "diagnostics": diagnostics,
             "replay": replay_bundle,
             "evidence": evidence_bundle,
+        }
+
+    def build_run_audit_timeline(
+        self,
+        run_id: str,
+        *,
+        include_tool_calls: bool = True,
+        include_security_actions: bool = True,
+        limit: int = 2000,
+    ) -> dict[str, Any]:
+        replay = self.replay_run(run_id)
+        run_id_normalized = str(replay.get("run_id") or run_id).strip()
+        if not run_id_normalized:
+            raise ValueError(f"Run not found: {run_id}")
+
+        timeline: list[dict[str, Any]] = []
+        raw_timeline = replay.get("timeline")
+        if isinstance(raw_timeline, list):
+            for index, item in enumerate(raw_timeline, start=1):
+                if not isinstance(item, dict):
+                    continue
+                timeline.append(
+                    {
+                        "event_id": f"checkpoint:{index}",
+                        "timestamp": str(item.get("timestamp") or ""),
+                        "channel": "run_checkpoint",
+                        "stage": str(item.get("stage") or "unknown"),
+                        "action": str(item.get("stage") or "unknown"),
+                        "status": str(item.get("status") or ""),
+                        "attempt": self._normalize_attempt(item.get("attempt")),
+                        "actor": str(item.get("actor") or ""),
+                        "target_type": "agent_run",
+                        "target_id": run_id_normalized,
+                        "policy_context": {
+                            "stop_reason": str(item.get("stop_reason") or ""),
+                            "failure_class": str(item.get("failure_class") or ""),
+                            "retryable": bool(item.get("retryable")) if "retryable" in item else None,
+                        },
+                        "message": str(item.get("message") or ""),
+                    }
+                )
+
+        if include_tool_calls:
+            tool_call_rows = self.database.list_agent_run_tool_calls(run_id=run_id_normalized, limit=5000)
+            for index, row in enumerate(tool_call_rows, start=1):
+                if not isinstance(row, dict):
+                    continue
+                timeline.append(
+                    {
+                        "event_id": f"tool_call:{index}",
+                        "timestamp": str(row.get("updated_at") or row.get("created_at") or ""),
+                        "channel": "tool_call",
+                        "stage": "tool_call",
+                        "action": str(row.get("tool_name") or "unknown"),
+                        "status": str(row.get("status") or "unknown"),
+                        "attempt": self._normalize_attempt(row.get("attempt")),
+                        "actor": "",
+                        "target_type": "agent_run",
+                        "target_id": run_id_normalized,
+                        "policy_context": {
+                            "idempotency_key": str(row.get("idempotency_key") or ""),
+                        },
+                        "message": str(row.get("error_message") or ""),
+                    }
+                )
+
+        if include_security_actions:
+            security_limit = max(1000, int(limit) * 4)
+            security_events = self.database.list_security_audit_events(limit=security_limit)
+            for index, row in enumerate(security_events, start=1):
+                if not isinstance(row, dict):
+                    continue
+                target_type = str(row.get("target_type") or "")
+                target_id = str(row.get("target_id") or "")
+                details = dict(row.get("details") or {})
+                details_run_id = str(details.get("run_id") or "").strip()
+                if not (
+                    (target_type == "agent_run" and target_id == run_id_normalized)
+                    or details_run_id == run_id_normalized
+                ):
+                    continue
+                timeline.append(
+                    {
+                        "event_id": f"security:{index}",
+                        "timestamp": str(row.get("created_at") or ""),
+                        "channel": "security_audit",
+                        "stage": "security_action",
+                        "action": str(row.get("action") or ""),
+                        "status": str(row.get("status") or ""),
+                        "attempt": None,
+                        "actor": str(row.get("actor") or ""),
+                        "target_type": target_type,
+                        "target_id": target_id,
+                        "policy_context": {
+                            "event_type": str(row.get("event_type") or ""),
+                            "request_id": str(row.get("request_id") or ""),
+                        },
+                        "message": str(details.get("message") or details.get("error") or ""),
+                    }
+                )
+
+        timeline.sort(
+            key=lambda item: (
+                str(item.get("timestamp") or ""),
+                str(item.get("channel") or ""),
+                str(item.get("event_id") or ""),
+            )
+        )
+        max_items = max(1, min(int(limit), 20_000))
+        if len(timeline) > max_items:
+            timeline = timeline[-max_items:]
+
+        channel_counts: dict[str, int] = {}
+        status_counts: dict[str, int] = {}
+        for event in timeline:
+            channel = str(event.get("channel") or "unknown")
+            status = str(event.get("status") or "").strip().lower()
+            channel_counts[channel] = int(channel_counts.get(channel, 0)) + 1
+            if status:
+                status_counts[status] = int(status_counts.get(status, 0)) + 1
+
+        return {
+            "run_id": run_id_normalized,
+            "agent_id": replay.get("agent_id"),
+            "user_id": replay.get("user_id"),
+            "session_id": replay.get("session_id"),
+            "status": replay.get("status"),
+            "generated_at": self._utc_now(),
+            "timeline": timeline,
+            "event_count": len(timeline),
+            "summary": {
+                "channel_counts": channel_counts,
+                "status_counts": status_counts,
+                "include_tool_calls": bool(include_tool_calls),
+                "include_security_actions": bool(include_security_actions),
+                "terminal_stop_reason": replay.get("stop_reason"),
+                "terminal_failure_class": replay.get("failure_class"),
+            },
+        }
+
+    def export_run_audit_timeline(
+        self,
+        run_id: str,
+        *,
+        export_format: str = "json",
+        include_tool_calls: bool = True,
+        include_security_actions: bool = True,
+        limit: int = 2000,
+    ) -> dict[str, Any]:
+        audit = self.build_run_audit_timeline(
+            run_id,
+            include_tool_calls=include_tool_calls,
+            include_security_actions=include_security_actions,
+            limit=limit,
+        )
+        normalized_format = str(export_format or "json").strip().lower() or "json"
+        if normalized_format not in {"json", "csv"}:
+            raise ValueError(f"Unsupported export format: {export_format}")
+        if normalized_format == "json":
+            return {
+                "format": "json",
+                "filename": f"run-audit-{str(audit.get('run_id') or run_id)}.json",
+                "content_type": "application/json",
+                "payload": audit,
+            }
+
+        rows = list(audit.get("timeline") or [])
+        output = StringIO()
+        writer = csv.DictWriter(
+            output,
+            fieldnames=[
+                "timestamp",
+                "channel",
+                "event_id",
+                "stage",
+                "action",
+                "status",
+                "attempt",
+                "actor",
+                "target_type",
+                "target_id",
+                "message",
+                "stop_reason",
+                "failure_class",
+                "request_id",
+            ],
+        )
+        writer.writeheader()
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            policy_context = dict(item.get("policy_context") or {})
+            writer.writerow(
+                {
+                    "timestamp": str(item.get("timestamp") or ""),
+                    "channel": str(item.get("channel") or ""),
+                    "event_id": str(item.get("event_id") or ""),
+                    "stage": str(item.get("stage") or ""),
+                    "action": str(item.get("action") or ""),
+                    "status": str(item.get("status") or ""),
+                    "attempt": str(item.get("attempt") if item.get("attempt") is not None else ""),
+                    "actor": str(item.get("actor") or ""),
+                    "target_type": str(item.get("target_type") or ""),
+                    "target_id": str(item.get("target_id") or ""),
+                    "message": str(item.get("message") or ""),
+                    "stop_reason": str(policy_context.get("stop_reason") or ""),
+                    "failure_class": str(policy_context.get("failure_class") or ""),
+                    "request_id": str(policy_context.get("request_id") or ""),
+                }
+            )
+        csv_content = output.getvalue()
+        return {
+            "format": "csv",
+            "filename": f"run-audit-{str(audit.get('run_id') or run_id)}.csv",
+            "content_type": "text/csv; charset=utf-8",
+            "content": csv_content,
+            "line_count": max(0, len(csv_content.splitlines())),
         }
 
     def get_run_health(

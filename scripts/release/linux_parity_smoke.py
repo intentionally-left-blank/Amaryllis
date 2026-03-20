@@ -765,6 +765,34 @@ def main() -> int:
                             latencies_ms=latencies_ms,
                         )
 
+                        _check_request(
+                            client=client,
+                            round_number=round_number,
+                            domain="run",
+                            label="run_audit",
+                            method="GET",
+                            path=f"/agents/runs/{run_id}/audit?include_tool_calls=true&include_security_actions=true&limit=200",
+                            token="user-token",
+                            expected_status=200,
+                            domain_stats=domain_stats,
+                            failures=failures,
+                            latencies_ms=latencies_ms,
+                        )
+
+                        _check_request(
+                            client=client,
+                            round_number=round_number,
+                            domain="run",
+                            label="run_audit_export_json",
+                            method="GET",
+                            path=f"/agents/runs/{run_id}/audit/export?format=json&include_tool_calls=true&include_security_actions=true&limit=200",
+                            token="user-token",
+                            expected_status=200,
+                            domain_stats=domain_stats,
+                            failures=failures,
+                            latencies_ms=latencies_ms,
+                        )
+
                 stt = _check_request(
                     client=client,
                     round_number=round_number,

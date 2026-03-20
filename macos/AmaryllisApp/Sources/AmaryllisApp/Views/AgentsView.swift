@@ -29,6 +29,9 @@ struct AgentsView: View {
     @State private var selectedRunDiagnostics: APIAgentRunDiagnosticsPayload?
     @State private var diagnosticsStatusMessage: String = "Diagnostics not loaded."
     @State private var isLoadingDiagnostics: Bool = false
+    @State private var selectedRunAudit: APIAgentRunAuditPayload?
+    @State private var auditStatusMessage: String = "Audit not loaded."
+    @State private var isLoadingAudit: Bool = false
     @State private var runWatchSource: String = "idle"
     @State private var runWatchLastEventAt: Date?
     @State private var replaySearchQuery: String = ""
@@ -38,8 +41,12 @@ struct AgentsView: View {
     @State private var replayCompareLeftAttempt: String = "auto"
     @State private var replayCompareRightAttempt: String = "auto"
     @State private var replayTimelineLimit: Int = 120
+    @State private var auditSearchQuery: String = ""
+    @State private var auditChannelFilter: String = "all"
+    @State private var auditTimelineLimit: Int = 120
 
     private let replayTimelinePageSize: Int = 120
+    private let auditTimelinePageSize: Int = 120
 
     @State private var newAutomationMessage: String = "Check recent updates and summarize key points."
     @State private var newAutomationScheduleType: String = "interval"
@@ -102,6 +109,8 @@ struct AgentsView: View {
                 replayStatusMessage = "Replay not loaded."
                 selectedRunDiagnostics = nil
                 diagnosticsStatusMessage = "Diagnostics not loaded."
+                selectedRunAudit = nil
+                auditStatusMessage = "Audit not loaded."
                 return
             }
             if selectedRunReplay?.runId != run.id {
@@ -118,6 +127,13 @@ struct AgentsView: View {
             if selectedRunDiagnostics?.runId != run.id {
                 selectedRunDiagnostics = nil
                 diagnosticsStatusMessage = "Diagnostics not loaded for selected run. Press Load Diagnostics."
+            }
+            if selectedRunAudit?.runId != run.id {
+                selectedRunAudit = nil
+                auditStatusMessage = "Audit not loaded for selected run. Press Load Audit."
+                auditSearchQuery = ""
+                auditChannelFilter = "all"
+                auditTimelineLimit = auditTimelinePageSize
             }
         }
         .onChange(of: inboxUnreadOnly) { _ in
@@ -137,6 +153,12 @@ struct AgentsView: View {
         }
         .onChange(of: replayPreset) { _ in
             replayTimelineLimit = replayTimelinePageSize
+        }
+        .onChange(of: auditSearchQuery) { _ in
+            auditTimelineLimit = auditTimelinePageSize
+        }
+        .onChange(of: auditChannelFilter) { _ in
+            auditTimelineLimit = auditTimelinePageSize
         }
         .onDisappear {
             inboxRefreshDebounceTask?.cancel()
@@ -204,6 +226,8 @@ struct AgentsView: View {
                             replayStatusMessage = "Replay not loaded."
                             selectedRunDiagnostics = nil
                             diagnosticsStatusMessage = "Diagnostics not loaded."
+                            selectedRunAudit = nil
+                            auditStatusMessage = "Audit not loaded."
                             runWatchSource = "idle"
                             runWatchLastEventAt = nil
                             replaySearchQuery = ""
@@ -213,6 +237,9 @@ struct AgentsView: View {
                             replayCompareLeftAttempt = "auto"
                             replayCompareRightAttempt = "auto"
                             replayTimelineLimit = replayTimelinePageSize
+                            auditSearchQuery = ""
+                            auditChannelFilter = "all"
+                            auditTimelineLimit = auditTimelinePageSize
                             runStatusMessage = "Agent switched. Refreshing runs..."
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
@@ -474,11 +501,37 @@ struct AgentsView: View {
                             }
                             .buttonStyle(AmaryllisSecondaryButtonStyle())
                             .disabled(isLoadingDiagnostics || isRunActionLoading)
+                            Button {
+                                Task { await loadAudit(runID: run.id) }
+                            } label: {
+                                if isLoadingAudit {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Text("Load Audit")
+                                }
+                            }
+                            .buttonStyle(AmaryllisSecondaryButtonStyle())
+                            .disabled(isLoadingAudit || isRunActionLoading)
                             Button("Export Package") {
                                 Task { await exportDiagnosticPackage(run: run) }
                             }
                             .buttonStyle(AmaryllisSecondaryButtonStyle())
-                            .disabled(isLoadingReplay || isLoadingDiagnostics)
+                            .disabled(isLoadingReplay || isLoadingDiagnostics || isLoadingAudit)
+                        }
+                        HStack(spacing: 8) {
+                            Button("Export Audit JSON") {
+                                Task { await exportAuditTimeline(run: run, format: "json") }
+                            }
+                            .buttonStyle(AmaryllisSecondaryButtonStyle())
+                            .disabled(isLoadingAudit || isLoadingReplay || isLoadingDiagnostics)
+
+                            Button("Export Audit CSV") {
+                                Task { await exportAuditTimeline(run: run, format: "csv") }
+                            }
+                            .buttonStyle(AmaryllisSecondaryButtonStyle())
+                            .disabled(isLoadingAudit || isLoadingReplay || isLoadingDiagnostics)
+                            Spacer()
                         }
                         Text("id: \(run.id)")
                             .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
@@ -498,6 +551,9 @@ struct AgentsView: View {
                             .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
                             .foregroundStyle(AmaryllisTheme.textSecondary)
                         Text(diagnosticsStatusMessage)
+                            .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                        Text(auditStatusMessage)
                             .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
                             .foregroundStyle(AmaryllisTheme.textSecondary)
 
@@ -631,6 +687,79 @@ struct AgentsView: View {
                                 .disabled(isLoadingReplay || isRunActionLoading)
                                 Spacer()
                             }
+                        }
+
+                        if let audit = selectedRunAudit, audit.runId == run.id {
+                            let filteredAudit = filteredAuditTimeline(audit)
+                            let visibleAudit = visibleAuditTimeline(filteredAudit)
+                            Text("Mission Audit (\(audit.eventCount) events)")
+                                .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                                .foregroundStyle(AmaryllisTheme.textSecondary)
+                            Text("channels: \(renderAuditChannelCounts(audit.summary.channelCounts))")
+                                .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                .foregroundStyle(AmaryllisTheme.textSecondary)
+                                .lineLimit(2)
+                            if !audit.summary.statusCounts.isEmpty {
+                                Text("statuses: \(renderAuditChannelCounts(audit.summary.statusCounts))")
+                                    .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                    .foregroundStyle(AmaryllisTheme.textSecondary)
+                                    .lineLimit(2)
+                            }
+
+                            HStack(spacing: 8) {
+                                TextField("Search channel/action/message", text: $auditSearchQuery)
+                                    .textFieldStyle(AmaryllisTerminalTextFieldStyle())
+                                    .frame(minWidth: 180, maxWidth: .infinity)
+                                Picker("Channel", selection: $auditChannelFilter) {
+                                    Text("all").tag("all")
+                                    ForEach(availableAuditChannels(audit), id: \.self) { channel in
+                                        Text(channel).tag(channel)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .frame(width: 150)
+                            }
+                            HStack(spacing: 8) {
+                                Text("Showing \(visibleAudit.count)/\(filteredAudit.count) events")
+                                    .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                    .foregroundStyle(AmaryllisTheme.textSecondary)
+                                Spacer()
+                                if filteredAudit.count > visibleAudit.count {
+                                    Button("Older +\(auditTimelinePageSize)") {
+                                        auditTimelineLimit += auditTimelinePageSize
+                                    }
+                                    .buttonStyle(AmaryllisSecondaryButtonStyle())
+                                }
+                                if auditTimelineLimit != auditTimelinePageSize {
+                                    Button("Latest") {
+                                        auditTimelineLimit = auditTimelinePageSize
+                                    }
+                                    .buttonStyle(AmaryllisSecondaryButtonStyle())
+                                }
+                                if !filteredAudit.isEmpty, auditTimelineLimit < filteredAudit.count {
+                                    Button("All") {
+                                        auditTimelineLimit = filteredAudit.count
+                                    }
+                                    .buttonStyle(AmaryllisSecondaryButtonStyle())
+                                }
+                            }
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: 4) {
+                                    ForEach(visibleAudit) { item in
+                                        HStack(spacing: 6) {
+                                            Circle()
+                                                .fill(auditChannelColor(item.channel))
+                                                .frame(width: 6, height: 6)
+                                            Text(renderAuditEventLine(item))
+                                                .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                                .foregroundStyle(AmaryllisTheme.textSecondary)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .lineLimit(2)
+                                        }
+                                    }
+                                }
+                            }
+                            .frame(maxHeight: 120)
                         }
 
                         if let replay = selectedRunReplay, replay.runId == run.id {
@@ -1282,6 +1411,8 @@ struct AgentsView: View {
             replayStatusMessage = "Replay not loaded."
             selectedRunDiagnostics = nil
             diagnosticsStatusMessage = "Diagnostics not loaded."
+            selectedRunAudit = nil
+            auditStatusMessage = "Audit not loaded."
             runWatchSource = "idle"
             runWatchLastEventAt = nil
             replaySearchQuery = ""
@@ -1291,6 +1422,9 @@ struct AgentsView: View {
             replayCompareLeftAttempt = "auto"
             replayCompareRightAttempt = "auto"
             replayTimelineLimit = replayTimelinePageSize
+            auditSearchQuery = ""
+            auditChannelFilter = "all"
+            auditTimelineLimit = auditTimelinePageSize
             return
         }
 
@@ -1396,6 +1530,39 @@ struct AgentsView: View {
         } catch {
             selectedRunDiagnostics = nil
             diagnosticsStatusMessage = "Diagnostics load failed."
+            if !silent {
+                appState.lastError = error.localizedDescription
+            }
+        }
+    }
+
+    private func loadAudit(runID: String, silent: Bool = false) async {
+        if silent,
+           let existing = selectedRunAudit,
+           existing.runId == runID,
+           !existing.timeline.isEmpty {
+            return
+        }
+
+        isLoadingAudit = true
+        defer { isLoadingAudit = false }
+
+        do {
+            let audit = try await appState.apiClient.getAgentRunAudit(
+                runId: runID,
+                includeToolCalls: true,
+                includeSecurityActions: true,
+                limit: 5_000
+            )
+            selectedRunAudit = audit
+            auditSearchQuery = ""
+            auditChannelFilter = "all"
+            auditTimelineLimit = auditTimelinePageSize
+            auditStatusMessage = "Audit loaded: \(audit.eventCount) events."
+            appState.clearError()
+        } catch {
+            selectedRunAudit = nil
+            auditStatusMessage = "Audit load failed."
             if !silent {
                 appState.lastError = error.localizedDescription
             }
@@ -1572,6 +1739,7 @@ struct AgentsView: View {
         runStatusMessage = "Run \(run.id) status: \(status)"
         await loadReplay(runID: run.id, silent: true)
         await loadDiagnostics(runID: run.id, silent: true)
+        await loadAudit(runID: run.id, silent: true)
     }
 
     private func cancelRun(id: String) async {
@@ -1786,6 +1954,79 @@ struct AgentsView: View {
         return parts.joined(separator: " | ")
     }
 
+    private func auditChannelColor(_ channel: String) -> Color {
+        switch channel {
+        case "run_checkpoint":
+            return .blue
+        case "tool_call":
+            return .orange
+        case "security_audit":
+            return .green
+        default:
+            return AmaryllisTheme.textSecondary
+        }
+    }
+
+    private func renderAuditChannelCounts(_ counts: [String: Int]) -> String {
+        if counts.isEmpty {
+            return "none"
+        }
+        return counts
+            .sorted { lhs, rhs in
+                if lhs.value == rhs.value {
+                    return lhs.key < rhs.key
+                }
+                return lhs.value > rhs.value
+            }
+            .prefix(4)
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: " | ")
+    }
+
+    private func availableAuditChannels(_ audit: APIAgentRunAuditPayload) -> [String] {
+        Array(Set(audit.timeline.map { $0.channel })).sorted()
+    }
+
+    private func filteredAuditTimeline(_ audit: APIAgentRunAuditPayload) -> [APIAgentRunAuditTimelineItem] {
+        let query = auditSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return audit.timeline.filter { item in
+            if auditChannelFilter != "all", item.channel != auditChannelFilter {
+                return false
+            }
+            if query.isEmpty {
+                return true
+            }
+            let attemptText = item.attempt.map(String.init) ?? ""
+            let haystack = "\(item.timestamp) \(item.channel) \(item.stage) \(item.action) \(item.status) \(attemptText) \(item.actor) \(item.message)".lowercased()
+            return haystack.contains(query)
+        }
+    }
+
+    private func visibleAuditTimeline(_ timeline: [APIAgentRunAuditTimelineItem]) -> [APIAgentRunAuditTimelineItem] {
+        let safeLimit = max(auditTimelinePageSize, auditTimelineLimit)
+        if timeline.count <= safeLimit {
+            return timeline
+        }
+        return Array(timeline.suffix(safeLimit))
+    }
+
+    private func renderAuditEventLine(_ item: APIAgentRunAuditTimelineItem) -> String {
+        var parts: [String] = ["[\(item.timestamp)]", item.channel, item.action]
+        if !item.status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            parts.append("status=\(item.status)")
+        }
+        if let attempt = item.attempt {
+            parts.append("a\(attempt)")
+        }
+        if !item.actor.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            parts.append("actor=\(item.actor)")
+        }
+        if !item.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            parts.append(item.message)
+        }
+        return parts.joined(separator: " ")
+    }
+
     private func availableReplayStages(_ replay: APIAgentRunReplayPayload) -> [String] {
         Array(Set(replay.timeline.map { $0.stage })).sorted()
     }
@@ -1968,6 +2209,67 @@ struct AgentsView: View {
             appState.clearError()
         } catch {
             replayStatusMessage = "Diagnostics export failed."
+            appState.lastError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func exportAuditTimeline(run: APIAgentRunRecord, format: String) async {
+        isLoadingAudit = true
+        defer { isLoadingAudit = false }
+
+        let normalized = format.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        do {
+            let fileName: String
+            let data: Data
+            let panelTitle: String
+            let allowedContentTypes: [UTType]
+
+            if normalized == "json" {
+                let response = try await appState.apiClient.exportAgentRunAuditJSON(
+                    runId: run.id,
+                    includeToolCalls: true,
+                    includeSecurityActions: true,
+                    limit: 5_000
+                )
+                selectedRunAudit = response.audit
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                data = try encoder.encode(response.audit)
+                fileName = response.export.filename
+                panelTitle = "Export Mission Audit (JSON)"
+                allowedContentTypes = [UTType.json]
+            } else {
+                let exported = try await appState.apiClient.exportAgentRunAuditCSV(
+                    runId: run.id,
+                    includeToolCalls: true,
+                    includeSecurityActions: true,
+                    limit: 5_000
+                )
+                data = Data(exported.content.utf8)
+                fileName = exported.filename
+                panelTitle = "Export Mission Audit (CSV)"
+                allowedContentTypes = [UTType.commaSeparatedText, UTType.plainText]
+            }
+
+            let panel = NSSavePanel()
+            panel.title = panelTitle
+            panel.nameFieldStringValue = fileName
+            panel.allowedContentTypes = allowedContentTypes
+            panel.canCreateDirectories = true
+            panel.isExtensionHidden = false
+
+            let result = panel.runModal()
+            guard result == .OK, let destination = panel.url else {
+                auditStatusMessage = "Audit export canceled."
+                return
+            }
+
+            try data.write(to: destination, options: .atomic)
+            auditStatusMessage = "Audit exported: \(destination.lastPathComponent)"
+            appState.clearError()
+        } catch {
+            auditStatusMessage = "Audit export failed."
             appState.lastError = error.localizedDescription
         }
     }

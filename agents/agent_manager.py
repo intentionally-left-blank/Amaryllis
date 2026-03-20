@@ -238,6 +238,42 @@ class AgentManager:
             raise ValueError("Run manager is not configured")
         return self.run_manager.build_run_diagnostics_package(run_id)
 
+    def build_run_audit_timeline(
+        self,
+        run_id: str,
+        *,
+        include_tool_calls: bool = True,
+        include_security_actions: bool = True,
+        limit: int = 2000,
+    ) -> dict[str, Any]:
+        if self.run_manager is None:
+            raise ValueError("Run manager is not configured")
+        return self.run_manager.build_run_audit_timeline(
+            run_id,
+            include_tool_calls=include_tool_calls,
+            include_security_actions=include_security_actions,
+            limit=limit,
+        )
+
+    def export_run_audit_timeline(
+        self,
+        run_id: str,
+        *,
+        export_format: str = "json",
+        include_tool_calls: bool = True,
+        include_security_actions: bool = True,
+        limit: int = 2000,
+    ) -> dict[str, Any]:
+        if self.run_manager is None:
+            raise ValueError("Run manager is not configured")
+        return self.run_manager.export_run_audit_timeline(
+            run_id,
+            export_format=export_format,
+            include_tool_calls=include_tool_calls,
+            include_security_actions=include_security_actions,
+            limit=limit,
+        )
+
     def list_run_issues(self, run_id: str, limit: int = 200) -> list[dict[str, Any]]:
         if self.run_manager is None:
             raise ValueError("Run manager is not configured")

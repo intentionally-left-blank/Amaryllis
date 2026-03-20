@@ -811,6 +811,120 @@ struct APIAgentRunDiagnosticsResponse: Codable {
     }
 }
 
+struct APIAgentRunAuditTimelineItem: Codable, Identifiable {
+    let eventId: String
+    let timestamp: String
+    let channel: String
+    let stage: String
+    let action: String
+    let status: String
+    let attempt: Int?
+    let actor: String
+    let targetType: String
+    let targetId: String
+    let policyContext: [String: JSONValue]
+    let message: String
+
+    var id: String { eventId }
+
+    private enum CodingKeys: String, CodingKey {
+        case eventId = "event_id"
+        case timestamp
+        case channel
+        case stage
+        case action
+        case status
+        case attempt
+        case actor
+        case targetType = "target_type"
+        case targetId = "target_id"
+        case policyContext = "policy_context"
+        case message
+    }
+}
+
+struct APIAgentRunAuditSummary: Codable {
+    let channelCounts: [String: Int]
+    let statusCounts: [String: Int]
+    let includeToolCalls: Bool
+    let includeSecurityActions: Bool
+    let terminalStopReason: String?
+    let terminalFailureClass: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case channelCounts = "channel_counts"
+        case statusCounts = "status_counts"
+        case includeToolCalls = "include_tool_calls"
+        case includeSecurityActions = "include_security_actions"
+        case terminalStopReason = "terminal_stop_reason"
+        case terminalFailureClass = "terminal_failure_class"
+    }
+}
+
+struct APIAgentRunAuditPayload: Codable {
+    let runId: String
+    let agentId: String?
+    let userId: String?
+    let sessionId: String?
+    let status: String?
+    let generatedAt: String
+    let timeline: [APIAgentRunAuditTimelineItem]
+    let eventCount: Int
+    let summary: APIAgentRunAuditSummary
+
+    private enum CodingKeys: String, CodingKey {
+        case runId = "run_id"
+        case agentId = "agent_id"
+        case userId = "user_id"
+        case sessionId = "session_id"
+        case status
+        case generatedAt = "generated_at"
+        case timeline
+        case eventCount = "event_count"
+        case summary
+    }
+}
+
+struct APIAgentRunAuditResponse: Codable {
+    let audit: APIAgentRunAuditPayload
+    let requestId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case audit
+        case requestId = "request_id"
+    }
+}
+
+struct APIAgentRunAuditExportMeta: Codable {
+    let format: String
+    let filename: String
+    let contentType: String
+
+    private enum CodingKeys: String, CodingKey {
+        case format
+        case filename
+        case contentType = "content_type"
+    }
+}
+
+struct APIAgentRunAuditExportJSONResponse: Codable {
+    let audit: APIAgentRunAuditPayload
+    let export: APIAgentRunAuditExportMeta
+    let requestId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case audit
+        case export
+        case requestId = "request_id"
+    }
+}
+
+struct APIAgentRunAuditCSVExport {
+    let filename: String
+    let contentType: String
+    let content: String
+}
+
 struct APIAgentRunStreamEvent: Codable, Identifiable {
     let event: String
     let runId: String
