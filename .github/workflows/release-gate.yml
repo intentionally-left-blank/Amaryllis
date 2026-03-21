@@ -100,11 +100,14 @@ jobs:
             tests.test_mission_planner \
             tests.test_automation_mission_plan_api \
             tests.test_automation_scheduler \
+            tests.test_agent_run_dispatch_mode_api \
             tests.test_plugin_compat \
             tests.test_plugin_capabilities \
             tests.test_tool_plugin_signing \
             tests.test_tool_isolation_policy \
             tests.test_tool_sandbox \
+            tests.test_unified_session_manager \
+            tests.test_flow_api \
             tests.test_release_quality_dashboard_snapshot \
             tests.test_mission_success_recovery_report_pack \
             tests.test_runtime_service_manifest_renderer \

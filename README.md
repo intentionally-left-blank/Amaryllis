@@ -291,7 +291,9 @@ Reference:
 - `docs/eval-replay-determinism.md`
 - `docs/release-provenance-sbom.md`
 - `docs/mission-simulation-mode.md`
+- `docs/agent-run-interaction-modes.md`
 - `docs/mission-planner.md`
+- `docs/flow-session-contract.md`
 - `docs/automation-mission-policy.md`
 - `docs/plugin-compat-contract.md`
 - `docs/plugin-capability-policy.md`
@@ -672,6 +674,55 @@ Voice STT env vars:
 - `AMARYLLIS_VOICE_STT_BACKEND` (default `whisper_python`; supported: `whisper_python`, `none`)
 - `AMARYLLIS_VOICE_STT_MODEL` (default `base`)
 
+## Unified Flow API (Text/Voice/Visual)
+
+Get flow contract:
+
+```bash
+curl "http://localhost:8000/flow/sessions/contract"
+```
+
+Start unified session:
+
+```bash
+curl -X POST http://localhost:8000/flow/sessions/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user-001",
+    "channels": ["text", "voice", "visual"],
+    "initial_state": "listening",
+    "metadata": {"source": "desktop-ui"}
+  }'
+```
+
+Transition session state:
+
+```bash
+curl -X POST "http://localhost:8000/flow/sessions/<session_id>/transition" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to_state": "planning",
+    "reason": "user_requested_plan"
+  }'
+```
+
+Record channel activity:
+
+```bash
+curl -X POST "http://localhost:8000/flow/sessions/<session_id>/activity" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "channel": "text",
+    "event": "prompt_submitted"
+  }'
+```
+
+List sessions (owner scoped):
+
+```bash
+curl "http://localhost:8000/flow/sessions?user_id=user-001&state=planning&limit=50"
+```
+
 ## Agent API
 
 ### Create agent
@@ -703,6 +754,54 @@ curl -X POST http://localhost:8000/agents/<agent_id>/chat \
     "user_id": "user-001",
     "session_id": "session-001",
     "message": "Find 3 sources about MLX and summarize them."
+  }'
+```
+
+### Work Mode: interaction modes contract
+
+```bash
+curl "http://localhost:8000/agents/runs/interaction-modes"
+```
+
+### Work Mode: dispatch (explicit plan-vs-execute)
+
+Plan first (dry-run, no execution):
+
+```bash
+curl -X POST http://localhost:8000/agents/<agent_id>/runs/dispatch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user-001",
+    "session_id": "session-001",
+    "message": "Investigate errors and propose remediation plan",
+    "interaction_mode": "plan",
+    "max_attempts": 3,
+    "budget": {
+      "max_tokens": 18000,
+      "max_duration_sec": 240,
+      "max_tool_calls": 8,
+      "max_tool_errors": 2
+    }
+  }'
+```
+
+Execute now (create async run immediately):
+
+```bash
+curl -X POST http://localhost:8000/agents/<agent_id>/runs/dispatch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user-001",
+    "session_id": "session-001",
+    "message": "Investigate errors and propose remediation plan",
+    "interaction_mode": "execute",
+    "max_attempts": 3,
+    "budget": {
+      "max_tokens": 18000,
+      "max_duration_sec": 240,
+      "max_tool_calls": 8,
+      "max_tool_errors": 2
+    }
   }'
 ```
 

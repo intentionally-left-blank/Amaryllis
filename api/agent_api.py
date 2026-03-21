@@ -14,6 +14,7 @@ from runtime.errors import AmaryllisError, NotFoundError, ProviderError, Validat
 router = APIRouter(tags=["agents"])
 RUN_STATUSES: set[str] = {"queued", "running", "succeeded", "failed", "canceled"}
 REPLAY_TIMELINE_PRESETS: set[str] = {"errors", "tools", "verify"}
+RUN_INTERACTION_MODES: set[str] = {"plan", "execute"}
 
 
 def _request_id(request: Request) -> str:
@@ -51,6 +52,37 @@ def _sign_action(
         return {}
 
 
+def _normalize_run_interaction_mode(raw_mode: str | None) -> str:
+    normalized = str(raw_mode or "execute").strip().lower() or "execute"
+    if normalized not in RUN_INTERACTION_MODES:
+        allowed = ", ".join(sorted(RUN_INTERACTION_MODES))
+        raise ValidationError(
+            f"Invalid interaction_mode '{raw_mode}'. Allowed values: {allowed}."
+        )
+    return normalized
+
+
+def _run_mode_trust_boundary(mode: str) -> dict[str, Any]:
+    if mode == "plan":
+        return {
+            "mode": "plan",
+            "execution_performed": False,
+            "tool_execution_performed": False,
+            "requires_explicit_execute_call": True,
+            "summary": (
+                "Planning mode is dry-run only. It does not create runs or execute tools. "
+                "A separate execute request is required."
+            ),
+        }
+    return {
+        "mode": "execute",
+        "execution_performed": True,
+        "tool_execution_performed": True,
+        "requires_explicit_execute_call": False,
+        "summary": "Execute mode creates an async run immediately under mission budgets and policy guardrails.",
+    }
+
+
 class CreateAgentRequest(BaseModel):
     name: str = Field(min_length=1)
     system_prompt: str = Field(min_length=1)
@@ -84,6 +116,15 @@ class AgentRunSimulationRequest(BaseModel):
     user_id: str = Field(min_length=1)
     message: str = Field(min_length=1)
     session_id: str | None = None
+    max_attempts: int | None = Field(default=None, ge=1, le=10)
+    budget: RunBudgetRequest | None = None
+
+
+class AgentRunDispatchRequest(BaseModel):
+    user_id: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    session_id: str | None = None
+    interaction_mode: str = Field(default="execute")
     max_attempts: int | None = Field(default=None, ge=1, le=10)
     budget: RunBudgetRequest | None = None
 
@@ -285,6 +326,170 @@ def simulate_agent_run(
             actor=auth.user_id,
             target_type="agent_run_simulation",
             details={"agent_id": agent_id, "error": str(exc)},
+            status="failed",
+        )
+        raise ProviderError(str(exc)) from exc
+
+
+@router.get("/agents/runs/interaction-modes")
+def get_agent_run_interaction_modes(request: Request) -> dict[str, Any]:
+    _ = auth_context_from_request(request)
+    return {
+        "modes": [
+            {
+                "mode": "plan",
+                "summary": "Dry-run planning preview (no run is created).",
+                "endpoint": "/agents/{agent_id}/runs/dispatch",
+                "execution_performed": False,
+            },
+            {
+                "mode": "execute",
+                "summary": "Immediate async run creation and execution.",
+                "endpoint": "/agents/{agent_id}/runs/dispatch",
+                "execution_performed": True,
+            },
+        ],
+        "supported_interaction_modes": sorted(RUN_INTERACTION_MODES),
+        "request_id": _request_id(request),
+    }
+
+
+@router.post("/agents/{agent_id}/runs/dispatch")
+def dispatch_agent_run(
+    payload: AgentRunDispatchRequest,
+    request: Request,
+    agent_id: str = Path(..., min_length=1),
+) -> dict[str, Any]:
+    services = request.app.state.services
+    auth = auth_context_from_request(request)
+    effective_user_id = resolve_user_id(request_user_id=payload.user_id, auth=auth)
+    interaction_mode = _normalize_run_interaction_mode(payload.interaction_mode)
+    budget_payload = payload.budget.model_dump(exclude_none=True) if payload.budget is not None else None
+    action_payload = {
+        **payload.model_dump(exclude_none=True),
+        "user_id": effective_user_id,
+        "interaction_mode": interaction_mode,
+    }
+    if budget_payload is not None:
+        action_payload["budget"] = budget_payload
+
+    try:
+        agent = services.agent_manager.get_agent(agent_id)
+        if agent is None:
+            raise NotFoundError(f"Agent not found: {agent_id}")
+        assert_owner(
+            owner_user_id=agent.user_id,
+            auth=auth,
+            resource_name="agent",
+            resource_id=agent_id,
+        )
+
+        if interaction_mode == "plan":
+            simulation = services.agent_manager.simulate_run(
+                agent_id=agent_id,
+                user_message=payload.message,
+                user_id=effective_user_id,
+                session_id=payload.session_id,
+                max_attempts=payload.max_attempts,
+                budget=budget_payload,
+            )
+            dry_run_receipt = _sign_action(
+                request,
+                action="agent_run_dispatch",
+                payload=action_payload,
+                actor=auth.user_id,
+                target_type="agent_run_simulation",
+                target_id=str(simulation.get("simulation_id") or ""),
+                details={
+                    "agent_id": agent_id,
+                    "interaction_mode": interaction_mode,
+                    "execution_performed": False,
+                },
+            )
+            execute_payload: dict[str, Any] = {
+                "user_id": effective_user_id,
+                "message": payload.message,
+                "interaction_mode": "execute",
+            }
+            if payload.session_id is not None:
+                execute_payload["session_id"] = payload.session_id
+            if payload.max_attempts is not None:
+                execute_payload["max_attempts"] = payload.max_attempts
+            if budget_payload is not None:
+                execute_payload["budget"] = budget_payload
+            return {
+                "interaction_mode": interaction_mode,
+                "trust_boundary": _run_mode_trust_boundary(interaction_mode),
+                "simulation": simulation,
+                "dry_run_receipt": dry_run_receipt,
+                "execute_hint": {
+                    "endpoint": f"/agents/{agent_id}/runs/dispatch",
+                    "payload": execute_payload,
+                },
+                "supported_interaction_modes": sorted(RUN_INTERACTION_MODES),
+                "request_id": _request_id(request),
+            }
+
+        run = services.agent_manager.create_run(
+            agent_id=agent_id,
+            user_message=payload.message,
+            user_id=effective_user_id,
+            session_id=payload.session_id,
+            max_attempts=payload.max_attempts,
+            budget=budget_payload,
+        )
+        receipt = _sign_action(
+            request,
+            action="agent_run_dispatch",
+            payload=action_payload,
+            actor=auth.user_id,
+            target_type="agent_run",
+            target_id=str(run.get("id")),
+            details={
+                "agent_id": agent_id,
+                "interaction_mode": interaction_mode,
+                "execution_performed": True,
+            },
+        )
+        return {
+            "interaction_mode": interaction_mode,
+            "trust_boundary": _run_mode_trust_boundary(interaction_mode),
+            "run": run,
+            "action_receipt": receipt,
+            "supported_interaction_modes": sorted(RUN_INTERACTION_MODES),
+            "request_id": _request_id(request),
+        }
+    except ValueError as exc:
+        _sign_action(
+            request,
+            action="agent_run_dispatch",
+            payload=action_payload,
+            actor=auth.user_id,
+            target_type="agent_run",
+            details={
+                "agent_id": agent_id,
+                "interaction_mode": interaction_mode,
+                "error": str(exc),
+            },
+            status="failed",
+        )
+        if "not found" in str(exc).lower():
+            raise NotFoundError(str(exc)) from exc
+        raise ValidationError(str(exc)) from exc
+    except AmaryllisError:
+        raise
+    except Exception as exc:
+        _sign_action(
+            request,
+            action="agent_run_dispatch",
+            payload=action_payload,
+            actor=auth.user_id,
+            target_type="agent_run",
+            details={
+                "agent_id": agent_id,
+                "interaction_mode": interaction_mode,
+                "error": str(exc),
+            },
             status="failed",
         )
         raise ProviderError(str(exc)) from exc

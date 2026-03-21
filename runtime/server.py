@@ -20,6 +20,7 @@ from api.agent_api import router as agent_router
 from api.automation_api import router as automation_router
 from api.backup_api import router as backup_router
 from api.chat_api import router as chat_router
+from api.flow_api import router as flow_router
 from api.inbox_api import router as inbox_router
 from api.memory_api import router as memory_router
 from api.model_api import router as model_router
@@ -55,6 +56,7 @@ from runtime.telemetry import LocalTelemetry
 from storage.database import Database
 from storage.vector_store import VectorStore
 from tasks.task_executor import TaskExecutor
+from flow.session_manager import UnifiedSessionManager
 from tools.mcp_client_registry import MCPClientRegistry
 from tools.autonomy_policy import AutonomyPolicy
 from tools.browser_action_adapter import BrowserActionAdapter, StubBrowserActionAdapter, register_browser_action_tool
@@ -78,6 +80,7 @@ class ServiceContainer:
     tool_registry: ToolRegistry
     browser_adapter: BrowserActionAdapter
     voice_session_manager: VoiceSessionManager
+    flow_session_manager: UnifiedSessionManager
     stt_adapter: STTAdapter
     tool_executor: ToolExecutor
     meta_controller: MetaController
@@ -239,6 +242,7 @@ def create_services() -> ServiceContainer:
         telemetry_emitter=telemetry.emit,
     )
     voice_session_manager = VoiceSessionManager(telemetry_emitter=telemetry.emit)
+    flow_session_manager = UnifiedSessionManager(telemetry_emitter=telemetry.emit)
     stt_adapter = create_stt_adapter_from_env()
 
     raw_model_manager = ModelManager(config=config, database=database)
@@ -364,6 +368,7 @@ def create_services() -> ServiceContainer:
         tool_registry=tool_registry,
         browser_adapter=browser_adapter,
         voice_session_manager=voice_session_manager,
+        flow_session_manager=flow_session_manager,
         stt_adapter=stt_adapter,
         tool_executor=tool_executor,
         meta_controller=meta_controller,
@@ -676,6 +681,7 @@ def create_app() -> FastAPI:
     app.include_router(model_router)
     app.include_router(agent_router)
     app.include_router(automation_router)
+    app.include_router(flow_router)
     app.include_router(inbox_router)
     app.include_router(memory_router)
     app.include_router(tool_router)
@@ -685,6 +691,7 @@ def create_app() -> FastAPI:
     app.include_router(model_router, prefix="/v1")
     app.include_router(agent_router, prefix="/v1")
     app.include_router(automation_router, prefix="/v1")
+    app.include_router(flow_router, prefix="/v1")
     app.include_router(inbox_router, prefix="/v1")
     app.include_router(memory_router, prefix="/v1")
     app.include_router(tool_router, prefix="/v1")

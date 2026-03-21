@@ -22,8 +22,8 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
-| P4-A01 | todo | Define unified session state machine for text/voice/visual loop | session contract + API/UI integration | User can move across listen/plan/act/review states without context loss |
-| P4-A02 | todo | Add "plan or execute" explicit interaction mode | reasoning/plan mode API + UI control | User can choose plan-first vs direct execution with clear trust boundaries |
+| P4-A01 | in_progress | Define unified session state machine for text/voice/visual loop | session contract + API/UI integration | User can move across listen/plan/act/review states without context loss |
+| P4-A02 | in_progress | Add "plan or execute" explicit interaction mode | reasoning/plan mode API + UI control | User can choose plan-first vs direct execution with clear trust boundaries |
 | P4-A03 | todo | Add action timeline and plain-language explainability feed | execution timeline stream + explain payload | Every action has visible reason, result, and next-step suggestion |
 
 ### Epic B - Desktop Action Surface (Linux-First)
@@ -54,8 +54,8 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 
 | ID | Status | Scope |
 |---|---|---|
-| P4-A01 | todo | unified multimodal session state machine contract |
-| P4-A02 | todo | explicit plan-vs-execute mode in API + UI |
+| P4-A01 | in_progress | unified multimodal session state machine contract (runtime manager + `/flow/sessions/*` API + tests + docs) |
+| P4-A02 | in_progress | explicit plan-vs-execute mode in API (`/agents/{agent_id}/runs/dispatch`) + interaction-mode contract endpoint + tests + docs |
 | P4-B01 | todo | Linux desktop integration adapters (first slice) |
 | P4-C01 | todo | bounded multi-agent supervisor skeleton |
 | P4-D01 | todo | end-to-end user journey benchmark baseline |
