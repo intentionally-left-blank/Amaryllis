@@ -76,12 +76,21 @@ Mission success/recovery report pack artifact:
 artifacts/nightly-mission-success-recovery-report.json
 ```
 
+Nightly macOS desktop parity smoke artifact (staging, non-blocking):
+
+```text
+artifacts/nightly-macos-desktop-parity-smoke-report.json
+```
+
 Report includes:
 - `summary`: total/failed requests, success/error rate, avg/p95 latency, jitter, stability score.
 - `trend_deltas`: deltas vs baseline metrics.
 - `burn_rate.samples`: per-round request/run burn-rate samples + active burn-rate budgets.
 - `burn_rate.summary`: p95/max/breach streaks for request/run burn-rate.
 - `failures`: per-request mismatch details (expected vs actual status, round, latency).
+
+Companion staging report:
+- `macos_desktop_parity_smoke_v1` for desktop-action parity on macOS contract surface.
 
 ## Baseline
 

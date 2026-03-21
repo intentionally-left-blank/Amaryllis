@@ -20,6 +20,9 @@ Mandatory gates before publish:
 14. Disaster recovery gate (backup + verify + restore drill)
 15. Compliance operations gate (access review + incidents + evidence export)
 
+Staging companion (non-blocking):
+- macOS desktop action parity smoke (`scripts/release/macos_desktop_parity_smoke.py`)
+
 Commands:
 
 ```bash
@@ -34,6 +37,7 @@ python scripts/release/runtime_lifecycle_smoke_gate.py --max-startup-slo-latency
 python scripts/release/fault_injection_reliability_gate.py --retry-max-attempts 2 --scenario-timeout-sec 8 --min-pass-rate-pct 100
 python scripts/release/mission_queue_load_gate.py --runs-total 40 --submit-concurrency 8 --worker-count 4 --task-latency-ms 35 --scenario-timeout-sec 30 --min-success-rate-pct 99 --max-failed-runs 0 --max-p95-queue-wait-ms 1500 --max-p95-end-to-end-ms 5000
 python scripts/release/user_journey_benchmark.py --iterations 5 --min-success-rate-pct 100 --max-p95-journey-latency-ms 3000 --max-p95-plan-dispatch-latency-ms 1200 --max-p95-execute-dispatch-latency-ms 1200 --min-plan-to-execute-conversion-rate-pct 100 --baseline eval/baselines/quality/user_journey_benchmark_baseline.json --output artifacts/user-journey-benchmark-report.json --strict
+python scripts/release/macos_desktop_parity_smoke.py --iterations 2 --output artifacts/macos-desktop-parity-smoke-report.json
 python scripts/release/linux_parity_smoke.py --iterations 1 --require-linux --output artifacts/linux-parity-smoke-report.json
 python scripts/release/linux_installer_smoke.py --require-linux --output artifacts/linux-installer-smoke-report.json
 python scripts/release/build_distribution_resilience_report.py --linux-parity-report artifacts/linux-parity-smoke-report.json --linux-installer-report artifacts/linux-installer-smoke-report.json --runtime-lifecycle-report artifacts/runtime-lifecycle-smoke-report.json --output artifacts/distribution-resilience-report.json

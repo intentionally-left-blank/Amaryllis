@@ -82,6 +82,13 @@ jobs:
             --output "artifacts/nightly-user-journey-benchmark-report.json" \
             --strict
 
+      - name: Run macOS desktop parity smoke (staging, non-blocking)
+        continue-on-error: true
+        run: |
+          python scripts/release/macos_desktop_parity_smoke.py \
+            --iterations "${AMARYLLIS_NIGHTLY_MACOS_DESKTOP_PARITY_ITERATIONS:-2}" \
+            --output "artifacts/nightly-macos-desktop-parity-smoke-report.json"
+
       - name: Build mission success/recovery report pack (nightly)
         if: ${{ always() }}
         run: |
@@ -115,6 +122,14 @@ jobs:
           name: nightly-user-journey-benchmark-report
           path: artifacts/nightly-user-journey-benchmark-report.json
           if-no-files-found: error
+
+      - name: Upload nightly macOS desktop parity smoke report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-macos-desktop-parity-smoke-report
+          path: artifacts/nightly-macos-desktop-parity-smoke-report.json
+          if-no-files-found: warn
 
       - name: Upload nightly mission success/recovery report pack
         if: ${{ always() }}

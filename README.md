@@ -52,13 +52,13 @@ Implemented in this version:
 - automatic incident detection from SLO breaches (availability, latency p95, run success)
 - API lifecycle policy with version headers and legacy deprecation headers (`Deprecation`, `Sunset`)
 - versioned API aliases for core routes under `/v1/*` with compatibility contract gate
-- release gate assets: compatibility script, canary smoke script, Linux parity/installer + distribution resilience gates, disaster-recovery gate, compliance gate, rollback playbook
+- release gate assets: compatibility script, canary smoke script, Linux parity/installer + distribution resilience gates, macOS desktop parity staging smoke, disaster-recovery gate, compliance gate, rollback playbook
 - lease/CAS ownership for agent runs (single-owner execution under concurrent workers)
 - mission simulation mode before apply with risk/rollback preview and signed dry-run receipt (`POST /agents/{agent_id}/runs/simulate`)
 - mission template catalog for automation planning (`GET /automations/mission/templates`) with defaults (`code_health`, `security_audit`, `release_guard`, `runtime_watchdog`)
 - mission policy catalog for per-automation SLO overlays (`GET /automations/mission/policies`) with enforcement profiles (`balanced`, `strict`, `watchdog`, `release`)
 - plugin compatibility contract + capability isolation policy (`compat` + `capabilities` manifest fields, fail-fast discovery validation)
-- release/nightly public quality artifacts: user journey benchmark + release quality dashboard snapshot + mission success/recovery report pack + release distribution resilience report
+- release/nightly public quality artifacts: user journey benchmark + release quality dashboard snapshot + mission success/recovery report pack + release distribution resilience report + macOS desktop parity staging smoke report
 - compact run diagnostics endpoint for mission postmortem (`GET /agents/runs/{run_id}/diagnostics`)
 - voice push-to-talk session contract with explicit state transitions (`created -> listening -> stopping -> stopped`)
 - pluggable local STT adapter layer (`whisper_python` backend + graceful unavailable mode)
@@ -1594,6 +1594,12 @@ User journey benchmark gate (intent -> planning -> execute -> review KPI surface
 python3 scripts/release/user_journey_benchmark.py --iterations 5 --min-success-rate-pct 100 --max-p95-journey-latency-ms 3000 --max-p95-plan-dispatch-latency-ms 1200 --max-p95-execute-dispatch-latency-ms 1200 --min-plan-to-execute-conversion-rate-pct 100 --baseline eval/baselines/quality/user_journey_benchmark_baseline.json --output artifacts/user-journey-benchmark-report.json --strict
 ```
 
+macOS desktop parity smoke (staging, non-blocking companion artifact):
+
+```bash
+python3 scripts/release/macos_desktop_parity_smoke.py --iterations 2 --output artifacts/macos-desktop-parity-smoke-report.json
+```
+
 Linux parity smoke gate (run/voice/tools/observability acceptance on Linux target):
 
 ```bash
@@ -1644,6 +1650,7 @@ Reference:
 - `docs/release-quality-dashboard.md`
 - `docs/user-journey-benchmark.md`
 - `docs/mission-success-recovery-report-pack.md`
+- `docs/macos-desktop-parity-smoke.md`
 
 Autonomy level contract (L0-L5):
 
@@ -1935,6 +1942,12 @@ python scripts/release/linux_parity_smoke.py --iterations 1 --output artifacts/l
 python scripts/release/linux_installer_smoke.py --output artifacts/linux-installer-smoke-report.json
 ```
 
+- macOS desktop parity smoke (staging companion):
+
+```bash
+python scripts/release/macos_desktop_parity_smoke.py --iterations 2 --output artifacts/macos-desktop-parity-smoke-report.json
+```
+
 - Distribution resilience report (aggregated Linux parity + installer/rollback + runtime lifecycle checks):
 
 ```bash
@@ -1962,6 +1975,7 @@ python scripts/release/check_runtime_profile_drift.py
 - Rollback playbook: `docs/release-playbook.md`
 - Linux parity matrix: `docs/linux-parity-matrix.md`
 - Distribution resilience report contract: `docs/distribution-resilience-report.md`
+- macOS desktop parity smoke contract: `docs/macos-desktop-parity-smoke.md`
 - Local rollback helper:
 
 ```bash
