@@ -41,6 +41,11 @@ def _parse_args() -> argparse.Namespace:
         help="Optional distribution resilience report JSON path.",
     )
     parser.add_argument(
+        "--macos-desktop-parity-report",
+        default="",
+        help="Optional macOS desktop parity smoke report JSON path.",
+    )
+    parser.add_argument(
         "--nightly-reliability-report",
         default="",
         help="Optional nightly reliability report JSON path.",
@@ -129,6 +134,7 @@ def _source_class(source: str) -> str:
         "fault_injection": "recovery",
         "quality_dashboard": "quality",
         "distribution_resilience": "distribution",
+        "macos_desktop_parity": "desktop_staging",
         "user_journey": "user_flow",
         "nightly_reliability": "nightly_reliability",
         "nightly_burn_rate": "nightly_reliability",
@@ -146,6 +152,8 @@ def _kpi_class(kpi_key: str) -> str:
         return "quality"
     if normalized.startswith("distribution_"):
         return "distribution"
+    if normalized.startswith("desktop_staging_") or normalized.startswith("macos_desktop_"):
+        return "desktop_staging"
     if normalized.startswith("journey_"):
         return "user_flow"
     if normalized.startswith("nightly_"):
@@ -159,6 +167,7 @@ def _class_order() -> list[str]:
         "recovery",
         "quality",
         "distribution",
+        "desktop_staging",
         "user_flow",
         "nightly_reliability",
         "other",
@@ -241,6 +250,7 @@ def main() -> int:
         "fault_injection": _resolve_optional_path(project_root, str(args.fault_injection_report)),
         "quality_dashboard": _resolve_optional_path(project_root, str(args.quality_dashboard_report)),
         "distribution_resilience": _resolve_optional_path(project_root, str(args.distribution_resilience_report)),
+        "macos_desktop_parity": _resolve_optional_path(project_root, str(args.macos_desktop_parity_report)),
         "user_journey": _resolve_optional_path(project_root, str(args.user_journey_report)),
         "nightly_reliability": _resolve_optional_path(project_root, str(args.nightly_reliability_report)),
         "nightly_burn_rate": _resolve_optional_path(project_root, str(args.nightly_burn_rate_report)),
@@ -387,6 +397,46 @@ def main() -> int:
         )
         kpis["distribution_score_pct"] = round(score_pct, 4)
         kpis["distribution_checks_failed"] = int(checks_failed)
+
+    desktop_staging = reports.get("macos_desktop_parity")
+    if isinstance(desktop_staging, dict):
+        summary = desktop_staging.get("summary") if isinstance(desktop_staging.get("summary"), dict) else {}
+        latency_ms = summary.get("latency_ms") if isinstance(summary.get("latency_ms"), dict) else {}
+        status = str(summary.get("status") or "").strip().lower()
+        checks_failed = _safe_float(summary.get("checks_failed"))
+        error_rate_pct = _safe_float(summary.get("error_rate_pct"))
+        p95_latency = _safe_float(latency_ms.get("p95"), default=0.0)
+        checks.extend(
+            [
+                _check(
+                    check_id="desktop_staging.status",
+                    source="macos_desktop_parity",
+                    value=1.0 if status == "pass" else 0.0,
+                    threshold=1.0,
+                    comparator="gte",
+                    unit="bool",
+                ),
+                _check(
+                    check_id="desktop_staging.checks_failed",
+                    source="macos_desktop_parity",
+                    value=checks_failed,
+                    threshold=0.0,
+                    comparator="lte",
+                    unit="count",
+                ),
+                _check(
+                    check_id="desktop_staging.error_rate_pct",
+                    source="macos_desktop_parity",
+                    value=error_rate_pct,
+                    threshold=0.0,
+                    comparator="lte",
+                    unit="pct",
+                ),
+            ]
+        )
+        kpis["desktop_staging_checks_failed"] = int(checks_failed)
+        kpis["desktop_staging_error_rate_pct"] = round(error_rate_pct, 4)
+        kpis["desktop_staging_p95_latency_ms"] = round(p95_latency, 2)
 
     journey = reports.get("user_journey")
     if isinstance(journey, dict):

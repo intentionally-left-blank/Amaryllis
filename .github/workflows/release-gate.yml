@@ -253,6 +253,10 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             RELEASE_CHANNEL="stable"
           fi
+          MACOS_DESKTOP_PARITY_ARG=""
+          if [[ -f "artifacts/macos-desktop-parity-smoke-report.json" ]]; then
+            MACOS_DESKTOP_PARITY_ARG="--macos-desktop-parity-report artifacts/macos-desktop-parity-smoke-report.json"
+          fi
 
           python scripts/release/build_quality_dashboard_snapshot.py \
             --perf-report "artifacts/perf-smoke-report.json" \
@@ -260,6 +264,7 @@ jobs:
             --mission-queue-report "artifacts/mission-queue-load-report.json" \
             --runtime-lifecycle-report "artifacts/runtime-lifecycle-smoke-report.json" \
             --user-journey-report "artifacts/user-journey-benchmark-report.json" \
+            ${MACOS_DESKTOP_PARITY_ARG} \
             --baseline "eval/baselines/quality/release_quality_dashboard_baseline.json" \
             --output "artifacts/release-quality-dashboard.json" \
             --trend-output "artifacts/release-quality-dashboard-trend.json" \
@@ -399,11 +404,22 @@ jobs:
           name: distribution-resilience-report
           path: artifacts/distribution
 
+      - name: Download macOS desktop parity smoke report (staging, optional)
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-desktop-parity-smoke-report
+          path: artifacts/macos-desktop-parity
+
       - name: Build release quality dashboard snapshot (final, with distribution)
         run: |
           RELEASE_CHANNEL="branch"
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             RELEASE_CHANNEL="stable"
+          fi
+          MACOS_DESKTOP_PARITY_ARG=""
+          if [[ -f "artifacts/macos-desktop-parity/macos-desktop-parity-smoke-report.json" ]]; then
+            MACOS_DESKTOP_PARITY_ARG="--macos-desktop-parity-report artifacts/macos-desktop-parity/macos-desktop-parity-smoke-report.json"
           fi
 
           python scripts/release/build_quality_dashboard_snapshot.py \
@@ -413,6 +429,7 @@ jobs:
             --runtime-lifecycle-report "artifacts/runtime-lifecycle/runtime-lifecycle-smoke-report.json" \
             --user-journey-report "artifacts/user-journey/user-journey-benchmark-report.json" \
             --distribution-resilience-report "artifacts/distribution/distribution-resilience-report.json" \
+            ${MACOS_DESKTOP_PARITY_ARG} \
             --baseline "eval/baselines/quality/release_quality_dashboard_baseline.json" \
             --output "artifacts/release-quality-dashboard-final.json" \
             --trend-output "artifacts/release-quality-dashboard-trend-final.json" \
@@ -431,12 +448,18 @@ jobs:
 
       - name: Build mission success/recovery report pack (release)
         run: |
+          MACOS_DESKTOP_PARITY_ARG=""
+          if [[ -f "artifacts/macos-desktop-parity/macos-desktop-parity-smoke-report.json" ]]; then
+            MACOS_DESKTOP_PARITY_ARG="--macos-desktop-parity-report artifacts/macos-desktop-parity/macos-desktop-parity-smoke-report.json"
+          fi
+
           python scripts/release/build_mission_success_recovery_report.py \
             --mission-queue-report "artifacts/mission-queue/mission-queue-load-report.json" \
             --fault-injection-report "artifacts/fault-injection/fault-injection-reliability-report.json" \
             --quality-dashboard-report "artifacts/release-quality-dashboard-final.json" \
             --distribution-resilience-report "artifacts/distribution/distribution-resilience-report.json" \
             --user-journey-report "artifacts/user-journey/user-journey-benchmark-report.json" \
+            ${MACOS_DESKTOP_PARITY_ARG} \
             --scope "release" \
             --output "artifacts/mission-success-recovery-report.json"
 

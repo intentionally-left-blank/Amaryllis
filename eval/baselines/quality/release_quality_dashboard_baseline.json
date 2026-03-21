@@ -78,6 +78,18 @@
     {
       "metric_id": "distribution_resilience.score_pct",
       "value": 100.0
+    },
+    {
+      "metric_id": "macos_desktop_parity.status",
+      "value": 1.0
+    },
+    {
+      "metric_id": "macos_desktop_parity.checks_failed",
+      "value": 0.0
+    },
+    {
+      "metric_id": "macos_desktop_parity.error_rate_pct",
+      "value": 0.0
     }
   ]
 }

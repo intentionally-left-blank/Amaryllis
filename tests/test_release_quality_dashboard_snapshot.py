@@ -33,6 +33,7 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
         base: Path,
         perf_p95: float = 210.0,
         distribution_status: str = "pass",
+        macos_status: str = "pass",
     ) -> dict[str, Path]:
         perf = base / "perf.json"
         fault = base / "fault.json"
@@ -40,6 +41,7 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
         runtime = base / "runtime.json"
         journey = base / "journey.json"
         distribution = base / "distribution.json"
+        macos = base / "macos-desktop-parity.json"
 
         self._write_json(
             perf,
@@ -135,6 +137,20 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
                 },
             },
         )
+        self._write_json(
+            macos,
+            {
+                "suite": "macos_desktop_parity_smoke_v1",
+                "generated_at": "2026-03-21T00:00:00+00:00",
+                "summary": {
+                    "checks_total": 16,
+                    "checks_passed": 16 if macos_status == "pass" else 13,
+                    "checks_failed": 0 if macos_status == "pass" else 3,
+                    "error_rate_pct": 0.0 if macos_status == "pass" else 18.75,
+                    "status": macos_status,
+                },
+            },
+        )
 
         return {
             "perf": perf,
@@ -143,6 +159,7 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
             "runtime": runtime,
             "journey": journey,
             "distribution": distribution,
+            "macos": macos,
         }
 
     @staticmethod
@@ -168,6 +185,9 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
                 {"metric_id": "distribution_resilience.status", "value": 1.0},
                 {"metric_id": "distribution_resilience.checks_failed", "value": 0.0},
                 {"metric_id": "distribution_resilience.score_pct", "value": 100.0},
+                {"metric_id": "macos_desktop_parity.status", "value": 1.0},
+                {"metric_id": "macos_desktop_parity.checks_failed", "value": 0.0},
+                {"metric_id": "macos_desktop_parity.error_rate_pct", "value": 0.0},
             ],
         }
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -255,6 +275,50 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
             trend_payload = json.loads(trend.read_text(encoding="utf-8"))
             self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 18)
 
+    def test_snapshot_and_trend_include_macos_staging_when_report_provided(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="amaryllis-quality-dashboard-") as tmp:
+            base = Path(tmp)
+            reports = self._write_reports(base=base)
+            baseline = base / "baseline.json"
+            snapshot = base / "dashboard.json"
+            trend = base / "trend.json"
+            self._write_baseline(baseline)
+
+            proc = self._run(
+                "--perf-report",
+                str(reports["perf"]),
+                "--fault-injection-report",
+                str(reports["fault"]),
+                "--mission-queue-report",
+                str(reports["mission"]),
+                "--runtime-lifecycle-report",
+                str(reports["runtime"]),
+                "--user-journey-report",
+                str(reports["journey"]),
+                "--macos-desktop-parity-report",
+                str(reports["macos"]),
+                "--baseline",
+                str(baseline),
+                "--output",
+                str(snapshot),
+                "--trend-output",
+                str(trend),
+            )
+            self.assertEqual(proc.returncode, 0, msg=f"stdout={proc.stdout}\nstderr={proc.stderr}")
+            payload = json.loads(snapshot.read_text(encoding="utf-8"))
+            self.assertEqual(payload.get("summary", {}).get("status"), "pass")
+            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 18)
+            trend_payload = json.loads(trend.read_text(encoding="utf-8"))
+            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 18)
+            metric_ids = {
+                str(item.get("metric_id"))
+                for item in payload.get("signals", [])
+                if isinstance(item, dict)
+            }
+            self.assertIn("macos_desktop_parity.status", metric_ids)
+            self.assertIn("macos_desktop_parity.checks_failed", metric_ids)
+            self.assertIn("macos_desktop_parity.error_rate_pct", metric_ids)
+
     def test_snapshot_fails_when_quality_signal_breaches_threshold(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-quality-dashboard-") as tmp:
             base = Path(tmp)
@@ -309,6 +373,39 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
                 str(reports["journey"]),
                 "--distribution-resilience-report",
                 str(reports["distribution"]),
+                "--baseline",
+                str(baseline),
+                "--output",
+                str(snapshot),
+                "--trend-output",
+                str(trend),
+            )
+            self.assertEqual(proc.returncode, 1, msg=f"stdout={proc.stdout}\nstderr={proc.stderr}")
+            payload = json.loads(snapshot.read_text(encoding="utf-8"))
+            self.assertEqual(payload.get("summary", {}).get("status"), "fail")
+
+    def test_snapshot_fails_when_macos_staging_signal_breaches_threshold(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="amaryllis-quality-dashboard-") as tmp:
+            base = Path(tmp)
+            reports = self._write_reports(base=base, macos_status="fail")
+            baseline = base / "baseline.json"
+            snapshot = base / "dashboard.json"
+            trend = base / "trend.json"
+            self._write_baseline(baseline)
+
+            proc = self._run(
+                "--perf-report",
+                str(reports["perf"]),
+                "--fault-injection-report",
+                str(reports["fault"]),
+                "--mission-queue-report",
+                str(reports["mission"]),
+                "--runtime-lifecycle-report",
+                str(reports["runtime"]),
+                "--user-journey-report",
+                str(reports["journey"]),
+                "--macos-desktop-parity-report",
+                str(reports["macos"]),
                 "--baseline",
                 str(baseline),
                 "--output",

@@ -13,7 +13,8 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Build consolidated release quality dashboard snapshot from gate reports "
-            "(perf/fault/mission-queue/runtime-lifecycle/user-journey with optional distribution resilience)."
+            "(perf/fault/mission-queue/runtime-lifecycle/user-journey with optional distribution resilience "
+            "and macOS desktop parity staging)."
         )
     )
     parser.add_argument(
@@ -45,6 +46,11 @@ def _parse_args() -> argparse.Namespace:
         "--distribution-resilience-report",
         default="",
         help="Optional path to distribution resilience report JSON.",
+    )
+    parser.add_argument(
+        "--macos-desktop-parity-report",
+        default="",
+        help="Optional path to macOS desktop parity smoke report JSON.",
     )
     parser.add_argument(
         "--output",
@@ -189,6 +195,12 @@ def _build_snapshot(
     distribution_summary = (
         distribution.get("summary")
         if isinstance(distribution, dict) and isinstance(distribution.get("summary"), dict)
+        else {}
+    )
+    macos_parity = reports.get("macos_desktop_parity")
+    macos_parity_summary = (
+        macos_parity.get("summary")
+        if isinstance(macos_parity, dict) and isinstance(macos_parity.get("summary"), dict)
         else {}
     )
 
@@ -377,6 +389,39 @@ def _build_snapshot(
                 ),
             ]
         )
+    if macos_parity_summary:
+        macos_status = str(macos_parity_summary.get("status") or "").strip().lower()
+        signals.extend(
+            [
+                _metric_signal(
+                    metric_id="macos_desktop_parity.status",
+                    source="macos_desktop_parity",
+                    category="desktop_staging",
+                    value=1.0 if macos_status == "pass" else 0.0,
+                    threshold=1.0,
+                    comparator="gte",
+                    unit="bool",
+                ),
+                _metric_signal(
+                    metric_id="macos_desktop_parity.checks_failed",
+                    source="macos_desktop_parity",
+                    category="desktop_staging",
+                    value=_safe_float(macos_parity_summary.get("checks_failed")),
+                    threshold=0.0,
+                    comparator="lte",
+                    unit="count",
+                ),
+                _metric_signal(
+                    metric_id="macos_desktop_parity.error_rate_pct",
+                    source="macos_desktop_parity",
+                    category="desktop_staging",
+                    value=_safe_float(macos_parity_summary.get("error_rate_pct")),
+                    threshold=0.0,
+                    comparator="lte",
+                    unit="pct",
+                ),
+            ]
+        )
 
     total = len(signals)
     passed = sum(1 for item in signals if bool(item.get("passed")))
@@ -494,6 +539,8 @@ def main() -> int:
     }
     distribution_raw = str(args.distribution_resilience_report or "").strip()
     distribution_path = _resolve_path(project_root, distribution_raw) if distribution_raw else None
+    macos_parity_raw = str(args.macos_desktop_parity_report or "").strip()
+    macos_parity_path = _resolve_path(project_root, macos_parity_raw) if macos_parity_raw else None
 
     reports: dict[str, dict[str, Any]] = {}
     for key, path in report_paths.items():
@@ -514,6 +561,18 @@ def main() -> int:
         except Exception as exc:
             print(
                 f"[quality-dashboard] invalid report for distribution_resilience: {distribution_path} error={exc}",
+                file=sys.stderr,
+            )
+            return 2
+    if macos_parity_path is not None:
+        if not macos_parity_path.exists():
+            print(f"[quality-dashboard] missing report for macos_desktop_parity: {macos_parity_path}", file=sys.stderr)
+            return 2
+        try:
+            reports["macos_desktop_parity"] = _load_json_object(macos_parity_path)
+        except Exception as exc:
+            print(
+                f"[quality-dashboard] invalid report for macos_desktop_parity: {macos_parity_path} error={exc}",
                 file=sys.stderr,
             )
             return 2

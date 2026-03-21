@@ -26,6 +26,7 @@ The snapshot builder consumes these gate reports:
 
 Optional:
 - `artifacts/distribution-resilience-report.json`
+- `artifacts/macos-desktop-parity-smoke-report.json`
 
 ## Output Contract
 
@@ -38,7 +39,7 @@ Optional:
   - `value`
   - `threshold`
   - `comparator` (`lte` or `gte`)
-  - `category` (performance/reliability/resilience/queue/runtime/user_flow/distribution)
+  - `category` (performance/reliability/resilience/queue/runtime/user_flow/distribution/desktop_staging)
   - `passed`
 - `summary`: total/passed/failed signals + `quality_score_pct` + `status`
 
@@ -53,6 +54,7 @@ Optional:
 `release-gate.yml` now:
 - persists perf smoke report as artifact,
 - builds dashboard snapshot after canary benchmark gates (`release-quality-dashboard`),
+- optionally enriches both canary/final dashboard snapshots with macOS desktop parity staging report when present,
 - rebuilds final dashboard in `Release KPI Pack` with `distribution-resilience-report` included (`release-quality-dashboard-final`),
 - uploads both snapshot + trend artifacts.
 

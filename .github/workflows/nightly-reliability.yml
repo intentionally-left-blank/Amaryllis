@@ -92,10 +92,16 @@ jobs:
       - name: Build mission success/recovery report pack (nightly)
         if: ${{ always() }}
         run: |
+          MACOS_DESKTOP_PARITY_ARG=""
+          if [[ -f "artifacts/nightly-macos-desktop-parity-smoke-report.json" ]]; then
+            MACOS_DESKTOP_PARITY_ARG="--macos-desktop-parity-report artifacts/nightly-macos-desktop-parity-smoke-report.json"
+          fi
+
           python scripts/release/build_mission_success_recovery_report.py \
             --nightly-reliability-report "artifacts/nightly-reliability-report.json" \
             --nightly-burn-rate-report "artifacts/nightly-burn-rate-gate-report.json" \
             --user-journey-report "artifacts/nightly-user-journey-benchmark-report.json" \
+            ${MACOS_DESKTOP_PARITY_ARG} \
             --scope "nightly" \
             --output "artifacts/nightly-mission-success-recovery-report.json"
 

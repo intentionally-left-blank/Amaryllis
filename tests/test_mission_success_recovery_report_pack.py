@@ -34,6 +34,7 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
             fault = base / "fault.json"
             quality = base / "quality.json"
             distribution = base / "distribution.json"
+            macos_staging = base / "macos-staging.json"
             journey = base / "journey.json"
             output = base / "report.json"
 
@@ -110,6 +111,20 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
                     },
                 },
             )
+            self._write_json(
+                macos_staging,
+                {
+                    "suite": "macos_desktop_parity_smoke_v1",
+                    "summary": {
+                        "checks_total": 8,
+                        "checks_passed": 8,
+                        "checks_failed": 0,
+                        "error_rate_pct": 0.0,
+                        "status": "pass",
+                        "latency_ms": {"p50": 1.0, "p95": 2.0, "max": 3.0},
+                    },
+                },
+            )
 
             proc = self._run(
                 "--mission-queue-report",
@@ -120,6 +135,8 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
                 str(quality),
                 "--distribution-resilience-report",
                 str(distribution),
+                "--macos-desktop-parity-report",
+                str(macos_staging),
                 "--user-journey-report",
                 str(journey),
                 "--scope",
@@ -140,7 +157,12 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
             class_breakdown = payload.get("class_breakdown", {})
             self.assertEqual(str(class_breakdown.get("mission_execution", {}).get("status")), "pass")
             self.assertEqual(str(class_breakdown.get("distribution", {}).get("status")), "pass")
+            self.assertEqual(str(class_breakdown.get("desktop_staging", {}).get("status")), "pass")
             self.assertIn("distribution_score_pct", class_breakdown.get("distribution", {}).get("kpis", {}))
+            self.assertIn(
+                "desktop_staging_error_rate_pct",
+                class_breakdown.get("desktop_staging", {}).get("kpis", {}),
+            )
             self.assertIn("journey_success_rate_pct", class_breakdown.get("user_flow", {}).get("kpis", {}))
 
     def test_nightly_report_pack_marks_failed_summary_when_burn_gate_failed(self) -> None:
@@ -244,6 +266,43 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
             self.assertIn("distribution.status", [c.get("id") for c in payload.get("checks", [])])
             class_breakdown = payload.get("class_breakdown", {})
             self.assertEqual(str(class_breakdown.get("distribution", {}).get("status")), "fail")
+
+    def test_release_report_pack_marks_failed_summary_when_macos_staging_failed(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="amaryllis-mission-report-pack-") as tmp:
+            base = Path(tmp)
+            macos_staging = base / "macos-staging.json"
+            output = base / "report.json"
+
+            self._write_json(
+                macos_staging,
+                {
+                    "suite": "macos_desktop_parity_smoke_v1",
+                    "summary": {
+                        "checks_total": 8,
+                        "checks_passed": 5,
+                        "checks_failed": 3,
+                        "error_rate_pct": 37.5,
+                        "status": "fail",
+                        "latency_ms": {"p50": 1.0, "p95": 2.0, "max": 4.0},
+                    },
+                },
+            )
+
+            proc = self._run(
+                "--macos-desktop-parity-report",
+                str(macos_staging),
+                "--scope",
+                "release",
+                "--output",
+                str(output),
+            )
+            self.assertEqual(proc.returncode, 0, msg=f"stdout={proc.stdout}\nstderr={proc.stderr}")
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(str(payload.get("suite")), "mission_success_recovery_report_pack_v2")
+            self.assertEqual(payload.get("summary", {}).get("status"), "fail")
+            self.assertIn("desktop_staging.status", [c.get("id") for c in payload.get("checks", [])])
+            class_breakdown = payload.get("class_breakdown", {})
+            self.assertEqual(str(class_breakdown.get("desktop_staging", {}).get("status")), "fail")
 
 
 if __name__ == "__main__":
