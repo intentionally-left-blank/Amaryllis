@@ -86,6 +86,8 @@ class DesktopActionRuntimeAPITests(unittest.TestCase):
         adapter_payload = result.get("result", {})
         status = str(adapter_payload.get("status"))
         self.assertIn(status, {"succeeded", "unavailable", "stubbed"})
+        adapter_kind = str(adapter_payload.get("adapter", {}).get("kind"))
+        self.assertIn(adapter_kind, {"linux", "macos", "stub"})
 
     def test_desktop_action_write_requires_permission_under_strict_enforcement(self) -> None:
         response = self.client.post(

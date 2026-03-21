@@ -6,7 +6,9 @@ from tools.desktop_action_adapter import (
     DesktopActionRequest,
     DesktopActionResult,
     LinuxDesktopActionAdapter,
+    MacOSDesktopActionAdapter,
     StubDesktopActionAdapter,
+    create_default_desktop_action_adapter,
     register_desktop_action_tool,
 )
 from tools.tool_executor import ToolExecutionError, ToolExecutor
@@ -48,6 +50,16 @@ class _PopenResult:
 
 
 class DesktopActionAdapterTests(unittest.TestCase):
+    def test_default_adapter_selector_uses_platform_mapping(self) -> None:
+        linux_adapter = create_default_desktop_action_adapter(platform_name="linux")
+        self.assertEqual(str(linux_adapter.describe().get("kind")), "linux")
+
+        macos_adapter = create_default_desktop_action_adapter(platform_name="darwin")
+        self.assertEqual(str(macos_adapter.describe().get("kind")), "macos")
+
+        fallback_adapter = create_default_desktop_action_adapter(platform_name="win32")
+        self.assertEqual(str(fallback_adapter.describe().get("kind")), "stub")
+
     def test_register_and_execute_desktop_action_with_stub_adapter(self) -> None:
         registry = ToolRegistry()
         registry.load_builtin_tools()
@@ -250,6 +262,109 @@ class DesktopActionAdapterTests(unittest.TestCase):
         self.assertEqual(result.status, "succeeded")
         self.assertEqual(popen_calls[0], ["/usr/bin/gtk-launch", "org.gnome.Nautilus.desktop"])
         self.assertEqual(int(result.data.get("pid", 0)), 4242)
+
+    def test_macos_notify_uses_osascript(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        def _which(name: str) -> str | None:
+            if name == "osascript":
+                return "/usr/bin/osascript"
+            return None
+
+        def _run(command: list[str], **kwargs: object) -> _Completed:
+            calls.append({"command": list(command), **kwargs})
+            return _Completed(returncode=0, stdout="", stderr="")
+
+        adapter = MacOSDesktopActionAdapter(
+            which_resolver=_which,
+            run_command=_run,
+        )
+        request = DesktopActionRequest.from_arguments(
+            {"action": "notify", "title": "Jarvis", "message": "Hi"},
+        )
+        result = adapter.execute(request)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.status, "succeeded")
+        self.assertTrue(calls)
+        command = calls[0]["command"]
+        self.assertIsInstance(command, list)
+        assert isinstance(command, list)
+        self.assertEqual(command[0:2], ["/usr/bin/osascript", "-e"])
+        self.assertIn('display notification "Hi"', str(command[2]))
+
+    def test_macos_clipboard_write_uses_pbcopy(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        def _which(name: str) -> str | None:
+            if name == "pbcopy":
+                return "/usr/bin/pbcopy"
+            return None
+
+        def _run(command: list[str], **kwargs: object) -> _Completed:
+            calls.append({"command": list(command), **kwargs})
+            return _Completed(returncode=0, stdout="", stderr="")
+
+        adapter = MacOSDesktopActionAdapter(
+            which_resolver=_which,
+            run_command=_run,
+        )
+        request = DesktopActionRequest.from_arguments(
+            {"action": "clipboard_write", "text": "hello"},
+        )
+        result = adapter.execute(request)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.status, "succeeded")
+        self.assertTrue(calls)
+        self.assertEqual(calls[0]["command"], ["/usr/bin/pbcopy"])
+
+    def test_macos_app_launch_uses_open_bundle_id(self) -> None:
+        popen_calls: list[list[str]] = []
+
+        def _which(name: str) -> str | None:
+            if name == "open":
+                return "/usr/bin/open"
+            return None
+
+        def _popen(command: list[str], **kwargs: object) -> _PopenResult:
+            _ = kwargs
+            popen_calls.append(list(command))
+            return _PopenResult(pid=777)
+
+        adapter = MacOSDesktopActionAdapter(
+            which_resolver=_which,
+            popen_command=_popen,
+        )
+        request = DesktopActionRequest.from_arguments(
+            {"action": "app_launch", "target": "com.apple.Safari"},
+        )
+        result = adapter.execute(request)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.status, "succeeded")
+        self.assertEqual(popen_calls[0], ["/usr/bin/open", "-b", "com.apple.Safari"])
+        self.assertEqual(int(result.data.get("pid", 0)), 777)
+
+    def test_macos_window_list_parses_process_names(self) -> None:
+        def _which(name: str) -> str | None:
+            if name == "osascript":
+                return "/usr/bin/osascript"
+            return None
+
+        def _run(command: list[str], **kwargs: object) -> _Completed:
+            _ = kwargs
+            self.assertEqual(command[0:2], ["/usr/bin/osascript", "-e"])
+            return _Completed(returncode=0, stdout="Finder, Terminal, Safari\n", stderr="")
+
+        adapter = MacOSDesktopActionAdapter(
+            which_resolver=_which,
+            run_command=_run,
+        )
+        request = DesktopActionRequest.from_arguments({"action": "window_list"})
+        result = adapter.execute(request)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.status, "succeeded")
+        windows = result.data.get("windows", [])
+        self.assertEqual(len(windows), 3)
+        self.assertEqual(str(windows[0].get("window_id")), "Finder")
 
 
 if __name__ == "__main__":

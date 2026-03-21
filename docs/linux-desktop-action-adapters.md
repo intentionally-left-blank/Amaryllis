@@ -1,8 +1,8 @@
-# Linux Desktop Action Adapters
+# Desktop Action Adapters (Linux + macOS Staging)
 
 ## Purpose
 
-Provide policy-gated desktop control primitives for Linux-first "Jarvis on PC" workflows:
+Provide policy-gated desktop control primitives for "Jarvis on PC" workflows:
 
 - notifications
 - clipboard read/write
@@ -38,7 +38,8 @@ Request fields:
 ## Runtime Behavior
 
 - Linux hosts use `LinuxDesktopActionAdapter`.
-- Non-Linux hosts use `StubDesktopActionAdapter` for staging/testing parity.
+- macOS hosts use `MacOSDesktopActionAdapter` (staging parity surface).
+- other hosts use `StubDesktopActionAdapter` for non-supported platforms.
 
 Command usage on Linux:
 
@@ -51,6 +52,14 @@ Command usage on Linux:
 - window close: `wmctrl -ic <window_id>`
 
 When required system commands are missing, tool returns `status=unavailable` with explicit reason.
+
+Command usage on macOS (staging):
+
+- notifications: `osascript` (`display notification`)
+- clipboard write: `pbcopy`
+- clipboard read: `pbpaste`
+- app launch: `open` (`-b <bundle_id>` for bundle ids, `-a <app>` for app names, direct path/url passthrough)
+- window list/focus/close: `osascript` (application-process-level control)
 
 Each result includes metadata rollback guidance (`metadata.rollback_hint`) so UI and audit can expose recovery steps.
 

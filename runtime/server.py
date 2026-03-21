@@ -3,7 +3,6 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import logging
 import os
-import sys
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -65,8 +64,7 @@ from tools.autonomy_policy import AutonomyPolicy
 from tools.browser_action_adapter import BrowserActionAdapter, StubBrowserActionAdapter, register_browser_action_tool
 from tools.desktop_action_adapter import (
     DesktopActionAdapter,
-    LinuxDesktopActionAdapter,
-    StubDesktopActionAdapter,
+    create_default_desktop_action_adapter,
     register_desktop_action_tool,
 )
 from tools.permission_manager import ToolPermissionManager
@@ -198,10 +196,7 @@ def create_services() -> ServiceContainer:
     tool_registry.load_builtin_tools()
     browser_adapter: BrowserActionAdapter = StubBrowserActionAdapter()
     register_browser_action_tool(tool_registry, browser_adapter)
-    if sys.platform.startswith("linux"):
-        desktop_adapter: DesktopActionAdapter = LinuxDesktopActionAdapter()
-    else:
-        desktop_adapter = StubDesktopActionAdapter(provider_name=f"stub-desktop-{sys.platform}")
+    desktop_adapter: DesktopActionAdapter = create_default_desktop_action_adapter()
     register_desktop_action_tool(tool_registry, desktop_adapter)
     tool_registry.discover_plugins(config.plugins_dir)
     mcp_registry: MCPClientRegistry | None = None

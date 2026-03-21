@@ -487,6 +487,334 @@ class LinuxDesktopActionAdapter:
         return replace(result, metadata=metadata)
 
 
+class MacOSDesktopActionAdapter:
+    def __init__(
+        self,
+        provider_name: str = "macos-desktop",
+        *,
+        which_resolver: Any = None,
+        run_command: Any = None,
+        popen_command: Any = None,
+    ) -> None:
+        self.provider_name = str(provider_name or "macos-desktop").strip() or "macos-desktop"
+        self._which = which_resolver or shutil.which
+        self._run = run_command or subprocess.run
+        self._popen = popen_command or subprocess.Popen
+
+    def describe(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider_name,
+            "kind": "macos",
+            "platform": sys.platform,
+            "actions": list(SUPPORTED_DESKTOP_ACTIONS),
+            "commands": {
+                "osascript": bool(self._which("osascript")),
+                "pbcopy": bool(self._which("pbcopy")),
+                "pbpaste": bool(self._which("pbpaste")),
+                "open": bool(self._which("open")),
+            },
+            "supports_real_desktop": True,
+            "staging_surface": True,
+        }
+
+    def execute(self, request: DesktopActionRequest) -> DesktopActionResult:
+        try:
+            if request.action == "notify":
+                result = self._notify(request)
+                return self._attach_action_context(result, request)
+            if request.action == "clipboard_read":
+                result = self._clipboard_read(request)
+                return self._attach_action_context(result, request)
+            if request.action == "clipboard_write":
+                result = self._clipboard_write(request)
+                return self._attach_action_context(result, request)
+            if request.action == "app_launch":
+                result = self._app_launch(request)
+                return self._attach_action_context(result, request)
+            if request.action == "window_list":
+                result = self._window_list(request)
+                return self._attach_action_context(result, request)
+            if request.action == "window_focus":
+                result = self._window_focus(request)
+                return self._attach_action_context(result, request)
+            if request.action == "window_close":
+                result = self._window_close(request)
+                return self._attach_action_context(result, request)
+            return self._attach_action_context(self._failed(request.action, "unsupported_action"), request)
+        except subprocess.TimeoutExpired:
+            return self._attach_action_context(
+                self._failed(request.action, f"desktop command timeout ({request.timeout_sec}s)"),
+                request,
+            )
+        except Exception as exc:
+            return self._attach_action_context(self._failed(request.action, str(exc)), request)
+
+    def _notify(self, request: DesktopActionRequest) -> DesktopActionResult:
+        osascript = self._which("osascript")
+        if not osascript:
+            return self._unavailable(request.action, "osascript is not available on this host")
+        title = request.title or "Amaryllis"
+        body = request.message or request.text or ""
+        script = (
+            f'display notification "{_escape_applescript_string(body)}" '
+            f'with title "{_escape_applescript_string(title)}"'
+        )
+        completed = self._run(
+            [osascript, "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=request.timeout_sec,
+            check=False,
+        )
+        if int(completed.returncode) != 0:
+            return self._failed(request.action, (completed.stderr or "").strip() or "osascript notify failed")
+        return DesktopActionResult(
+            ok=True,
+            provider=self.provider_name,
+            action=request.action,
+            status="succeeded",
+            data={
+                "title": title,
+                "message": body,
+                "command": [osascript, "-e", script],
+            },
+        )
+
+    def _clipboard_write(self, request: DesktopActionRequest) -> DesktopActionResult:
+        pbcopy = self._which("pbcopy")
+        if not pbcopy:
+            return self._unavailable(request.action, "pbcopy is not available on this host")
+        text = str(request.text or "")
+        completed = self._run(
+            [pbcopy],
+            capture_output=True,
+            text=True,
+            input=text,
+            timeout=request.timeout_sec,
+            check=False,
+        )
+        if int(completed.returncode) != 0:
+            return self._failed(request.action, (completed.stderr or "").strip() or "pbcopy failed")
+        return DesktopActionResult(
+            ok=True,
+            provider=self.provider_name,
+            action=request.action,
+            status="succeeded",
+            data={
+                "written_chars": len(text),
+                "command": [pbcopy],
+            },
+        )
+
+    def _clipboard_read(self, request: DesktopActionRequest) -> DesktopActionResult:
+        pbpaste = self._which("pbpaste")
+        if not pbpaste:
+            return self._unavailable(request.action, "pbpaste is not available on this host")
+        completed = self._run(
+            [pbpaste],
+            capture_output=True,
+            text=True,
+            timeout=request.timeout_sec,
+            check=False,
+        )
+        if int(completed.returncode) != 0:
+            return self._failed(request.action, (completed.stderr or "").strip() or "pbpaste failed")
+        content = str(completed.stdout or "")
+        truncated = False
+        if len(content) > MAX_CLIPBOARD_RESPONSE_CHARS:
+            content = content[:MAX_CLIPBOARD_RESPONSE_CHARS]
+            truncated = True
+        return DesktopActionResult(
+            ok=True,
+            provider=self.provider_name,
+            action=request.action,
+            status="succeeded",
+            data={
+                "content": content,
+                "truncated": truncated,
+                "command": [pbpaste],
+            },
+        )
+
+    def _app_launch(self, request: DesktopActionRequest) -> DesktopActionResult:
+        target = str(request.target or "").strip()
+        if not target:
+            return self._failed(request.action, "target is required")
+        open_command = self._which("open")
+        if not open_command:
+            return self._unavailable(request.action, "open is not available on this host")
+
+        command = self._launch_command(open_command, target)
+        process = self._popen(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return DesktopActionResult(
+            ok=True,
+            provider=self.provider_name,
+            action=request.action,
+            status="succeeded",
+            data={
+                "target": target,
+                "pid": int(getattr(process, "pid", 0) or 0),
+                "command": list(command),
+            },
+        )
+
+    def _window_list(self, request: DesktopActionRequest) -> DesktopActionResult:
+        osascript = self._which("osascript")
+        if not osascript:
+            return self._unavailable(request.action, "osascript is not available on this host")
+        script = 'tell application "System Events" to get name of every application process whose background only is false'
+        completed = self._run(
+            [osascript, "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=request.timeout_sec,
+            check=False,
+        )
+        if int(completed.returncode) != 0:
+            return self._failed(
+                request.action,
+                (completed.stderr or "").strip() or "osascript window listing failed",
+            )
+
+        apps = _parse_macos_application_list(str(completed.stdout or ""))
+        windows = [
+            {
+                "window_id": app_name,
+                "desktop": None,
+                "host": "macos",
+                "title": app_name,
+            }
+            for app_name in apps
+        ]
+        return DesktopActionResult(
+            ok=True,
+            provider=self.provider_name,
+            action=request.action,
+            status="succeeded",
+            data={
+                "windows": windows,
+                "count": len(windows),
+                "command": [osascript, "-e", script],
+                "mode": "app_processes",
+            },
+        )
+
+    def _window_focus(self, request: DesktopActionRequest) -> DesktopActionResult:
+        target = str(request.target or "").strip()
+        if not target:
+            return self._failed(request.action, "target is required")
+        osascript = self._which("osascript")
+        if not osascript:
+            return self._unavailable(request.action, "osascript is not available on this host")
+        script = f'tell application "{_escape_applescript_string(target)}" to activate'
+        completed = self._run(
+            [osascript, "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=request.timeout_sec,
+            check=False,
+        )
+        if int(completed.returncode) != 0:
+            return self._failed(request.action, (completed.stderr or "").strip() or "window focus failed")
+        return DesktopActionResult(
+            ok=True,
+            provider=self.provider_name,
+            action=request.action,
+            status="succeeded",
+            data={
+                "target": target,
+                "command": [osascript, "-e", script],
+            },
+        )
+
+    def _window_close(self, request: DesktopActionRequest) -> DesktopActionResult:
+        target = str(request.target or "").strip()
+        if not target:
+            return self._failed(request.action, "target is required")
+        osascript = self._which("osascript")
+        if not osascript:
+            return self._unavailable(request.action, "osascript is not available on this host")
+        escaped = _escape_applescript_string(target)
+        script = (
+            'tell application "System Events" to tell process '
+            f'"{escaped}" to if (count of windows) > 0 then close front window'
+        )
+        completed = self._run(
+            [osascript, "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=request.timeout_sec,
+            check=False,
+        )
+        if int(completed.returncode) != 0:
+            return self._failed(request.action, (completed.stderr or "").strip() or "window close failed")
+        return DesktopActionResult(
+            ok=True,
+            provider=self.provider_name,
+            action=request.action,
+            status="succeeded",
+            data={
+                "target": target,
+                "command": [osascript, "-e", script],
+            },
+        )
+
+    def _launch_command(self, open_command: str, target: str) -> list[str]:
+        if target.startswith("/") or target.startswith("~") or "://" in target or target.endswith(".app"):
+            return [open_command, target]
+        if _looks_like_bundle_id(target):
+            return [open_command, "-b", target]
+        return [open_command, "-a", target]
+
+    def _unavailable(self, action: str, reason: str) -> DesktopActionResult:
+        return DesktopActionResult(
+            ok=False,
+            provider=self.provider_name,
+            action=action,
+            status="unavailable",
+            message=reason,
+            warnings=[reason],
+            metadata={"platform": sys.platform},
+        )
+
+    def _failed(self, action: str, reason: str) -> DesktopActionResult:
+        return DesktopActionResult(
+            ok=False,
+            provider=self.provider_name,
+            action=action,
+            status="failed",
+            message=reason,
+            metadata={"platform": sys.platform},
+        )
+
+    def _attach_action_context(
+        self,
+        result: DesktopActionResult,
+        request: DesktopActionRequest,
+    ) -> DesktopActionResult:
+        rollback_hint = _rollback_hint_for_action(
+            action=request.action,
+            target=request.target,
+        )
+        metadata = dict(result.metadata)
+        metadata["rollback_hint"] = rollback_hint
+        metadata["mutating"] = request.action in MUTATING_DESKTOP_ACTIONS
+        return replace(result, metadata=metadata)
+
+
+def create_default_desktop_action_adapter(*, platform_name: str | None = None) -> DesktopActionAdapter:
+    normalized = str(platform_name or sys.platform).strip().lower()
+    if normalized.startswith("linux"):
+        return LinuxDesktopActionAdapter()
+    if normalized.startswith("darwin"):
+        return MacOSDesktopActionAdapter()
+    return StubDesktopActionAdapter(provider_name=f"stub-desktop-{normalized}")
+
+
 def register_desktop_action_tool(
     registry: ToolRegistry,
     adapter: DesktopActionAdapter,
@@ -509,8 +837,8 @@ def register_desktop_action_tool(
     registry.register(
         name=tool_name,
         description=(
-            "Linux desktop action adapter (notifications, clipboard, app launch, window listing) "
-            "with policy-gated execution."
+            "Desktop action adapter (Linux primary + macOS staging, stub fallback) "
+            "for notifications, clipboard, app launch, and window controls under policy guardrails."
         ),
         input_schema={
             "type": "object",
@@ -546,6 +874,13 @@ def _looks_like_desktop_id(value: str) -> bool:
     return "/" not in target and "://" not in target and " " not in target
 
 
+def _looks_like_bundle_id(value: str) -> bool:
+    target = str(value or "").strip()
+    if not target:
+        return False
+    return "." in target and "/" not in target and "://" not in target and " " not in target
+
+
 def _parse_wmctrl_lines(payload: str) -> list[dict[str, Any]]:
     windows: list[dict[str, Any]] = []
     for line in str(payload or "").splitlines():
@@ -563,6 +898,22 @@ def _parse_wmctrl_lines(payload: str) -> list[dict[str, Any]]:
         }
         windows.append(window)
     return windows
+
+
+def _parse_macos_application_list(payload: str) -> list[str]:
+    apps: list[str] = []
+    for token in str(payload or "").replace("\n", ",").split(","):
+        app_name = token.strip()
+        if not app_name:
+            continue
+        if app_name in apps:
+            continue
+        apps.append(app_name)
+    return apps
+
+
+def _escape_applescript_string(value: str) -> str:
+    return str(value or "").replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
 def _rollback_hint_for_action(*, action: str, target: str | None) -> str:

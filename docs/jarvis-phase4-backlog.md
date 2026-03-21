@@ -31,7 +31,7 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
 | P4-B01 | in_progress | Implement Linux desktop integration pack (notifications/window/clipboard/app launch) | adapter set + tests | Common desktop actions run through policy-gated adapters on Linux |
-| P4-B02 | todo | Add macOS staging parity adapters for core desktop actions | mac staging adapters + parity tests | macOS supports critical subset with same contract and policy behavior |
+| P4-B02 | done | Add macOS staging parity adapters for core desktop actions | mac staging adapters + parity tests | macOS supports critical subset with same contract and policy behavior |
 | P4-B03 | todo | Add transaction-safe rollback hints for desktop actions | action rollback contract + receipts | Risky actions provide deterministic rollback metadata where feasible |
 
 ### Epic C - Autonomous Multi-Agent Operations
@@ -48,7 +48,7 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 |---|---|---|---|---|
 | P4-D01 | in_progress | Add end-to-end user journey benchmark harness | journey benchmark suite + report | Release/nightly include comparable user-flow success/latency KPIs |
 | P4-D02 | in_progress | Add mission outcome public KPI pack v2 (release + nightly) | expanded KPI report schema | Success/recovery metrics include trendable mission-class breakdowns |
-| P4-D03 | in_progress | Harden packaging/update/rollback path for Linux primary and mac staging | updater/rollback contracts + smoke gates | Operator can safely install/update/rollback without manual recovery steps |
+| P4-D03 | done | Harden packaging/update/rollback path for Linux primary and mac staging | updater/rollback contracts + smoke gates | Operator can safely install/update/rollback without manual recovery steps |
 
 ## Current Sprint (P4-S0)
 
@@ -57,6 +57,7 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 | P4-A01 | in_progress | unified multimodal session state machine contract (runtime manager + `/flow/sessions/*` API + tests + docs) |
 | P4-A02 | in_progress | explicit plan-vs-execute mode in API (`/agents/{agent_id}/runs/dispatch`) + interaction-mode contract endpoint + tests + docs |
 | P4-B01 | in_progress | Linux desktop integration adapters (first slice: `desktop_action` tool + Linux/Stub adapters + tests + docs) |
+| P4-B02 | done | macOS staging parity adapters (`MacOSDesktopActionAdapter`) + platform selector wiring + adapter contract tests |
 | P4-C01 | in_progress | bounded multi-agent supervisor skeleton (task graph manager + API contract + launch/tick control loop + tests) |
 | P4-C02 | in_progress | supervisor checkpoint store + auto-hydrate on runtime start (SQLite migration + storage methods + recovery tests) |
 | P4-C03 | in_progress | objective verification gates in supervisor (`objective_verification` policy + `/supervisor/graphs/{id}/verify` endpoint + tests) |

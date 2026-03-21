@@ -1389,7 +1389,7 @@ curl -X POST "http://localhost:8000/mcp/tools/browser_action/invoke" \
   }'
 ```
 
-Linux desktop action adapter tool (Linux provider, non-Linux falls back to stub):
+Desktop action adapter tool (Linux primary, macOS staging, other platforms use stub):
 
 ```bash
 curl -X POST "http://localhost:8000/mcp/tools/desktop_action/invoke" \
