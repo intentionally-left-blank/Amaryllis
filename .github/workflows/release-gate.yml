@@ -93,6 +93,14 @@ jobs:
             tests.test_api_compatibility \
             -v
 
+      - name: Run mission planner and runtime lifecycle contract tests
+        run: |
+          python -m unittest \
+            tests.test_mission_planner \
+            tests.test_automation_mission_plan_api \
+            tests.test_runtime_service_manifest_renderer \
+            -v
+
       - name: Run compatibility gate script (blocking)
         run: |
           python scripts/release/api_compat_gate.py

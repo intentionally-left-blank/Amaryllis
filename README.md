@@ -243,6 +243,13 @@ Linux runtime install (inside cloned repo):
 ./scripts/install_linux.sh
 ```
 
+Render runtime lifecycle manifests (Phase 3 contract slice):
+
+```bash
+python3 scripts/runtime/render_service_manifest.py --target linux-systemd
+python3 scripts/runtime/render_service_manifest.py --target macos-launchd
+```
+
 Manual backend setup:
 
 ```bash
@@ -276,9 +283,12 @@ Reference:
 - `docs/eval-replay-determinism.md`
 - `docs/release-provenance-sbom.md`
 - `docs/mission-simulation-mode.md`
+- `docs/mission-planner.md`
 - `docs/dynamic-mission-budgets.md`
 - `docs/linux-runtime-installer.md`
 - `docs/linux-release-channels.md`
+- `docs/runtime-lifecycle-contract.md`
+- `docs/jarvis-phase3-backlog.md`
 
 ## Run
 
@@ -1030,10 +1040,23 @@ Implemented now:
   - create/edit watcher schedules (`watch_fs`) without CLI
   - view escalation/failure counters directly on automation cards
   - triage inbox notifications and mark read/unread
+- mission planner endpoint for risk-aware preflight before schedule creation (`POST /automations/mission/plan`)
 
 Automation API:
 
 ```bash
+# plan mission (risk-aware cadence + dry-run + apply hint)
+curl -X POST http://localhost:8000/automations/mission/plan \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "<agent_id>",
+    "user_id": "user-001",
+    "message": "Run autonomous daily code health mission",
+    "cadence_profile": "workday",
+    "timezone": "UTC",
+    "start_immediately": true
+  }'
+
 # create
 curl -X POST http://localhost:8000/automations/create \
   -H "Content-Type: application/json" \

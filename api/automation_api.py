@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Path, Query, Request
 from pydantic import BaseModel, Field
 
+from automation.mission_planner import build_mission_plan
 from runtime.auth import assert_owner, auth_context_from_request, resolve_user_id
 from runtime.errors import AmaryllisError, NotFoundError, ProviderError, ValidationError
 
@@ -51,6 +52,103 @@ class CreateAutomationRequest(BaseModel):
     schedule: dict[str, Any] = Field(default_factory=dict)
     timezone: str = Field(default="UTC", min_length=1)
     start_immediately: bool = False
+
+
+class PlanMissionRequest(BaseModel):
+    agent_id: str = Field(min_length=1)
+    user_id: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    session_id: str | None = None
+    timezone: str = Field(default="UTC", min_length=1)
+    cadence_profile: str = Field(default="workday", min_length=1)
+    start_immediately: bool = False
+    schedule_type: str | None = Field(default=None)
+    schedule: dict[str, Any] = Field(default_factory=dict)
+    interval_sec: int | None = Field(default=None, ge=10, le=86400)
+    max_attempts: int | None = Field(default=None, ge=1, le=10)
+    budget: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/automations/mission/plan")
+def plan_mission(payload: PlanMissionRequest, request: Request) -> dict[str, Any]:
+    services = request.app.state.services
+    auth = auth_context_from_request(request)
+    effective_user_id = resolve_user_id(request_user_id=payload.user_id, auth=auth)
+    try:
+        agent = services.agent_manager.get_agent(payload.agent_id)
+        if agent is None:
+            raise NotFoundError(f"Agent not found: {payload.agent_id}")
+        assert_owner(
+            owner_user_id=agent.user_id,
+            auth=auth,
+            resource_name="agent",
+            resource_id=payload.agent_id,
+        )
+
+        simulation = services.agent_manager.simulate_run(
+            agent_id=payload.agent_id,
+            user_id=effective_user_id,
+            session_id=payload.session_id,
+            user_message=payload.message,
+            max_attempts=payload.max_attempts,
+            budget=payload.budget,
+        )
+        mission_plan = build_mission_plan(
+            agent_id=payload.agent_id,
+            user_id=effective_user_id,
+            message=payload.message,
+            session_id=payload.session_id,
+            timezone_name=payload.timezone,
+            cadence_profile=payload.cadence_profile,
+            start_immediately=payload.start_immediately,
+            schedule_type=payload.schedule_type,
+            schedule=payload.schedule,
+            interval_sec=payload.interval_sec,
+            simulation=simulation,
+        )
+        receipt = _sign_action(
+            request,
+            action="automation_plan_mission",
+            payload={**payload.model_dump(), "user_id": effective_user_id},
+            actor=auth.user_id,
+            target_id=payload.agent_id,
+        )
+        return {
+            "mission_plan": mission_plan,
+            "simulation": simulation,
+            "apply_hint": {
+                "endpoint": "/automations/create",
+                "payload": mission_plan.get("apply_payload", {}),
+            },
+            "action_receipt": receipt,
+            "request_id": _request_id(request),
+        }
+    except ValueError as exc:
+        _sign_action(
+            request,
+            action="automation_plan_mission",
+            payload={**payload.model_dump(), "user_id": effective_user_id},
+            actor=auth.user_id,
+            target_id=payload.agent_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
+        if "not found" in str(exc).lower():
+            raise NotFoundError(str(exc)) from exc
+        raise ValidationError(str(exc)) from exc
+    except AmaryllisError:
+        raise
+    except Exception as exc:
+        _sign_action(
+            request,
+            action="automation_plan_mission",
+            payload={**payload.model_dump(), "user_id": effective_user_id},
+            actor=auth.user_id,
+            target_id=payload.agent_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
+        raise ProviderError(str(exc)) from exc
 
 
 @router.post("/automations/create")
