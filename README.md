@@ -857,6 +857,8 @@ curl -X POST "http://localhost:8000/supervisor/graphs/<graph_id>/tick" \
   -d '{"noop": true}'
 ```
 
+Supervisor checkpoints are persisted in SQLite. After runtime restart, existing graphs are auto-hydrated and can continue from the next `tick` without losing dependency/run linkage.
+
 ### Work Mode: create async run
 
 ```bash

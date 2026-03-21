@@ -109,6 +109,11 @@ def supervisor_contract(request: Request) -> dict[str, Any]:
     return {
         "graph_statuses": sorted(SUPERVISOR_GRAPH_STATUSES),
         "node_statuses": sorted(SUPERVISOR_NODE_STATUSES),
+        "checkpoint_resume": {
+            "enabled": True,
+            "store": "sqlite.supervisor_graphs",
+            "mode": "runtime_auto_hydrate",
+        },
         "request_id": _request_id(request),
     }
 

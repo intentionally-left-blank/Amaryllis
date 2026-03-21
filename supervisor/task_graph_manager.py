@@ -27,16 +27,19 @@ class SupervisorTaskGraphManager:
         self,
         *,
         agent_manager: Any,
+        database: Any | None = None,
         telemetry_emitter: TelemetryEmitter | None = None,
         max_graphs: int = 10_000,
         max_nodes_per_graph: int = 256,
     ) -> None:
         self._agent_manager = agent_manager
+        self._database = database
         self._telemetry_emitter = telemetry_emitter
         self._max_graphs = max(1, int(max_graphs))
         self._max_nodes_per_graph = max(1, int(max_nodes_per_graph))
         self._lock = RLock()
         self._graphs: dict[str, dict[str, Any]] = {}
+        self._hydrate_from_database()
 
     def create_graph(
         self,
@@ -179,6 +182,7 @@ class SupervisorTaskGraphManager:
                     "request_id": _optional_str(request_id),
                 },
             )
+            self._persist_graph(graph)
             return _snapshot(graph)
 
     def get_graph(self, *, graph_id: str) -> dict[str, Any]:
@@ -264,6 +268,7 @@ class SupervisorTaskGraphManager:
             )
             self._sync_graph_status(graph)
             graph["updated_at"] = _utcnow_iso()
+            self._persist_graph(graph)
             return _snapshot(graph)
 
     def tick_graph(
@@ -323,6 +328,7 @@ class SupervisorTaskGraphManager:
                     "request_id": _optional_str(request_id),
                 },
             )
+            self._persist_graph(graph)
             return _snapshot(graph)
 
     @staticmethod
@@ -678,6 +684,150 @@ class SupervisorTaskGraphManager:
                 },
             )
 
+    def _hydrate_from_database(self) -> None:
+        if self._database is None:
+            return
+        try:
+            persisted = self._database.list_supervisor_graphs(limit=self._max_graphs)
+        except Exception:
+            return
+        if not isinstance(persisted, list):
+            return
+        with self._lock:
+            for row in persisted:
+                if not isinstance(row, dict):
+                    continue
+                normalized = self._normalize_loaded_graph(row)
+                graph_id = str(normalized.get("id") or "").strip()
+                if not graph_id:
+                    continue
+                self._graphs[graph_id] = normalized
+
+    def _persist_graph(self, graph: dict[str, Any]) -> None:
+        if self._database is None:
+            return
+        graph_id = str(graph.get("id") or "").strip()
+        if not graph_id:
+            return
+        timeline = graph.get("timeline")
+        checkpoint_count = len(timeline) if isinstance(timeline, list) else 0
+        try:
+            self._database.upsert_supervisor_graph(
+                graph_id=graph_id,
+                user_id=str(graph.get("user_id") or ""),
+                status=str(graph.get("status") or "planned"),
+                objective=str(graph.get("objective") or ""),
+                graph=graph,
+                checkpoint_count=checkpoint_count,
+                created_at=str(graph.get("created_at") or _utcnow_iso()),
+                updated_at=str(graph.get("updated_at") or _utcnow_iso()),
+                launched_at=_optional_str(str(graph.get("launched_at") or "")),
+                finished_at=_optional_str(str(graph.get("finished_at") or "")),
+            )
+        except Exception:
+            if self._telemetry_emitter is not None:
+                self._telemetry_emitter(
+                    "supervisor_graph_persist_failed",
+                    {
+                        "graph_id": graph_id,
+                    },
+                )
+
+    def _persist_graph_delete(self, graph_id: str) -> None:
+        if self._database is None:
+            return
+        normalized = str(graph_id or "").strip()
+        if not normalized:
+            return
+        try:
+            self._database.delete_supervisor_graph(normalized)
+        except Exception:
+            if self._telemetry_emitter is not None:
+                self._telemetry_emitter(
+                    "supervisor_graph_delete_failed",
+                    {
+                        "graph_id": normalized,
+                    },
+                )
+
+    @staticmethod
+    def _normalize_loaded_graph(raw_graph: dict[str, Any]) -> dict[str, Any]:
+        graph = deepcopy(raw_graph)
+        graph["id"] = str(graph.get("id") or "").strip()
+        graph["user_id"] = str(graph.get("user_id") or "").strip()
+        graph["objective"] = str(graph.get("objective") or "").strip()
+        graph["status"] = str(graph.get("status") or "planned").strip().lower() or "planned"
+        graph["created_at"] = str(graph.get("created_at") or _utcnow_iso())
+        graph["updated_at"] = str(graph.get("updated_at") or graph["created_at"])
+        graph["launched_at"] = _optional_str(str(graph.get("launched_at") or ""))
+        graph["finished_at"] = _optional_str(str(graph.get("finished_at") or ""))
+        graph["default_session_id"] = _optional_str(str(graph.get("default_session_id") or ""))
+        graph["metadata"] = dict(graph.get("metadata") or {}) if isinstance(graph.get("metadata"), dict) else {}
+
+        raw_nodes = graph.get("nodes")
+        node_map: dict[str, dict[str, Any]] = {}
+        if isinstance(raw_nodes, dict):
+            rows = [item for item in raw_nodes.values() if isinstance(item, dict)]
+        elif isinstance(raw_nodes, list):
+            rows = [item for item in raw_nodes if isinstance(item, dict)]
+        else:
+            rows = []
+
+        for index, node in enumerate(rows):
+            node_id = str(node.get("node_id") or f"node-{index + 1}").strip()
+            if not node_id:
+                continue
+            if node_id in node_map:
+                continue
+            raw_order = node.get("order")
+            try:
+                normalized_order = int(raw_order)
+            except Exception:
+                normalized_order = index + 1
+            if normalized_order <= 0:
+                normalized_order = index + 1
+            depends_on = node.get("depends_on")
+            if isinstance(depends_on, list):
+                dependencies = []
+                for dep in depends_on:
+                    dep_id = str(dep or "").strip()
+                    if dep_id and dep_id not in dependencies:
+                        dependencies.append(dep_id)
+            else:
+                dependencies = []
+            node_map[node_id] = {
+                "node_id": node_id,
+                "order": normalized_order,
+                "agent_id": str(node.get("agent_id") or "").strip(),
+                "message": str(node.get("message") or "").strip(),
+                "depends_on": dependencies,
+                "max_attempts": node.get("max_attempts"),
+                "budget": dict(node.get("budget") or {}) if isinstance(node.get("budget"), dict) else None,
+                "metadata": dict(node.get("metadata") or {}) if isinstance(node.get("metadata"), dict) else {},
+                "status": str(node.get("status") or "planned").strip().lower() or "planned",
+                "run_id": _optional_str(str(node.get("run_id") or "")),
+                "run_status": _optional_str(str(node.get("run_status") or "")),
+                "attempts": _safe_int(node.get("attempts"), default=0, minimum=0),
+                "created_at": str(node.get("created_at") or graph["created_at"]),
+                "started_at": _optional_str(str(node.get("started_at") or "")),
+                "completed_at": _optional_str(str(node.get("completed_at") or "")),
+                "last_error": _optional_str(str(node.get("last_error") or "")),
+            }
+        graph["nodes"] = node_map
+
+        timeline = graph.get("timeline")
+        graph["timeline"] = [item for item in timeline if isinstance(item, dict)] if isinstance(timeline, list) else []
+        telemetry = graph.get("telemetry")
+        if not isinstance(telemetry, dict):
+            telemetry = {}
+        graph["telemetry"] = {
+            "ticks": _safe_int(telemetry.get("ticks"), default=0, minimum=0),
+            "runs_started": _safe_int(telemetry.get("runs_started"), default=0, minimum=0),
+            "runs_completed": _safe_int(telemetry.get("runs_completed"), default=0, minimum=0),
+            "last_tick_at": _optional_str(str(telemetry.get("last_tick_at") or "")),
+        }
+        return graph
+
     def _evict_terminal_if_needed(self) -> None:
         if len(self._graphs) < self._max_graphs:
             return
@@ -694,6 +844,7 @@ class SupervisorTaskGraphManager:
             graph_id = str(row.get("id") or "")
             if graph_id:
                 self._graphs.pop(graph_id, None)
+                self._persist_graph_delete(graph_id)
 
 
 def _extract_run_error(run: dict[str, Any]) -> str | None:
@@ -715,6 +866,16 @@ def _utcnow_iso() -> str:
 def _optional_str(value: str | None) -> str | None:
     normalized = str(value or "").strip()
     return normalized or None
+
+
+def _safe_int(value: Any, *, default: int = 0, minimum: int | None = None) -> int:
+    try:
+        parsed = int(value)
+    except Exception:
+        parsed = int(default)
+    if minimum is not None and parsed < minimum:
+        return int(minimum)
+    return parsed
 
 
 def _snapshot(graph: dict[str, Any]) -> dict[str, Any]:

@@ -48,4 +48,13 @@ All endpoints are auth-scoped. Graph ownership is enforced (`user|admin` scopes)
   - starts newly-ready nodes
   - updates graph terminal status when complete
 
-This is an explicit control-loop contract (operator-driven `launch/tick`) intended as a safe first slice before introducing automatic supervisor workers and checkpoint persistence in later tasks (`P4-C02`/`P4-C03`).
+## Checkpoint + Resume (P4-C02 Slice)
+- Graph state is persisted into SQLite table `supervisor_graphs` on each create/launch/tick checkpoint.
+- Persisted payload includes full graph JSON plus indexed columns (`status`, `user_id`, `updated_at`, `checkpoint_count`).
+- On runtime startup, `SupervisorTaskGraphManager` hydrates recent persisted graphs into memory automatically.
+- Resume policy:
+  - existing `run_id` links are preserved,
+  - next `tick` reconciles node status from current child-run status,
+  - dependency unlocking/blocking continues from hydrated state without rebuilding graph topology.
+
+Current mode remains explicit operator control (`launch/tick`), but now with crash/restart recovery baseline for the supervisor layer.

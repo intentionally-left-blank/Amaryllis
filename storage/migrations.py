@@ -808,6 +808,31 @@ MIGRATIONS: list[Migration] = [
         ALTER TABLE automations ADD COLUMN mission_policy_json TEXT NOT NULL DEFAULT '{}';
         """,
     ),
+    Migration(
+        version=19,
+        name="supervisor_graphs_checkpoint_store_v1",
+        sql="""
+        CREATE TABLE IF NOT EXISTS supervisor_graphs (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            objective TEXT NOT NULL,
+            graph_json TEXT NOT NULL DEFAULT '{}',
+            checkpoint_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            launched_at TEXT,
+            finished_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_supervisor_graphs_user_updated
+            ON supervisor_graphs(user_id, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_supervisor_graphs_status_updated
+            ON supervisor_graphs(status, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_supervisor_graphs_created
+            ON supervisor_graphs(created_at);
+        """,
+    ),
 ]
 
 

@@ -321,6 +321,7 @@ def create_services() -> ServiceContainer:
     )
     supervisor_manager = SupervisorTaskGraphManager(
         agent_manager=agent_manager,
+        database=database,
         telemetry_emitter=telemetry.emit,
     )
     automation_scheduler = AutomationScheduler(

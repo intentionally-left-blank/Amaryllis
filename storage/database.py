@@ -1642,6 +1642,122 @@ class Database:
             ).fetchall()
         return [self._decode_security_incident_event_row(dict(row)) for row in rows]
 
+    def upsert_supervisor_graph(
+        self,
+        *,
+        graph_id: str,
+        user_id: str,
+        status: str,
+        objective: str,
+        graph: dict[str, Any],
+        created_at: str,
+        updated_at: str,
+        launched_at: str | None = None,
+        finished_at: str | None = None,
+        checkpoint_count: int = 0,
+    ) -> None:
+        normalized_graph_id = str(graph_id or "").strip()
+        if not normalized_graph_id:
+            raise ValueError("graph_id is required")
+        normalized_user_id = str(user_id or "").strip()
+        if not normalized_user_id:
+            raise ValueError("user_id is required")
+        normalized_objective = str(objective or "").strip()
+        if not normalized_objective:
+            raise ValueError("objective is required")
+        normalized_status = str(status or "").strip().lower() or "planned"
+        payload = graph if isinstance(graph, dict) else {}
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO supervisor_graphs(
+                    id,
+                    user_id,
+                    status,
+                    objective,
+                    graph_json,
+                    checkpoint_count,
+                    created_at,
+                    updated_at,
+                    launched_at,
+                    finished_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    user_id=excluded.user_id,
+                    status=excluded.status,
+                    objective=excluded.objective,
+                    graph_json=excluded.graph_json,
+                    checkpoint_count=excluded.checkpoint_count,
+                    updated_at=excluded.updated_at,
+                    launched_at=excluded.launched_at,
+                    finished_at=excluded.finished_at
+                """,
+                (
+                    normalized_graph_id,
+                    normalized_user_id,
+                    normalized_status,
+                    normalized_objective,
+                    json.dumps(payload, ensure_ascii=False),
+                    max(0, int(checkpoint_count)),
+                    str(created_at or self._utc_now()),
+                    str(updated_at or self._utc_now()),
+                    launched_at,
+                    finished_at,
+                ),
+            )
+            self._commit_locked()
+
+    def get_supervisor_graph(self, graph_id: str) -> dict[str, Any] | None:
+        normalized_graph_id = str(graph_id or "").strip()
+        if not normalized_graph_id:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM supervisor_graphs WHERE id = ?",
+                (normalized_graph_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._decode_supervisor_graph_row(dict(row))
+
+    def list_supervisor_graphs(
+        self,
+        *,
+        user_id: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+
+        query = "SELECT * FROM supervisor_graphs WHERE 1 = 1"
+        params: list[Any] = []
+        if user_id:
+            query += " AND user_id = ?"
+            params.append(str(user_id).strip())
+        if status:
+            query += " AND status = ?"
+            params.append(str(status).strip().lower())
+        query += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(max(1, int(limit)))
+
+        with self._lock:
+            rows = self._conn.execute(query, tuple(params)).fetchall()
+        return [self._decode_supervisor_graph_row(dict(row)) for row in rows]
+
+    def delete_supervisor_graph(self, graph_id: str) -> bool:
+        normalized_graph_id = str(graph_id or "").strip()
+        if not normalized_graph_id:
+            return False
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM supervisor_graphs WHERE id = ?",
+                (normalized_graph_id,),
+            )
+            self._commit_locked()
+        return int(cursor.rowcount or 0) > 0
+
     def create_agent_run(
         self,
         run_id: str,
@@ -2983,6 +3099,38 @@ class Database:
         if int(cursor.rowcount or 0) <= 0:
             return None
         return self.get_inbox_item(item_id)
+
+    @staticmethod
+    def _decode_supervisor_graph_row(row: dict[str, Any]) -> dict[str, Any]:
+        graph_json = row.pop("graph_json", "{}")
+        try:
+            parsed = json.loads(graph_json or "{}")
+            graph = parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            graph = {}
+
+        graph_id = str(row.get("id") or graph.get("id") or "").strip()
+        graph["id"] = graph_id
+        graph["user_id"] = str(row.get("user_id") or graph.get("user_id") or "").strip()
+        graph["objective"] = str(row.get("objective") or graph.get("objective") or "").strip()
+        graph["status"] = str(row.get("status") or graph.get("status") or "planned").strip().lower() or "planned"
+        graph["created_at"] = str(row.get("created_at") or graph.get("created_at") or "")
+        graph["updated_at"] = str(row.get("updated_at") or graph.get("updated_at") or "")
+        graph["launched_at"] = (
+            str(row.get("launched_at"))
+            if row.get("launched_at") not in (None, "")
+            else graph.get("launched_at")
+        )
+        graph["finished_at"] = (
+            str(row.get("finished_at"))
+            if row.get("finished_at") not in (None, "")
+            else graph.get("finished_at")
+        )
+        try:
+            graph["checkpoint_count"] = max(0, int(row.get("checkpoint_count", 0)))
+        except Exception:
+            graph["checkpoint_count"] = 0
+        return graph
 
     def _decode_agent_run_row(self, row: dict[str, Any]) -> dict[str, Any]:
         try:

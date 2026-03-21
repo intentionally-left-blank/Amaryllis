@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 from typing import Any
 
+from storage.database import Database
 from supervisor.task_graph_manager import SupervisorTaskGraphManager
 
 
@@ -198,6 +201,59 @@ class SupervisorTaskGraphManagerTests(unittest.TestCase):
         graph_id = str(created.get("id") or "")
         with self.assertRaises(ValueError):
             manager.launch_graph(graph_id=graph_id, user_id="user-2")
+
+    def test_graph_state_recovers_from_database_checkpoint_store(self) -> None:
+        fake_agent_manager = _FakeAgentManager()
+        with tempfile.TemporaryDirectory(prefix="amaryllis-tests-supervisor-persistence-") as tmp_dir:
+            database = Database(Path(tmp_dir) / "amaryllis.db")
+            manager = SupervisorTaskGraphManager(
+                agent_manager=fake_agent_manager,
+                database=database,
+            )
+            created = manager.create_graph(
+                user_id="user-1",
+                objective="resume-graph",
+                nodes=[
+                    {
+                        "node_id": "triage",
+                        "agent_id": "agent-a",
+                        "message": "triage",
+                    },
+                    {
+                        "node_id": "fix",
+                        "agent_id": "agent-b",
+                        "message": "fix",
+                        "depends_on": ["triage"],
+                    },
+                ],
+            )
+            graph_id = str(created.get("id") or "")
+            launched = manager.launch_graph(
+                graph_id=graph_id,
+                user_id="user-1",
+                session_id="sup-persist-session-1",
+            )
+            triage_run_id = str(_node_by_id(launched, "triage").get("run_id") or "")
+            self.assertTrue(triage_run_id)
+
+            fake_agent_manager.set_run_status(triage_run_id, "succeeded")
+            progressed = manager.tick_graph(graph_id=graph_id, user_id="user-1")
+            fix_run_id = str(_node_by_id(progressed, "fix").get("run_id") or "")
+            self.assertTrue(fix_run_id)
+
+            recovered_manager = SupervisorTaskGraphManager(
+                agent_manager=fake_agent_manager,
+                database=database,
+            )
+            recovered_graph = recovered_manager.get_graph(graph_id=graph_id)
+            self.assertEqual(str(recovered_graph.get("status")), "running")
+            self.assertEqual(str(_node_by_id(recovered_graph, "triage").get("status")), "succeeded")
+            self.assertEqual(str(_node_by_id(recovered_graph, "fix").get("run_id")), fix_run_id)
+
+            fake_agent_manager.set_run_status(fix_run_id, "succeeded")
+            completed = recovered_manager.tick_graph(graph_id=graph_id, user_id="user-1")
+            self.assertEqual(str(completed.get("status")), "succeeded")
+            database.close()
 
 
 if __name__ == "__main__":
