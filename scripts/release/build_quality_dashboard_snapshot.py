@@ -13,7 +13,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Build consolidated release quality dashboard snapshot from gate reports "
-            "(perf/fault/mission-queue/runtime-lifecycle)."
+            "(perf/fault/mission-queue/runtime-lifecycle/user-journey)."
         )
     )
     parser.add_argument(
@@ -35,6 +35,11 @@ def _parse_args() -> argparse.Namespace:
         "--runtime-lifecycle-report",
         default="artifacts/runtime-lifecycle-smoke-report.json",
         help="Path to runtime lifecycle smoke report JSON.",
+    )
+    parser.add_argument(
+        "--user-journey-report",
+        default="artifacts/user-journey-benchmark-report.json",
+        help="Path to user journey benchmark report JSON.",
     )
     parser.add_argument(
         "--output",
@@ -157,6 +162,7 @@ def _build_snapshot(
     fault = reports["fault_injection"]
     mission = reports["mission_queue"]
     runtime = reports["runtime_lifecycle"]
+    user_journey = reports["user_journey"]
 
     perf_summary = perf.get("summary") if isinstance(perf.get("summary"), dict) else {}
     perf_thresholds = perf.get("thresholds") if isinstance(perf.get("thresholds"), dict) else {}
@@ -165,6 +171,15 @@ def _build_snapshot(
     mission_summary = mission.get("summary") if isinstance(mission.get("summary"), dict) else {}
     mission_config = mission.get("config") if isinstance(mission.get("config"), dict) else {}
     runtime_summary = runtime.get("summary") if isinstance(runtime.get("summary"), dict) else {}
+    user_journey_summary = (
+        user_journey.get("summary") if isinstance(user_journey.get("summary"), dict) else {}
+    )
+    user_journey_thresholds = (
+        user_journey.get("config", {}).get("thresholds")
+        if isinstance(user_journey.get("config"), dict)
+        and isinstance(user_journey.get("config", {}).get("thresholds"), dict)
+        else {}
+    )
 
     signals: list[dict[str, Any]] = [
         _metric_signal(
@@ -256,6 +271,66 @@ def _build_snapshot(
             threshold=0.0,
             comparator="lte",
             unit="count",
+        ),
+        _metric_signal(
+            metric_id="user_journey.success_rate_pct",
+            source="user_journey",
+            category="user_flow",
+            value=_safe_float(user_journey_summary.get("journey_success_rate_pct")),
+            threshold=_safe_float(
+                user_journey_thresholds.get("min_success_rate_pct"),
+                default=_safe_float(user_journey_summary.get("journey_success_rate_pct")),
+            ),
+            comparator="gte",
+            unit="pct",
+        ),
+        _metric_signal(
+            metric_id="user_journey.p95_journey_latency_ms",
+            source="user_journey",
+            category="user_flow",
+            value=_safe_float(user_journey_summary.get("p95_journey_latency_ms")),
+            threshold=_safe_float(
+                user_journey_thresholds.get("max_p95_journey_latency_ms"),
+                default=_safe_float(user_journey_summary.get("p95_journey_latency_ms")),
+            ),
+            comparator="lte",
+            unit="ms",
+        ),
+        _metric_signal(
+            metric_id="user_journey.p95_plan_dispatch_latency_ms",
+            source="user_journey",
+            category="user_flow",
+            value=_safe_float(user_journey_summary.get("p95_plan_dispatch_latency_ms")),
+            threshold=_safe_float(
+                user_journey_thresholds.get("max_p95_plan_dispatch_latency_ms"),
+                default=_safe_float(user_journey_summary.get("p95_plan_dispatch_latency_ms")),
+            ),
+            comparator="lte",
+            unit="ms",
+        ),
+        _metric_signal(
+            metric_id="user_journey.p95_execute_dispatch_latency_ms",
+            source="user_journey",
+            category="user_flow",
+            value=_safe_float(user_journey_summary.get("p95_execute_dispatch_latency_ms")),
+            threshold=_safe_float(
+                user_journey_thresholds.get("max_p95_execute_dispatch_latency_ms"),
+                default=_safe_float(user_journey_summary.get("p95_execute_dispatch_latency_ms")),
+            ),
+            comparator="lte",
+            unit="ms",
+        ),
+        _metric_signal(
+            metric_id="user_journey.plan_to_execute_conversion_rate_pct",
+            source="user_journey",
+            category="user_flow",
+            value=_safe_float(user_journey_summary.get("plan_to_execute_conversion_rate_pct")),
+            threshold=_safe_float(
+                user_journey_thresholds.get("min_plan_to_execute_conversion_rate_pct"),
+                default=_safe_float(user_journey_summary.get("plan_to_execute_conversion_rate_pct")),
+            ),
+            comparator="gte",
+            unit="pct",
         ),
     ]
 
@@ -371,6 +446,7 @@ def main() -> int:
         "fault_injection": _resolve_path(project_root, str(args.fault_injection_report)),
         "mission_queue": _resolve_path(project_root, str(args.mission_queue_report)),
         "runtime_lifecycle": _resolve_path(project_root, str(args.runtime_lifecycle_report)),
+        "user_journey": _resolve_path(project_root, str(args.user_journey_report)),
     }
 
     reports: dict[str, dict[str, Any]] = {}
