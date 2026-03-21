@@ -76,6 +76,12 @@ Mission success/recovery report pack artifact:
 artifacts/nightly-mission-success-recovery-report.json
 ```
 
+Nightly runtime-export companion artifact:
+
+```text
+artifacts/nightly-mission-success-recovery-runtime-export.json
+```
+
 Nightly macOS desktop parity smoke artifact (staging, non-blocking):
 
 ```text
@@ -91,6 +97,16 @@ Report includes:
 
 Companion staging report:
 - `macos_desktop_parity_smoke_v1` for desktop-action parity on macOS contract surface.
+
+Runtime export publisher:
+
+```bash
+python3 scripts/release/publish_mission_success_recovery_snapshot.py \
+  --report artifacts/nightly-mission-success-recovery-report.json \
+  --channel nightly \
+  --expect-scope nightly \
+  --install-root ~/.local/share/amaryllis
+```
 
 ## Baseline
 

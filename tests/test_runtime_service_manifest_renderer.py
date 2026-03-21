@@ -57,6 +57,10 @@ class RuntimeServiceManifestRendererTests(unittest.TestCase):
             'Environment="AMARYLLIS_RELEASE_QUALITY_DASHBOARD_PATH=/tmp/amaryllis/observability/release-quality-dashboard-latest.json"',
             text,
         )
+        self.assertIn(
+            'Environment="AMARYLLIS_NIGHTLY_MISSION_REPORT_PATH=/tmp/amaryllis/observability/nightly-mission-success-recovery-latest.json"',
+            text,
+        )
         self.assertIn('Environment="EXTRA_FLAG=1"', text)
         self.assertIn("WantedBy=default.target", text)
 
@@ -93,6 +97,10 @@ class RuntimeServiceManifestRendererTests(unittest.TestCase):
             self.assertEqual(
                 env.get("AMARYLLIS_RELEASE_QUALITY_DASHBOARD_PATH"),
                 "/tmp/amaryllis/observability/release-quality-dashboard-latest.json",
+            )
+            self.assertEqual(
+                env.get("AMARYLLIS_NIGHTLY_MISSION_REPORT_PATH"),
+                "/tmp/amaryllis/observability/nightly-mission-success-recovery-latest.json",
             )
             self.assertEqual(env.get("EXTRA_FLAG"), "1")
 

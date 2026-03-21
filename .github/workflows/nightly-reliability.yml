@@ -105,6 +105,19 @@ jobs:
             --scope "nightly" \
             --output "artifacts/nightly-mission-success-recovery-report.json"
 
+      - name: Publish nightly mission report for runtime export
+        if: ${{ always() }}
+        run: |
+          if [[ -f "artifacts/nightly-mission-success-recovery-report.json" ]]; then
+            python scripts/release/publish_mission_success_recovery_snapshot.py \
+              --report "artifacts/nightly-mission-success-recovery-report.json" \
+              --channel "nightly" \
+              --expect-scope "nightly" \
+              --output "artifacts/nightly-mission-success-recovery-runtime-export.json"
+          else
+            echo "[nightly-runtime-export] source report missing; skip publish"
+          fi
+
       - name: Upload nightly reliability report
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -142,5 +155,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nightly-mission-success-recovery-report
-          path: artifacts/nightly-mission-success-recovery-report.json
-          if-no-files-found: error
+          path: |
+            artifacts/nightly-mission-success-recovery-report.json
+            artifacts/nightly-mission-success-recovery-runtime-export.json
+          if-no-files-found: warn

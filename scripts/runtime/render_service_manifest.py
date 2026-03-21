@@ -104,6 +104,9 @@ def _base_env(*, install_root: str, channel: str, host: str, port: int) -> dict[
         "AMARYLLIS_RELEASE_QUALITY_DASHBOARD_PATH": str(
             Path(root) / "observability" / "release-quality-dashboard-latest.json"
         ),
+        "AMARYLLIS_NIGHTLY_MISSION_REPORT_PATH": str(
+            Path(root) / "observability" / "nightly-mission-success-recovery-latest.json"
+        ),
     }
 
 

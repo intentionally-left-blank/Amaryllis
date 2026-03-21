@@ -25,6 +25,19 @@ Optional release-quality metric export:
   - `amaryllis_release_desktop_staging_error_rate_pct`
   - `amaryllis_release_desktop_staging_checks_failed`
 
+Optional nightly mission metric export:
+
+- set `AMARYLLIS_NIGHTLY_MISSION_REPORT_PATH=/abs/path/nightly-mission-success-recovery-latest.json`,
+- Linux installer/service manifest default path is
+  `~/.local/share/amaryllis/observability/nightly-mission-success-recovery-latest.json`,
+- `/service/observability/metrics` additionally exports nightly gauges:
+  - `amaryllis_nightly_mission_snapshot_loaded` (`0|1`)
+  - `amaryllis_nightly_mission_status` (`1=pass`, `0=fail`)
+  - `amaryllis_nightly_success_rate_pct`
+  - `amaryllis_nightly_p95_latency_ms`
+  - `amaryllis_nightly_latency_jitter_ms`
+  - `amaryllis_nightly_burn_rate_gate_passed` (`1=pass`, `0=fail`)
+
 ## SLO / SLI
 
 Current targets are versioned by SLO profile manifests (`slo_profiles/*.json`) and can still be overridden via env.

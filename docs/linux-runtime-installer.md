@@ -38,7 +38,10 @@ This performs:
 5. `current` pointer update when `stable` is installed,
 6. optional publish of `artifacts/release-quality-dashboard-final.json` into:
    - `${AMARYLLIS_LINUX_INSTALL_ROOT}/observability/release-quality-dashboard-latest.json`
-   when snapshot artifact exists in repo workspace.
+   when snapshot artifact exists in repo workspace,
+7. optional publish of `artifacts/nightly-mission-success-recovery-report.json` into:
+   - `${AMARYLLIS_LINUX_INSTALL_ROOT}/observability/nightly-mission-success-recovery-latest.json`
+   when nightly mission artifact exists in repo workspace.
 
 ## Upgrade
 
@@ -118,6 +121,7 @@ Environment overrides:
 - `AMARYLLIS_HOST` (default `127.0.0.1`)
 - `AMARYLLIS_PORT` (default `8000`)
 - `AMARYLLIS_RELEASE_QUALITY_DASHBOARD_PATH` (optional override for runtime release-quality snapshot path)
+- `AMARYLLIS_NIGHTLY_MISSION_REPORT_PATH` (optional override for runtime nightly mission snapshot path)
 
 ## Installer Options
 

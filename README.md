@@ -1630,6 +1630,12 @@ Publish release quality snapshot to stable runtime observability path:
 python3 scripts/release/publish_release_quality_snapshot.py --snapshot-report artifacts/release-quality-dashboard-final.json --trend-report artifacts/release-quality-dashboard-trend-final.json --install-root ~/.local/share/amaryllis
 ```
 
+Publish nightly mission success/recovery report to stable runtime observability path:
+
+```bash
+python3 scripts/release/publish_mission_success_recovery_snapshot.py --report artifacts/nightly-mission-success-recovery-report.json --channel nightly --expect-scope nightly --install-root ~/.local/share/amaryllis
+```
+
 Mission success/recovery report pack (public KPI snapshot for release/nightly):
 
 ```bash
@@ -1858,6 +1864,7 @@ export AMARYLLIS_SLO_REQUEST_AVAILABILITY_TARGET=0.995
 export AMARYLLIS_SLO_REQUEST_LATENCY_P95_MS_TARGET=1200
 export AMARYLLIS_SLO_RUN_SUCCESS_TARGET=0.98
 export AMARYLLIS_RELEASE_QUALITY_DASHBOARD_PATH=
+export AMARYLLIS_NIGHTLY_MISSION_REPORT_PATH=
 export AMARYLLIS_BACKUP_ENABLED=true
 export AMARYLLIS_BACKUP_DIR=~/Library/Application\ Support/amaryllis/backups
 export AMARYLLIS_BACKUP_INTERVAL_SEC=3600
@@ -1877,6 +1884,7 @@ export AMARYLLIS_API_COMPAT_CONTRACT_PATH=contracts/api_compat_v1.json
 - Dashboard template: `observability/grafana/dashboard-amaryllis.json`
 - Alert rules: `observability/alerts/prometheus-rules.yml`
 - Optional release-quality export: `AMARYLLIS_RELEASE_QUALITY_DASHBOARD_PATH=/abs/path/release-quality-dashboard-latest.json` (Linux installer default: `~/.local/share/amaryllis/observability/release-quality-dashboard-latest.json`)
+- Optional nightly mission export: `AMARYLLIS_NIGHTLY_MISSION_REPORT_PATH=/abs/path/nightly-mission-success-recovery-latest.json` (Linux installer default: `~/.local/share/amaryllis/observability/nightly-mission-success-recovery-latest.json`)
 - Service endpoints:
   - `GET /service/observability/slo`
   - `GET /service/observability/incidents`

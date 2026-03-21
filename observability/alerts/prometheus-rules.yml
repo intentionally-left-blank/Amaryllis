@@ -54,3 +54,21 @@ groups:
         annotations:
           summary: "Amaryllis desktop staging parity failed"
           description: "macOS desktop parity staging signal is failing in latest release quality snapshot."
+
+      - alert: AmaryllisNightlyMissionFailed
+        expr: (amaryllis_nightly_mission_snapshot_loaded == 1) and (amaryllis_nightly_mission_status < 1)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Amaryllis nightly mission report failed"
+          description: "Latest nightly mission success/recovery report status is fail."
+
+      - alert: AmaryllisNightlyBurnRateGateFailed
+        expr: (amaryllis_nightly_mission_snapshot_loaded == 1) and (amaryllis_nightly_burn_rate_gate_passed < 1)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Amaryllis nightly burn-rate gate failed"
+          description: "Nightly mission report indicates burn-rate gate failure."

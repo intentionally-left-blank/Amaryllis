@@ -6,6 +6,7 @@ release and nightly pipelines.
 
 Script:
 - `scripts/release/build_mission_success_recovery_report.py`
+- `scripts/release/publish_mission_success_recovery_snapshot.py` (runtime-export helper)
 
 ## Output
 
@@ -14,6 +15,7 @@ Default output:
 
 Nightly output:
 - `artifacts/nightly-mission-success-recovery-report.json`
+- `artifacts/nightly-mission-success-recovery-runtime-export.json`
 
 Suite id:
 - `mission_success_recovery_report_pack_v2`
@@ -32,6 +34,7 @@ Nightly scope:
 - nightly reliability report
 - nightly burn-rate gate report
 - nightly user journey benchmark report
+- macOS desktop parity smoke report (staging, optional)
 
 The script accepts any subset and produces a normalized report with:
 - source metadata
@@ -55,5 +58,6 @@ Optional macOS desktop staging source flag:
   - `artifacts/mission-success-recovery-report.json`
 - Nightly workflow (`nightly-reliability.yml`) exports:
   - `artifacts/nightly-mission-success-recovery-report.json`
+  - `artifacts/nightly-mission-success-recovery-runtime-export.json`
 
 This makes mission reliability KPIs available as machine-readable artifacts for each release and nightly run.

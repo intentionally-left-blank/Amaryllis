@@ -21,6 +21,7 @@ Environment:
   AMARYLLIS_KEEP_RELEASES           Number of releases to keep (default: 3)
   AMARYLLIS_LINUX_RELEASE_CHANNEL   Default channel when --channel is omitted (stable|canary)
   AMARYLLIS_RELEASE_QUALITY_DASHBOARD_PATH  Runtime export path for release quality snapshot
+  AMARYLLIS_NIGHTLY_MISSION_REPORT_PATH     Runtime export path for nightly mission report snapshot
 USAGE
 }
 
@@ -148,6 +149,9 @@ RELEASE_QUALITY_SNAPSHOT_SOURCE="${ROOT_DIR}/artifacts/release-quality-dashboard
 RELEASE_QUALITY_TREND_SOURCE="${ROOT_DIR}/artifacts/release-quality-dashboard-trend-final.json"
 RELEASE_QUALITY_RUNTIME_PATH="${INSTALL_ROOT}/observability/release-quality-dashboard-latest.json"
 RELEASE_QUALITY_PUBLISHER="${ROOT_DIR}/scripts/release/publish_release_quality_snapshot.py"
+NIGHTLY_MISSION_REPORT_SOURCE="${ROOT_DIR}/artifacts/nightly-mission-success-recovery-report.json"
+NIGHTLY_MISSION_RUNTIME_PATH="${INSTALL_ROOT}/observability/nightly-mission-success-recovery-latest.json"
+NIGHTLY_MISSION_PUBLISHER="${ROOT_DIR}/scripts/release/publish_mission_success_recovery_snapshot.py"
 
 run_cmd() {
   echo "+ $*"
@@ -223,6 +227,8 @@ HOST="${AMARYLLIS_HOST:-127.0.0.1}"
 PORT="${AMARYLLIS_PORT:-8000}"
 RELEASE_QUALITY_DASHBOARD_PATH="${AMARYLLIS_RELEASE_QUALITY_DASHBOARD_PATH:-${INSTALL_ROOT}/observability/release-quality-dashboard-latest.json}"
 export AMARYLLIS_RELEASE_QUALITY_DASHBOARD_PATH="${RELEASE_QUALITY_DASHBOARD_PATH}"
+NIGHTLY_MISSION_REPORT_PATH="${AMARYLLIS_NIGHTLY_MISSION_REPORT_PATH:-${INSTALL_ROOT}/observability/nightly-mission-success-recovery-latest.json}"
+export AMARYLLIS_NIGHTLY_MISSION_REPORT_PATH="${NIGHTLY_MISSION_REPORT_PATH}"
 
 exec "${VENV_DIR}/bin/uvicorn" runtime.server:app \
   --app-dir "${SRC_DIR}" \
@@ -302,6 +308,24 @@ else
   echo "[linux-installer] release quality snapshot not found: ${RELEASE_QUALITY_SNAPSHOT_SOURCE} (skip publish)"
 fi
 
+if [[ -f "${NIGHTLY_MISSION_REPORT_SOURCE}" ]]; then
+  nightly_publish_cmd=(
+    "${PYTHON_BIN}"
+    "${NIGHTLY_MISSION_PUBLISHER}"
+    "--report"
+    "${NIGHTLY_MISSION_REPORT_SOURCE}"
+    "--channel"
+    "nightly"
+    "--expect-scope"
+    "nightly"
+    "--install-root"
+    "${INSTALL_ROOT}"
+  )
+  run_cmd "${nightly_publish_cmd[@]}"
+else
+  echo "[linux-installer] nightly mission report not found: ${NIGHTLY_MISSION_REPORT_SOURCE} (skip publish)"
+fi
+
 echo "[linux-installer] install complete"
 echo "[linux-installer] launcher: ${LAUNCHER}"
 if [[ -L "${CHANNEL_LINK}" ]]; then
@@ -313,4 +337,5 @@ else
   echo "[linux-installer] current release link not set"
 fi
 echo "[linux-installer] release quality runtime path: ${RELEASE_QUALITY_RUNTIME_PATH}"
+echo "[linux-installer] nightly mission runtime path: ${NIGHTLY_MISSION_RUNTIME_PATH}"
 echo "[linux-installer] start runtime: ${LAUNCHER}"

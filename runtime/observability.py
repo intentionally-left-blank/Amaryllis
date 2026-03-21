@@ -72,6 +72,9 @@ class SREMonitor:
         self._release_quality_dashboard_path = (
             str(os.getenv("AMARYLLIS_RELEASE_QUALITY_DASHBOARD_PATH") or "").strip() or None
         )
+        self._nightly_mission_report_path = (
+            str(os.getenv("AMARYLLIS_NIGHTLY_MISSION_REPORT_PATH") or "").strip() or None
+        )
         self._lock = Lock()
         self._http_events: deque[dict[str, Any]] = deque(maxlen=20000)
         self._run_events: deque[dict[str, Any]] = deque(maxlen=20000)
@@ -184,6 +187,7 @@ class SREMonitor:
         run_sli = snapshot["sli"]["runs"]
         budgets = snapshot["error_budget"]
         release_quality = self._release_quality_snapshot_metrics()
+        nightly_mission = self._nightly_mission_snapshot_metrics()
         lines = [
             "# HELP amaryllis_requests_total HTTP requests observed in SLO window.",
             "# TYPE amaryllis_requests_total gauge",
@@ -237,6 +241,24 @@ class SREMonitor:
             "# HELP amaryllis_release_desktop_staging_checks_failed Desktop staging parity failed checks count.",
             "# TYPE amaryllis_release_desktop_staging_checks_failed gauge",
             f"amaryllis_release_desktop_staging_checks_failed {float(release_quality['desktop_staging_checks_failed']):.6f}",
+            "# HELP amaryllis_nightly_mission_snapshot_loaded Nightly mission report snapshot availability (0/1).",
+            "# TYPE amaryllis_nightly_mission_snapshot_loaded gauge",
+            f"amaryllis_nightly_mission_snapshot_loaded {float(nightly_mission['snapshot_loaded']):.0f}",
+            "# HELP amaryllis_nightly_mission_status Nightly mission status (1=pass, 0=fail).",
+            "# TYPE amaryllis_nightly_mission_status gauge",
+            f"amaryllis_nightly_mission_status {float(nightly_mission['status']):.6f}",
+            "# HELP amaryllis_nightly_success_rate_pct Nightly mission success-rate percent.",
+            "# TYPE amaryllis_nightly_success_rate_pct gauge",
+            f"amaryllis_nightly_success_rate_pct {float(nightly_mission['success_rate_pct']):.6f}",
+            "# HELP amaryllis_nightly_p95_latency_ms Nightly mission p95 latency in milliseconds.",
+            "# TYPE amaryllis_nightly_p95_latency_ms gauge",
+            f"amaryllis_nightly_p95_latency_ms {float(nightly_mission['p95_latency_ms']):.6f}",
+            "# HELP amaryllis_nightly_latency_jitter_ms Nightly mission latency jitter in milliseconds.",
+            "# TYPE amaryllis_nightly_latency_jitter_ms gauge",
+            f"amaryllis_nightly_latency_jitter_ms {float(nightly_mission['latency_jitter_ms']):.6f}",
+            "# HELP amaryllis_nightly_burn_rate_gate_passed Nightly burn-rate gate status (1=pass, 0=fail).",
+            "# TYPE amaryllis_nightly_burn_rate_gate_passed gauge",
+            f"amaryllis_nightly_burn_rate_gate_passed {float(nightly_mission['burn_rate_gate_passed']):.6f}",
         ]
         return "\n".join(lines) + "\n"
 
@@ -303,6 +325,53 @@ class SREMonitor:
             metrics["desktop_staging_error_rate_pct"] = max(0.0, float(desktop_error_rate))
         if desktop_checks_failed is not None:
             metrics["desktop_staging_checks_failed"] = max(0.0, float(desktop_checks_failed))
+        return metrics
+
+    def _nightly_mission_snapshot_metrics(self) -> dict[str, float]:
+        metrics = {
+            "snapshot_loaded": 0.0,
+            "status": 0.0,
+            "success_rate_pct": 0.0,
+            "p95_latency_ms": 0.0,
+            "latency_jitter_ms": 0.0,
+            "burn_rate_gate_passed": 0.0,
+        }
+        path_raw = str(self._nightly_mission_report_path or "").strip()
+        if not path_raw:
+            return metrics
+
+        path = Path(path_raw)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return metrics
+        if not isinstance(payload, dict):
+            return metrics
+        if str(payload.get("suite") or "").strip() != "mission_success_recovery_report_pack_v2":
+            return metrics
+
+        metrics["snapshot_loaded"] = 1.0
+        summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+        metrics["status"] = 1.0 if str(summary.get("status") or "").strip().lower() == "pass" else 0.0
+
+        kpis = payload.get("kpis") if isinstance(payload.get("kpis"), dict) else {}
+        metrics["success_rate_pct"] = max(
+            0.0,
+            self._safe_float(kpis.get("nightly_success_rate_pct"), default=0.0),
+        )
+        metrics["p95_latency_ms"] = max(
+            0.0,
+            self._safe_float(kpis.get("nightly_p95_latency_ms"), default=0.0),
+        )
+        metrics["latency_jitter_ms"] = max(
+            0.0,
+            self._safe_float(kpis.get("nightly_latency_jitter_ms"), default=0.0),
+        )
+        burn_gate = kpis.get("nightly_burn_rate_gate_passed")
+        if isinstance(burn_gate, bool):
+            metrics["burn_rate_gate_passed"] = 1.0 if burn_gate else 0.0
+        else:
+            metrics["burn_rate_gate_passed"] = 1.0 if self._safe_float(burn_gate, default=0.0) >= 1.0 else 0.0
         return metrics
 
     def _prune_unlocked(self) -> None:

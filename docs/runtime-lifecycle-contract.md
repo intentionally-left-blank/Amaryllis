@@ -64,6 +64,7 @@ python3 scripts/release/runtime_lifecycle_smoke_gate.py \
   - `AMARYLLIS_HOST`
   - `AMARYLLIS_PORT`
   - `AMARYLLIS_RELEASE_QUALITY_DASHBOARD_PATH`
+  - `AMARYLLIS_NIGHTLY_MISSION_REPORT_PATH`
 - Extra env entries accepted via repeatable `--environment KEY=VALUE`.
 - Invalid env entries fail fast.
 - Manifest writes are atomic (temp-file + replace) to avoid partial state.

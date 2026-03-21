@@ -52,6 +52,7 @@ class ObservabilityTests(unittest.TestCase):
         self.assertIn("amaryllis_request_availability_ratio", metrics)
         self.assertIn("amaryllis_run_success_ratio", metrics)
         self.assertIn("amaryllis_release_quality_snapshot_loaded 0", metrics)
+        self.assertIn("amaryllis_nightly_mission_snapshot_loaded 0", metrics)
 
     def test_release_quality_snapshot_metrics_are_exported_when_configured(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-observability-") as tmp:
@@ -87,6 +88,42 @@ class ObservabilityTests(unittest.TestCase):
             self.assertIn("amaryllis_release_desktop_staging_signal_present 1", metrics)
             self.assertIn("amaryllis_release_desktop_staging_status 1.000000", metrics)
             self.assertIn("amaryllis_release_desktop_staging_error_rate_pct 0.000000", metrics)
+
+    def test_nightly_mission_snapshot_metrics_are_exported_when_configured(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="amaryllis-observability-") as tmp:
+            snapshot_path = Path(tmp) / "nightly-mission-success-recovery.json"
+            payload = {
+                "suite": "mission_success_recovery_report_pack_v2",
+                "scope": "nightly",
+                "summary": {
+                    "checks_total": 4,
+                    "checks_passed": 4,
+                    "checks_failed": 0,
+                    "status": "pass",
+                },
+                "kpis": {
+                    "nightly_success_rate_pct": 100.0,
+                    "nightly_p95_latency_ms": 280.5,
+                    "nightly_latency_jitter_ms": 42.0,
+                    "nightly_burn_rate_gate_passed": True,
+                },
+            }
+            snapshot_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+            with patch.dict(
+                os.environ,
+                {"AMARYLLIS_NIGHTLY_MISSION_REPORT_PATH": str(snapshot_path)},
+                clear=False,
+            ):
+                manager = self._build_manager()
+
+            metrics = manager.sre.render_prometheus_metrics()
+            self.assertIn("amaryllis_nightly_mission_snapshot_loaded 1", metrics)
+            self.assertIn("amaryllis_nightly_mission_status 1.000000", metrics)
+            self.assertIn("amaryllis_nightly_success_rate_pct 100.000000", metrics)
+            self.assertIn("amaryllis_nightly_p95_latency_ms 280.500000", metrics)
+            self.assertIn("amaryllis_nightly_latency_jitter_ms 42.000000", metrics)
+            self.assertIn("amaryllis_nightly_burn_rate_gate_passed 1.000000", metrics)
 
     def test_incident_is_detected_when_slo_is_breached(self) -> None:
         manager = self._build_manager()

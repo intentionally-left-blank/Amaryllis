@@ -115,6 +115,7 @@ jobs:
             tests.test_supervisor_api \
             tests.test_release_quality_dashboard_snapshot \
             tests.test_publish_release_quality_snapshot \
+            tests.test_publish_mission_success_recovery_snapshot \
             tests.test_mission_success_recovery_report_pack \
             tests.test_distribution_resilience_report \
             tests.test_user_journey_benchmark \

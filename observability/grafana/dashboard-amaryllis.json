@@ -97,6 +97,42 @@
           "expr": "amaryllis_release_desktop_staging_error_rate_pct"
         }
       ]
+    },
+    {
+      "type": "stat",
+      "title": "Nightly Snapshot Loaded",
+      "targets": [
+        {
+          "expr": "amaryllis_nightly_mission_snapshot_loaded"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Nightly Mission Status",
+      "targets": [
+        {
+          "expr": "amaryllis_nightly_mission_status"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Nightly Success Rate (%)",
+      "targets": [
+        {
+          "expr": "amaryllis_nightly_success_rate_pct"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Nightly Burn-Rate Gate",
+      "targets": [
+        {
+          "expr": "amaryllis_nightly_burn_rate_gate_passed"
+        }
+      ]
     }
   ]
 }
