@@ -20,7 +20,7 @@ Build a local-first, voice-native, autonomous assistant for developer workflows 
 
 ## Execution Phases
 
-### Phase 0 - Foundation Hardening (current)
+### Phase 0 - Foundation Hardening (completed)
 - Goal: make architecture and delivery process Tier-1 ready before expanding feature surface.
 - Outcomes:
   - modular boundaries and RFC set for cognitive kernel/action layer/memory.
@@ -28,14 +28,14 @@ Build a local-first, voice-native, autonomous assistant for developer workflows 
   - baseline golden-task eval harness.
   - removal of known platform lifecycle risks.
 
-### Phase 1 - Developer Jarvis Alpha
+### Phase 1 - Developer Jarvis Alpha (completed)
 - Goal: high-value daily workflows for developers on local runtime.
 - Outcomes:
   - voice push-to-talk + visual execution HUD.
   - terminal/filesystem/browser/IDE action layer v1.
   - reliable async mission mode with replay and diagnostics.
 
-### Phase 2 - Autonomous Operator Beta
+### Phase 2 - Autonomous Operator Beta (completed)
 - Goal: move from assistant to proactive operator with Tier-1 engineering guarantees.
 - Outcomes:
   - modular cognitive kernel and backend-swappable cognition adapters.
@@ -45,12 +45,20 @@ Build a local-first, voice-native, autonomous assistant for developer workflows 
   - richer OS integrations (calendar/mail/notifications/window-control).
   - L2-L3 autonomy with user-facing trust controls.
 
-### Phase 3 - Jarvis 1.0 OSS
+### Phase 3 - Jarvis 1.0 OSS (completed)
 - Goal: open, extensible, local cognitive platform.
 - Outcomes:
   - skills/agents ecosystem and plugin compatibility contracts.
   - L4 bounded autonomous missions.
   - public benchmark + eval dashboards.
+
+### Phase 4 - Jarvis Personal Operator (current)
+- Goal: deliver an everyday local "Jarvis on PC" experience with safe autonomy and desktop action depth.
+- Outcomes:
+  - unified multimodal user flow: intent -> plan -> execute -> explain -> iterate.
+  - Linux-first desktop integrations with policy-gated capabilities and rollback hints.
+  - bounded multi-agent supervision with mission checkpoints and resume.
+  - release/nightly end-to-end journey KPIs and hardened distribution/update path.
 
 ### Parallel Track - Post-LLM Cognitive R&D
 - Goal: keep backend swappable for next-gen local cognition.
