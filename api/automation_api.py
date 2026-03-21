@@ -5,8 +5,12 @@ from typing import Any
 from fastapi import APIRouter, Path, Query, Request
 from pydantic import BaseModel, Field
 
-from automation.mission_planner import apply_mission_template, build_mission_plan, list_mission_templates
-from automation.mission_policy import list_mission_policy_profiles
+from runtime.automation_missions import (
+    apply_mission_template,
+    build_mission_plan,
+    list_mission_policy_profiles,
+    list_mission_templates,
+)
 from runtime.auth import assert_owner, auth_context_from_request, resolve_user_id
 from runtime.errors import AmaryllisError, NotFoundError, ProviderError, ValidationError
 
