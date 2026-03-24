@@ -59,6 +59,11 @@ Build a local-first, voice-native, autonomous assistant for developer workflows 
   - Linux-first desktop integrations with policy-gated capabilities and rollback hints.
   - bounded multi-agent supervision with mission checkpoints and resume.
   - release/nightly end-to-end journey KPIs and hardened distribution/update path.
+  - backend-portable generation-loop contract (CPU/GPU/NPU parity + deterministic fallback semantics).
+  - long-context reliability envelope (KV telemetry, cache policies, and quality-preserving memory pressure behavior).
+  - offline trust stack: provenance-first answers, RAG threat-model coverage, and injection-resistant tool execution.
+  - secure model supply-chain and quantization passport (artifact signatures, hashes, reproducible quant recipe metadata).
+  - runtime environment passport and license admission gate for model/adapter/index artifacts.
 
 ### Parallel Track - Post-LLM Cognitive R&D
 - Goal: keep backend swappable for next-gen local cognition.
@@ -67,6 +72,25 @@ Build a local-first, voice-native, autonomous assistant for developer workflows 
   - experiment lane for memory-native and neuro-symbolic variants.
   - measurable improvement gates vs baseline backend.
 
+## Research Delta (March 2026)
+Derived from `deep-research-report-2` and integrated into execution priorities.
+
+Execution-ready breakdown:
+- `/Users/bogdan/Amaryllis/docs/jarvis-phase4-execution-plan.md`
+
+### 6-12 Month Priorities
+- Treat generation-loop portability as a first-class contract, not an implementation detail.
+- Optimize for sustained QoS (`TTFT`, decode stability, thermal/energy behavior), not peak tokens/s.
+- Make RAG and tool execution zero-trust by default (provenance, allow-lists, strict sandbox boundaries).
+- Standardize model artifact trust: signatures, checksums, reproducible quantization metadata.
+- Gate model onboarding by license constraints and reproducibility requirements.
+
+### 12-36 Month Priorities
+- Move from workaround-heavy KV management toward architectures less sensitive to linear KV growth.
+- Develop edge-native multimodal scheduling (stage-aware CPU/GPU/NPU placement) with stable UX under load.
+- Introduce privacy-aware personalization lanes (adapter composition first, DP-aware paths as advanced tier).
+- Evolve benchmark strategy from single-task metrics to end-to-end user-flow resilience and safety under distribution shift.
+
 ## North-Star Metrics
 - Golden task completion rate.
 - Time-to-first-useful-action.
@@ -74,3 +98,7 @@ Build a local-first, voice-native, autonomous assistant for developer workflows 
 - Autonomous mission success rate.
 - Unsafe action rate (must trend to near-zero).
 - Recovery success rate after interruption/failure.
+- Time-to-first-token (`TTFT`) and sustained decode stability under thermal pressure.
+- Provenance coverage rate (answers with verifiable evidence trail).
+- Prompt-injection containment rate for RAG/tool chains.
+- Reproducibility pass rate across hardware/runtime profiles.

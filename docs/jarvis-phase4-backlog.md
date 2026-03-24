@@ -15,6 +15,9 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 - Multi-agent orchestration executes long missions with checkpoints, retries, and bounded budgets.
 - Release and nightly pipelines expose end-to-end product KPIs for user-flow success and recovery quality.
 - Distribution path (installer/update/rollback) is reliable for Linux primary and macOS staging.
+- Generation loop behavior is portable across CPU/GPU/NPU profiles with deterministic fallback semantics.
+- RAG/tooling stack is provenance-first and zero-trust by default (injection containment and sandbox guarantees).
+- Quantized model delivery is reproducible and attestable (quant passport, signatures, and environment passport).
 
 ## Epics and Tasks
 
@@ -50,6 +53,32 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 | P4-D02 | in_progress | Add mission outcome public KPI pack v2 (release + nightly) | expanded KPI report schema | Success/recovery metrics include trendable mission-class breakdowns |
 | P4-D03 | done | Harden packaging/update/rollback path for Linux primary and mac staging | updater/rollback contracts + smoke gates | Operator can safely install/update/rollback without manual recovery steps |
 
+### Epic E - Runtime Portability and QoS Envelope
+
+| ID | Status | Task | Deliverable | Definition of Done |
+|---|---|---|---|---|
+| P4-E01 | todo | Define backend-portable generation-loop contract (`prefill/decode`, cache, fallback semantics) | contract spec + conformance tests | CPU/GPU/NPU backends pass the same functional contract and fallback determinism checks |
+| P4-E02 | todo | Add KV cache observability and pressure-policy framework | KV telemetry schema + policy engine | Runtime emits KV pressure signals and applies policy transitions without silent quality collapse |
+| P4-E03 | todo | Implement QoS governor (`TTFT`, sustained decode, thermal-aware mode switching) | qos governor module + benchmark hooks | User-visible modes maintain target latency/stability envelopes under stress |
+| P4-E04 | todo | Add long-context reliability eval pack | eval dataset + gate job | Release/nightly fail on long-context regressions in relevance and stability |
+
+### Epic F - Trust, Safety, and Supply Chain Hardening
+
+| ID | Status | Task | Deliverable | Definition of Done |
+|---|---|---|---|---|
+| P4-F01 | todo | Make provenance mandatory for RAG-grounded answers | provenance contract + UI/API exposure | Responses using external context include verifiable source trace by default |
+| P4-F02 | todo | Enforce zero-trust tool execution and unsafe-deserialization bans | hardened executor + security policy tests | Tool chain blocks known unsafe deserialization patterns and enforces sandbox permissions |
+| P4-F03 | todo | Build injection-resilience regression suite for RAG and agent flows | attack scenarios + CI gate | Release/nightly publish containment score and block severe regressions |
+| P4-F04 | todo | Introduce secure model package + quantization passport | signed artifact spec + validator tooling | Model artifacts fail admission without signatures, hashes, and quant recipe metadata |
+
+### Epic G - Reproducibility, Licensing, and Personalization Discipline
+
+| ID | Status | Task | Deliverable | Definition of Done |
+|---|---|---|---|---|
+| P4-G01 | todo | Add runtime environment passport generation (hardware, drivers, runtime, quant recipe) | env passport artifact + collector | Every benchmark and release bundle contains environment passport metadata |
+| P4-G02 | todo | Add license admission policy for models/adapters/index packs | license policy engine + report | Artifact onboarding is blocked on incompatible licensing constraints |
+| P4-G03 | todo | Add adapter-based personalization lane with rollback and signature checks | personalization workflow + adapter registry | Personalization uses reversible adapter stacks; base weights remain immutable in default path |
+
 ## Current Sprint (P4-S0)
 
 | ID | Status | Scope |
@@ -65,6 +94,41 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 | P4-D02 | in_progress | mission KPI pack schema v2 (`mission_success_recovery_report_pack_v2` + class breakdown by mission/recovery/quality/user_flow/nightly) |
 | P4-D03 | done | distribution resilience report (`scripts/release/build_distribution_resilience_report.py`) + release-gate blocking artifact wiring (`distribution-resilience-report.json`) |
 
+## Planned Sprint (P4-S1, Research Integration Hardening)
+
+| ID | Status | Scope |
+|---|---|---|
+| P4-E01 | todo | generation-loop portability contract draft + backend conformance matrix |
+| P4-E02 | todo | KV telemetry schema + initial pressure-policy transitions |
+| P4-E03 | todo | QoS governor baseline with `balanced` and `power-save` modes |
+| P4-F01 | todo | provenance contract for RAG responses + API payload wiring |
+| P4-F02 | todo | unsafe-deserialization denylist checks + sandbox policy tests |
+| P4-F04 | todo | signed model artifact and quant-passport validator MVP |
+| P4-G01 | todo | environment passport collector in release/nightly artifacts |
+| P4-G02 | todo | license admission checker for model/adapters onboarding |
+
+## Execution Playbook (Start-Now)
+- Detailed implementation-ready program: `/Users/bogdan/Amaryllis/docs/jarvis-phase4-execution-plan.md`
+- Sprint order: `P4-S1` (contracts/baselines) -> `P4-S2` (enforcement/gates) -> `P4-S3` (hardening/parity) -> `P4-S4` (safe personalization lane)
+
+### Critical Path (Implementation Order)
+1. `P4-E01` generation-loop contract and conformance matrix
+2. `P4-E02` KV telemetry and pressure-policy transitions
+3. `P4-E03` QoS governor mode switching
+4. `P4-E04` long-context reliability gate pack
+5. `P4-F01` provenance-by-default responses
+6. `P4-F02` zero-trust tool execution + unsafe-deserialization bans
+7. `P4-F03` injection-resilience regression suite
+8. `P4-F04` secure model package + quant passport admission
+9. `P4-G01` environment passport in release/nightly artifacts
+10. `P4-G02` license admission policy for onboarding
+11. `P4-G03` adapter-based personalization with rollback/signature checks
+
+### Start Conditions
+- No P0 task may be skipped out of critical-path order unless dependency is explicitly removed in this backlog.
+- New gates enter warning mode first, then become blocking after 3 stable nightlies.
+- Linux primary gates must be green before macOS staging parity sign-off.
+
 ## Next Checkpoint
 - Deliver first executable "Jarvis on PC" flow:
   - unified session states for text/voice/visual interaction,
@@ -73,3 +137,8 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
   - supervisor skeleton for bounded multi-agent decomposition,
   - initial journey benchmark artifact in release/nightly quality pack,
   - Linux distribution resilience gate for install/upgrade/rollback reliability.
+- Start Tier-1 research-integration hardening:
+  - generation-loop portability contract and first backend conformance checks,
+  - KV/QoS observability baseline (`TTFT`, decode stability, cache pressure),
+  - provenance-by-default RAG answers and zero-trust tool chain checks,
+  - signed artifact + quant passport + environment passport baseline in CI.
