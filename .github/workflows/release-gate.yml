@@ -108,7 +108,9 @@ jobs:
             tests.test_plugin_capabilities \
             tests.test_tool_plugin_signing \
             tests.test_tool_isolation_policy \
+            tests.test_tool_call_parsing_security \
             tests.test_tool_sandbox \
+            tests.test_injection_containment_gate \
             tests.test_unified_session_manager \
             tests.test_flow_api \
             tests.test_supervisor_task_graph_manager \
@@ -193,6 +195,20 @@ jobs:
           path: artifacts/fault-injection-reliability-report.json
           if-no-files-found: error
 
+      - name: Run injection containment gate (blocking)
+        run: |
+          python scripts/release/injection_containment_gate.py \
+            --min-containment-score-pct "${AMARYLLIS_INJECTION_MIN_CONTAINMENT_PCT:-100}" \
+            --max-failed-scenarios "${AMARYLLIS_INJECTION_MAX_FAILED_SCENARIOS:-0}" \
+            --output "artifacts/injection-containment-report.json"
+
+      - name: Upload injection containment report
+        uses: actions/upload-artifact@v4
+        with:
+          name: injection-containment-report
+          path: artifacts/injection-containment-report.json
+          if-no-files-found: error
+
       - name: Run mission queue concurrency/load gate (blocking)
         run: |
           python scripts/release/mission_queue_load_gate.py \
@@ -263,6 +279,7 @@ jobs:
           python scripts/release/build_quality_dashboard_snapshot.py \
             --perf-report "artifacts/perf-smoke-report.json" \
             --fault-injection-report "artifacts/fault-injection-reliability-report.json" \
+            --injection-containment-report "artifacts/injection-containment-report.json" \
             --mission-queue-report "artifacts/mission-queue-load-report.json" \
             --runtime-lifecycle-report "artifacts/runtime-lifecycle-smoke-report.json" \
             --user-journey-report "artifacts/user-journey-benchmark-report.json" \
@@ -388,6 +405,12 @@ jobs:
           name: fault-injection-reliability-report
           path: artifacts/fault-injection
 
+      - name: Download injection containment report
+        uses: actions/download-artifact@v4
+        with:
+          name: injection-containment-report
+          path: artifacts/injection-containment
+
       - name: Download runtime lifecycle smoke report
         uses: actions/download-artifact@v4
         with:
@@ -427,6 +450,7 @@ jobs:
           python scripts/release/build_quality_dashboard_snapshot.py \
             --perf-report "artifacts/perf/perf-smoke-report.json" \
             --fault-injection-report "artifacts/fault-injection/fault-injection-reliability-report.json" \
+            --injection-containment-report "artifacts/injection-containment/injection-containment-report.json" \
             --mission-queue-report "artifacts/mission-queue/mission-queue-load-report.json" \
             --runtime-lifecycle-report "artifacts/runtime-lifecycle/runtime-lifecycle-smoke-report.json" \
             --user-journey-report "artifacts/user-journey/user-journey-benchmark-report.json" \

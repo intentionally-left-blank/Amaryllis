@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any
 
 from tools.plugin_capabilities import (
@@ -10,6 +11,31 @@ from tools.plugin_capabilities import (
     supported_plugin_capabilities,
 )
 from tools.tool_registry import ToolDefinition
+
+_MAX_DESERIALIZATION_SCAN_VALUES = 200
+_MAX_DESERIALIZATION_SCAN_TEXT_CHARS = 4000
+_UNSAFE_DESERIALIZATION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("pickle_load", re.compile(r"\bpickle\s*\.\s*loads?\s*\(", flags=re.IGNORECASE)),
+    ("cpickle_load", re.compile(r"\bcpickle\s*\.\s*loads?\s*\(", flags=re.IGNORECASE)),
+    ("dill_load", re.compile(r"\bdill\s*\.\s*loads?\s*\(", flags=re.IGNORECASE)),
+    ("marshal_load", re.compile(r"\bmarshal\s*\.\s*loads?\s*\(", flags=re.IGNORECASE)),
+    ("yaml_load", re.compile(r"\byaml\s*\.\s*load\s*\(", flags=re.IGNORECASE)),
+    ("yaml_unsafe_load", re.compile(r"\byaml\s*\.\s*unsafe_load\s*\(", flags=re.IGNORECASE)),
+    (
+        "yaml_python_tag",
+        re.compile(
+            r"!!python/(object|object/new|name|module)|tag:yaml\.org,2002:python/(object|object/new|name|module)",
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "numpy_allow_pickle",
+        re.compile(r"\bnumpy\s*\.\s*load\s*\([^)]*allow_pickle\s*=\s*true", flags=re.IGNORECASE | re.DOTALL),
+    ),
+    ("torch_load", re.compile(r"\btorch\s*\.\s*load\s*\(", flags=re.IGNORECASE)),
+    ("joblib_load", re.compile(r"\bjoblib\s*\.\s*load\s*\(", flags=re.IGNORECASE)),
+    ("jsonpickle_decode", re.compile(r"\bjsonpickle\s*\.\s*decode\s*\(", flags=re.IGNORECASE)),
+)
 
 
 @dataclass(frozen=True)
@@ -105,6 +131,17 @@ class ToolIsolationPolicy:
             )
 
         tool_name = str(tool.name).strip().lower()
+        unsafe_deserialization_match = self._unsafe_deserialization_match(arguments)
+        if unsafe_deserialization_match is not None:
+            return ToolDecision(
+                allow=False,
+                requires_approval=False,
+                reason=(
+                    f"Unsafe deserialization pattern '{unsafe_deserialization_match}' "
+                    f"is blocked by isolation policy."
+                ),
+            )
+
         if tool_name == "python_exec":
             code = str(arguments.get("code", ""))
             if len(code) > self.python_exec_max_code_chars:
@@ -251,4 +288,30 @@ class ToolIsolationPolicy:
                 "blocked": sorted(self.blocked_plugin_capabilities),
                 "policy": plugin_capability_policy_snapshot(),
             },
+            "unsafe_deserialization_denylist": [item[0] for item in _UNSAFE_DESERIALIZATION_PATTERNS],
         }
+
+    def _unsafe_deserialization_match(self, arguments: dict[str, Any]) -> str | None:
+        for value in self._iter_candidate_string_values(arguments):
+            for pattern_id, pattern in _UNSAFE_DESERIALIZATION_PATTERNS:
+                if pattern.search(value):
+                    return pattern_id
+        return None
+
+    @staticmethod
+    def _iter_candidate_string_values(payload: Any) -> list[str]:
+        queue: list[Any] = [payload]
+        values: list[str] = []
+        while queue and len(values) < _MAX_DESERIALIZATION_SCAN_VALUES:
+            current = queue.pop(0)
+            if isinstance(current, str):
+                normalized = current.strip()
+                if normalized:
+                    values.append(normalized[:_MAX_DESERIALIZATION_SCAN_TEXT_CHARS])
+                continue
+            if isinstance(current, dict):
+                queue.extend(current.values())
+                continue
+            if isinstance(current, (list, tuple, set)):
+                queue.extend(list(current))
+        return values

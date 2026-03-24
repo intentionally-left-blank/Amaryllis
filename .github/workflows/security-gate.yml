@@ -60,8 +60,11 @@ jobs:
             tests.test_security_manager \
             tests.test_security_http_authz \
             tests.test_tool_enforcement_modes \
+            tests.test_tool_call_parsing_security \
+            tests.test_tool_isolation_policy \
             tests.test_tool_plugin_signing \
             tests.test_tool_permission_manager \
+            tests.test_injection_containment_gate \
             -v
 
       - name: Run security policy check

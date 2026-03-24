@@ -67,8 +67,8 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
 | P4-F01 | in_progress | Make provenance mandatory for RAG-grounded answers | provenance contract + UI/API exposure | Responses using external context include verifiable source trace by default |
-| P4-F02 | todo | Enforce zero-trust tool execution and unsafe-deserialization bans | hardened executor + security policy tests | Tool chain blocks known unsafe deserialization patterns and enforces sandbox permissions |
-| P4-F03 | todo | Build injection-resilience regression suite for RAG and agent flows | attack scenarios + CI gate | Release/nightly publish containment score and block severe regressions |
+| P4-F02 | in_progress | Enforce zero-trust tool execution and unsafe-deserialization bans | hardened executor + security policy tests | Tool chain blocks known unsafe deserialization patterns and enforces sandbox permissions |
+| P4-F03 | in_progress | Build injection-resilience regression suite for RAG and agent flows | attack scenarios + CI gate | Release/nightly publish containment score and block severe regressions |
 | P4-F04 | todo | Introduce secure model package + quantization passport | signed artifact spec + validator tooling | Model artifacts fail admission without signatures, hashes, and quant recipe metadata |
 
 ### Epic G - Reproducibility, Licensing, and Personalization Discipline
@@ -102,7 +102,8 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 | P4-E02 | in_progress | KV telemetry schema + initial pressure-policy transitions |
 | P4-E03 | todo | QoS governor baseline with `balanced` and `power-save` modes |
 | P4-F01 | in_progress | provenance contract for RAG responses + API payload wiring |
-| P4-F02 | todo | unsafe-deserialization denylist checks + sandbox policy tests |
+| P4-F02 | in_progress | unsafe-deserialization denylist checks + sandbox policy tests |
+| P4-F03 | in_progress | injection-containment regression gate + release/nightly artifact wiring |
 | P4-F04 | todo | signed model artifact and quant-passport validator MVP |
 | P4-G01 | todo | environment passport collector in release/nightly artifacts |
 | P4-G02 | todo | license admission checker for model/adapters onboarding |

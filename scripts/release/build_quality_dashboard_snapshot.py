@@ -13,8 +13,8 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Build consolidated release quality dashboard snapshot from gate reports "
-            "(perf/fault/mission-queue/runtime-lifecycle/user-journey with optional distribution resilience "
-            "and macOS desktop parity staging)."
+            "(perf/fault/injection-containment/mission-queue/runtime-lifecycle/user-journey "
+            "with optional distribution resilience and macOS desktop parity staging)."
         )
     )
     parser.add_argument(
@@ -26,6 +26,11 @@ def _parse_args() -> argparse.Namespace:
         "--fault-injection-report",
         default="artifacts/fault-injection-reliability-report.json",
         help="Path to fault-injection reliability report JSON.",
+    )
+    parser.add_argument(
+        "--injection-containment-report",
+        default="",
+        help="Optional path to injection containment gate report JSON.",
     )
     parser.add_argument(
         "--mission-queue-report",
@@ -201,6 +206,12 @@ def _build_snapshot(
     macos_parity_summary = (
         macos_parity.get("summary")
         if isinstance(macos_parity, dict) and isinstance(macos_parity.get("summary"), dict)
+        else {}
+    )
+    injection = reports.get("injection_containment")
+    injection_summary = (
+        injection.get("summary")
+        if isinstance(injection, dict) and isinstance(injection.get("summary"), dict)
         else {}
     )
 
@@ -422,6 +433,29 @@ def _build_snapshot(
                 ),
             ]
         )
+    if injection_summary:
+        signals.extend(
+            [
+                _metric_signal(
+                    metric_id="injection_containment.containment_score_pct",
+                    source="injection_containment",
+                    category="security",
+                    value=_safe_float(injection_summary.get("containment_score_pct")),
+                    threshold=_safe_float(injection_summary.get("min_containment_score_pct"), default=100.0),
+                    comparator="gte",
+                    unit="pct",
+                ),
+                _metric_signal(
+                    metric_id="injection_containment.failed_scenarios",
+                    source="injection_containment",
+                    category="security",
+                    value=_safe_float(injection_summary.get("failed_scenarios")),
+                    threshold=_safe_float(injection_summary.get("max_failed_scenarios"), default=0.0),
+                    comparator="lte",
+                    unit="count",
+                ),
+            ]
+        )
 
     total = len(signals)
     passed = sum(1 for item in signals if bool(item.get("passed")))
@@ -541,6 +575,8 @@ def main() -> int:
     distribution_path = _resolve_path(project_root, distribution_raw) if distribution_raw else None
     macos_parity_raw = str(args.macos_desktop_parity_report or "").strip()
     macos_parity_path = _resolve_path(project_root, macos_parity_raw) if macos_parity_raw else None
+    injection_raw = str(args.injection_containment_report or "").strip()
+    injection_path = _resolve_path(project_root, injection_raw) if injection_raw else None
 
     reports: dict[str, dict[str, Any]] = {}
     for key, path in report_paths.items():
@@ -573,6 +609,18 @@ def main() -> int:
         except Exception as exc:
             print(
                 f"[quality-dashboard] invalid report for macos_desktop_parity: {macos_parity_path} error={exc}",
+                file=sys.stderr,
+            )
+            return 2
+    if injection_path is not None:
+        if not injection_path.exists():
+            print(f"[quality-dashboard] missing report for injection_containment: {injection_path}", file=sys.stderr)
+            return 2
+        try:
+            reports["injection_containment"] = _load_json_object(injection_path)
+        except Exception as exc:
+            print(
+                f"[quality-dashboard] invalid report for injection_containment: {injection_path} error={exc}",
                 file=sys.stderr,
             )
             return 2

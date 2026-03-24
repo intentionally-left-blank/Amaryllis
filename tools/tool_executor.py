@@ -12,7 +12,7 @@ from tools.sandbox_runner import ToolSandboxRunner
 from tools.tool_budget import ToolBudgetExceededError, ToolBudgetGuard
 from tools.tool_registry import ToolRegistry
 
-TOOL_CALL_PATTERN = re.compile(r"<tool_call>(.*?)</tool_call>", flags=re.DOTALL)
+TOOL_CALL_PATTERN = re.compile(r"\s*<tool_call>\s*(\{.*\})\s*</tool_call>\s*", flags=re.DOTALL)
 
 
 class ToolExecutionError(Exception):
@@ -325,7 +325,7 @@ class ToolExecutor:
 
     @staticmethod
     def parse_tool_call(text: str) -> dict[str, Any] | None:
-        match = TOOL_CALL_PATTERN.search(text)
+        match = TOOL_CALL_PATTERN.fullmatch(str(text or ""))
         if not match:
             return None
 

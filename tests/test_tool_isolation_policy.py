@@ -86,6 +86,41 @@ class ToolIsolationPolicyTests(unittest.TestCase):
         self.assertTrue(decision.allow)
         self.assertTrue(decision.requires_approval)
 
+    def test_python_exec_blocks_unsafe_deserialization_snippet(self) -> None:
+        registry = ToolRegistry()
+        registry.load_builtin_tools()
+        policy = ToolIsolationPolicy(profile="balanced")
+        executor = ToolExecutor(registry=registry, policy=policy, approval_enforcement_mode="strict")
+
+        with self.assertRaises(ToolExecutionError) as ctx:
+            executor.execute(
+                "python_exec",
+                {
+                    "code": "import pickle\npayload = b'\\x80\\x04.'\npickle.loads(payload)\nprint('x')",
+                    "timeout": 2,
+                },
+            )
+
+        self.assertIn("unsafe deserialization", str(ctx.exception).lower())
+
+    def test_filesystem_write_with_safe_yaml_content_is_not_blocked_by_denylist(self) -> None:
+        registry = ToolRegistry()
+        registry.load_builtin_tools()
+        tool = registry.get("filesystem")
+        assert tool is not None
+
+        policy = ToolIsolationPolicy(profile="balanced")
+        decision = policy.evaluate(
+            tool=tool,
+            arguments={
+                "action": "write",
+                "path": "safe.yaml",
+                "content": "config:\n  loader: yaml.safe_load\n",
+            },
+        )
+        self.assertTrue(decision.allow)
+        self.assertTrue(decision.requires_approval)
+
 
 if __name__ == "__main__":
     unittest.main()

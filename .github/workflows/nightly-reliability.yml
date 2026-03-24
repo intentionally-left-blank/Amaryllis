@@ -82,6 +82,13 @@ jobs:
             --output "artifacts/nightly-user-journey-benchmark-report.json" \
             --strict
 
+      - name: Run nightly injection containment gate (blocking)
+        run: |
+          python scripts/release/injection_containment_gate.py \
+            --min-containment-score-pct "${AMARYLLIS_NIGHTLY_INJECTION_MIN_CONTAINMENT_PCT:-100}" \
+            --max-failed-scenarios "${AMARYLLIS_NIGHTLY_INJECTION_MAX_FAILED_SCENARIOS:-0}" \
+            --output "artifacts/nightly-injection-containment-report.json"
+
       - name: Run macOS desktop parity smoke (staging, non-blocking)
         continue-on-error: true
         run: |
@@ -140,6 +147,14 @@ jobs:
         with:
           name: nightly-user-journey-benchmark-report
           path: artifacts/nightly-user-journey-benchmark-report.json
+          if-no-files-found: error
+
+      - name: Upload nightly injection containment report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-injection-containment-report
+          path: artifacts/nightly-injection-containment-report.json
           if-no-files-found: error
 
       - name: Upload nightly macOS desktop parity smoke report

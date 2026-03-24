@@ -20,6 +20,14 @@
       "value": 100.0
     },
     {
+      "metric_id": "injection_containment.containment_score_pct",
+      "value": 100.0
+    },
+    {
+      "metric_id": "injection_containment.failed_scenarios",
+      "value": 0.0
+    },
+    {
       "metric_id": "mission_queue.success_rate_pct",
       "value": 99.0
     },
