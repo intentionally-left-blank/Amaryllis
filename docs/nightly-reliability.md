@@ -50,6 +50,16 @@ python3 scripts/release/user_journey_benchmark.py \
   --strict
 ```
 
+Nightly adoption KPI schema companion gate:
+
+```bash
+python3 scripts/release/adoption_kpi_schema_gate.py \
+  --user-journey-report artifacts/nightly-user-journey-benchmark-report.json \
+  --api-quickstart-report artifacts/nightly-api-quickstart-compat-report.json \
+  --distribution-channel-manifest-report artifacts/nightly-distribution-channel-manifest-report.json \
+  --output artifacts/nightly-adoption-kpi-schema-gate-report.json
+```
+
 ## Report
 
 Default output path:
@@ -74,6 +84,12 @@ Nightly user journey benchmark artifact:
 
 ```text
 artifacts/nightly-user-journey-benchmark-report.json
+```
+
+Nightly adoption KPI schema gate artifact:
+
+```text
+artifacts/nightly-adoption-kpi-schema-gate-report.json
 ```
 
 Mission success/recovery report pack artifact:

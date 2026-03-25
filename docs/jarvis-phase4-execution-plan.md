@@ -171,6 +171,7 @@ Adoption lane slices (next 10 working days after PR-1..PR-8):
 | runtime lifecycle smoke | `scripts/release/runtime_lifecycle_smoke_gate.py` | blocking |
 | Linux parity smoke | `scripts/release/linux_parity_smoke.py` | blocking |
 | macOS desktop parity smoke | `scripts/release/macos_desktop_parity_smoke.py` | staging-blocking |
+| adoption KPI schema gate | `scripts/release/adoption_kpi_schema_gate.py` | blocking |
 
 Additional Phase 4 gates to add in this plan:
 - generation-loop conformance gate
@@ -183,7 +184,6 @@ Additional Phase 4 gates to add in this plan:
 - offline transparency/network intent gate
 - distribution channel manifest readiness gate
 - API quickstart compatibility gate
-- adoption KPI schema gate
 
 ## Ownership Boundaries
 

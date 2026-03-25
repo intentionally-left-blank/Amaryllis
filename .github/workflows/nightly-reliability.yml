@@ -162,6 +162,14 @@ jobs:
           python scripts/release/api_quickstart_compatibility_gate.py \
             --output "artifacts/nightly-api-quickstart-compat-report.json"
 
+      - name: Run nightly adoption KPI schema gate (blocking)
+        run: |
+          python scripts/release/adoption_kpi_schema_gate.py \
+            --user-journey-report "artifacts/nightly-user-journey-benchmark-report.json" \
+            --api-quickstart-report "artifacts/nightly-api-quickstart-compat-report.json" \
+            --distribution-channel-manifest-report "artifacts/nightly-distribution-channel-manifest-report.json" \
+            --output "artifacts/nightly-adoption-kpi-schema-gate-report.json"
+
       - name: Run macOS desktop parity smoke (staging, non-blocking)
         continue-on-error: true
         run: |
@@ -292,6 +300,14 @@ jobs:
         with:
           name: nightly-api-quickstart-compat-report
           path: artifacts/nightly-api-quickstart-compat-report.json
+          if-no-files-found: error
+
+      - name: Upload nightly adoption KPI schema gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-adoption-kpi-schema-gate-report
+          path: artifacts/nightly-adoption-kpi-schema-gate-report.json
           if-no-files-found: error
 
       - name: Upload nightly macOS desktop parity smoke report

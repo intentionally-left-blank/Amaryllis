@@ -23,10 +23,11 @@ Mandatory gates before publish:
 17. Distribution resilience report gate (aggregated parity + installer/rollback + runtime lifecycle blocking checks)
 18. Distribution channel manifest readiness gate (WinGet/Homebrew/Flathub templates + placeholders)
 19. API quickstart compatibility gate (OpenAI-compatible developer onboarding contract)
-20. Release quality dashboard snapshot gate (final post-Linux benchmark/reliability artifact + trend deltas)
-21. Mission success/recovery report pack export (public KPI artifact)
-22. Disaster recovery gate (backup + verify + restore drill)
-23. Compliance operations gate (access review + incidents + evidence export)
+20. Adoption KPI schema gate (install/activation/retention/feature-adoption contract assertions)
+21. Release quality dashboard snapshot gate (final post-Linux benchmark/reliability artifact + trend deltas)
+22. Mission success/recovery report pack export (public KPI artifact)
+23. Disaster recovery gate (backup + verify + restore drill)
+24. Compliance operations gate (access review + incidents + evidence export)
 
 Staging companion (non-blocking):
 - macOS desktop action parity smoke (`scripts/release/macos_desktop_parity_smoke.py`)
@@ -36,6 +37,9 @@ Channel template reference:
 
 Developer quickstart reference:
 - `docs/developer-quickstart.md`
+
+Adoption KPI schema gate reference:
+- `docs/adoption-kpi-schema-gate.md`
 
 Commands:
 
@@ -65,6 +69,7 @@ python scripts/release/distribution_channel_manifest_gate.py --output artifacts/
 python scripts/release/api_quickstart_compatibility_gate.py --output artifacts/api-quickstart-compat-report.json
 python scripts/release/render_distribution_channel_manifests.py --version "<version>" --windows-x64-url "<url>" --windows-x64-sha256 "<sha256>" --macos-arm64-url "<url>" --macos-arm64-sha256 "<sha256>" --macos-x64-url "<url>" --macos-x64-sha256 "<sha256>" --flathub-archive-url "<url>" --flathub-archive-sha256 "<sha256>" --output-dir artifacts/distribution-channels-rendered --report artifacts/distribution-channels-rendered-report.json
 python scripts/release/build_quality_dashboard_snapshot.py --perf-report artifacts/perf-smoke-report.json --fault-injection-report artifacts/fault-injection-reliability-report.json --injection-containment-report artifacts/injection-containment-report.json --model-artifact-admission-report artifacts/model-artifact-admission-report.json --license-admission-report artifacts/license-admission-report.json --environment-passport-report artifacts/environment-passport-report.json --mission-queue-report artifacts/mission-queue-load-report.json --runtime-lifecycle-report artifacts/runtime-lifecycle-smoke-report.json --user-journey-report artifacts/user-journey-benchmark-report.json --qos-governor-report artifacts/qos-governor-gate-report.json --long-context-report artifacts/long-context-reliability-report.json --distribution-resilience-report artifacts/distribution-resilience-report.json --distribution-channel-manifest-report artifacts/distribution-channel-manifest-report.json --api-quickstart-report artifacts/api-quickstart-compat-report.json --macos-desktop-parity-report artifacts/macos-desktop-parity-smoke-report.json --baseline eval/baselines/quality/release_quality_dashboard_baseline.json --output artifacts/release-quality-dashboard-final.json --trend-output artifacts/release-quality-dashboard-trend-final.json
+python scripts/release/adoption_kpi_schema_gate.py --user-journey-report artifacts/user-journey-benchmark-report.json --api-quickstart-report artifacts/api-quickstart-compat-report.json --distribution-channel-manifest-report artifacts/distribution-channel-manifest-report.json --quality-dashboard-report artifacts/release-quality-dashboard-final.json --output artifacts/adoption-kpi-schema-gate-report.json
 python scripts/release/publish_release_quality_snapshot.py --snapshot-report artifacts/release-quality-dashboard-final.json --trend-report artifacts/release-quality-dashboard-trend-final.json --install-root ~/.local/share/amaryllis
 python scripts/release/build_mission_success_recovery_report.py --mission-queue-report artifacts/mission-queue-load-report.json --fault-injection-report artifacts/fault-injection-reliability-report.json --quality-dashboard-report artifacts/release-quality-dashboard-final.json --distribution-resilience-report artifacts/distribution-resilience-report.json --macos-desktop-parity-report artifacts/macos-desktop-parity-smoke-report.json --user-journey-report artifacts/user-journey-benchmark-report.json --scope release --output artifacts/mission-success-recovery-report.json
 python scripts/release/disaster_recovery_gate.py
