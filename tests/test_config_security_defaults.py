@@ -40,6 +40,7 @@ class ConfigSecurityDefaultsTests(unittest.TestCase):
         self.assertEqual(config.slo_profile, "dev")
         self.assertEqual(config.qos_mode, "balanced")
         self.assertTrue(config.qos_auto_enabled)
+        self.assertEqual(config.qos_thermal_state, "unknown")
 
     def test_invalid_modes_fallback_to_strict(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-config-tests-") as tmp:

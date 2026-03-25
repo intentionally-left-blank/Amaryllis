@@ -15,15 +15,16 @@ Mandatory gates before publish:
 9. Environment passport gate (runtime/toolchain/hardware/quant metadata completeness assertions)
 10. Mission queue concurrency/load gate (queue-drain, p95 latency and success-rate SLO assertions)
 11. User journey benchmark gate (intent -> planning -> execute -> review KPI assertions)
-12. Linux parity gate (runtime/voice/tools/observability API parity on Linux target)
-13. Linux installer smoke gate (install/upgrade/channel rollback path on Linux target)
-14. Distribution resilience report gate (aggregated parity + installer/rollback + runtime lifecycle blocking checks)
-15. Distribution channel manifest readiness gate (WinGet/Homebrew/Flathub templates + placeholders)
-16. API quickstart compatibility gate (OpenAI-compatible developer onboarding contract)
-17. Release quality dashboard snapshot gate (final post-Linux benchmark/reliability artifact + trend deltas)
-18. Mission success/recovery report pack export (public KPI artifact)
-19. Disaster recovery gate (backup + verify + restore drill)
-20. Compliance operations gate (access review + incidents + evidence export)
+12. QoS governor gate (thermal-aware deterministic mode-switch contract assertions)
+13. Linux parity gate (runtime/voice/tools/observability API parity on Linux target)
+14. Linux installer smoke gate (install/upgrade/channel rollback path on Linux target)
+15. Distribution resilience report gate (aggregated parity + installer/rollback + runtime lifecycle blocking checks)
+16. Distribution channel manifest readiness gate (WinGet/Homebrew/Flathub templates + placeholders)
+17. API quickstart compatibility gate (OpenAI-compatible developer onboarding contract)
+18. Release quality dashboard snapshot gate (final post-Linux benchmark/reliability artifact + trend deltas)
+19. Mission success/recovery report pack export (public KPI artifact)
+20. Disaster recovery gate (backup + verify + restore drill)
+21. Compliance operations gate (access review + incidents + evidence export)
 
 Staging companion (non-blocking):
 - macOS desktop action parity smoke (`scripts/release/macos_desktop_parity_smoke.py`)
@@ -51,6 +52,7 @@ python scripts/release/model_artifact_admission_gate.py --min-admission-score-pc
 python scripts/release/environment_passport_gate.py --model-artifact-admission-report artifacts/model-artifact-admission-report.json --min-completeness-score-pct 100 --max-missing-required 0 --output artifacts/environment-passport-report.json
 python scripts/release/mission_queue_load_gate.py --runs-total 40 --submit-concurrency 8 --worker-count 4 --task-latency-ms 35 --scenario-timeout-sec 30 --min-success-rate-pct 99 --max-failed-runs 0 --max-p95-queue-wait-ms 1500 --max-p95-end-to-end-ms 5000
 python scripts/release/user_journey_benchmark.py --iterations 5 --min-success-rate-pct 100 --max-p95-journey-latency-ms 3000 --max-p95-plan-dispatch-latency-ms 1200 --max-p95-execute-dispatch-latency-ms 1200 --min-plan-to-execute-conversion-rate-pct 100 --baseline eval/baselines/quality/user_journey_benchmark_baseline.json --output artifacts/user-journey-benchmark-report.json --strict
+python scripts/release/qos_governor_gate.py --initial-mode balanced --expect-critical-mode power_save --expect-final-mode quality --output artifacts/qos-governor-gate-report.json
 python scripts/release/macos_desktop_parity_smoke.py --iterations 2 --output artifacts/macos-desktop-parity-smoke-report.json
 python scripts/release/linux_parity_smoke.py --iterations 1 --require-linux --output artifacts/linux-parity-smoke-report.json
 python scripts/release/linux_installer_smoke.py --require-linux --output artifacts/linux-installer-smoke-report.json

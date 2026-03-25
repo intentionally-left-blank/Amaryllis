@@ -105,21 +105,24 @@ class APILifecycleTests(unittest.TestCase):
         qos = payload.get("qos", {})
         self.assertIn(str(qos.get("active_mode")), {"quality", "balanced", "power_save"})
         self.assertIn(str(qos.get("route_mode")), {"quality_first", "balanced", "local_first"})
+        self.assertIn(str(qos.get("thermal_state")), {"unknown", "cool", "warm", "hot", "critical"})
 
         qos_get = self.client.get("/service/qos", headers=self._auth("service-token"))
         self.assertEqual(qos_get.status_code, 200)
         qos_payload = qos_get.json().get("qos", {})
         self.assertIn(str(qos_payload.get("active_mode")), {"quality", "balanced", "power_save"})
+        self.assertIn(str(qos_payload.get("thermal_state")), {"unknown", "cool", "warm", "hot", "critical"})
 
         qos_set = self.client.post(
             "/service/qos/mode",
             headers=self._auth("service-token"),
-            json={"mode": "power_save", "auto_enabled": False},
+            json={"mode": "power_save", "auto_enabled": False, "thermal_state": "hot"},
         )
         self.assertEqual(qos_set.status_code, 200)
         qos_set_payload = qos_set.json().get("qos", {})
         self.assertEqual(str(qos_set_payload.get("active_mode")), "power_save")
         self.assertFalse(bool(qos_set_payload.get("auto_enabled", True)))
+        self.assertEqual(str(qos_set_payload.get("thermal_state")), "hot")
 
         qos_set_invalid = self.client.post(
             "/service/qos/mode",
@@ -127,6 +130,22 @@ class APILifecycleTests(unittest.TestCase):
             json={"mode": "ultra"},
         )
         self.assertEqual(qos_set_invalid.status_code, 400)
+
+        qos_thermal_set = self.client.post(
+            "/service/qos/thermal",
+            headers=self._auth("service-token"),
+            json={"thermal_state": "cool"},
+        )
+        self.assertEqual(qos_thermal_set.status_code, 200)
+        qos_thermal_payload = qos_thermal_set.json().get("qos", {})
+        self.assertEqual(str(qos_thermal_payload.get("thermal_state")), "cool")
+
+        qos_thermal_invalid = self.client.post(
+            "/service/qos/thermal",
+            headers=self._auth("service-token"),
+            json={"thermal_state": "lava"},
+        )
+        self.assertEqual(qos_thermal_invalid.status_code, 400)
 
         metrics = self.client.get("/service/observability/metrics", headers=self._auth("service-token"))
         self.assertEqual(metrics.status_code, 200)

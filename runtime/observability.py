@@ -149,6 +149,7 @@ class SREMonitor:
         ttft_ms: float | None = None,
         total_latency_ms: float | None = None,
         kv_pressure_state: str | None = None,
+        thermal_state: str | None = None,
     ) -> None:
         row = {
             "ts": self._now_epoch(),
@@ -160,6 +161,7 @@ class SREMonitor:
             "ttft_ms": float(max(0.0, ttft_ms or 0.0)),
             "total_latency_ms": float(max(0.0, total_latency_ms or 0.0)),
             "kv_pressure_state": str(kv_pressure_state or "unknown").strip().lower() or "unknown",
+            "thermal_state": str(thermal_state or "unknown").strip().lower() or "unknown",
         }
         with self._lock:
             self._generation_events.append(row)
@@ -209,6 +211,7 @@ class SREMonitor:
                 ttft_ms=float(data.get("ttft_ms") or 0.0),
                 total_latency_ms=float(data.get("total_latency_ms") or 0.0),
                 kv_pressure_state=str(kv_cache.get("pressure_state") or "unknown"),
+                thermal_state=str(data.get("thermal_state") or "unknown"),
             )
 
     def snapshot(self) -> dict[str, Any]:
@@ -262,6 +265,9 @@ class SREMonitor:
             "# HELP amaryllis_generation_kv_pressure_events_total Generation events with high/critical KV pressure.",
             "# TYPE amaryllis_generation_kv_pressure_events_total gauge",
             f"amaryllis_generation_kv_pressure_events_total {float(generation_sli['kv_pressure_events']):.0f}",
+            "# HELP amaryllis_generation_thermal_hot_events_total Generation events observed in hot/critical thermal states.",
+            "# TYPE amaryllis_generation_thermal_hot_events_total gauge",
+            f"amaryllis_generation_thermal_hot_events_total {float(generation_sli['thermal_hot_events']):.0f}",
             "# HELP amaryllis_error_budget_remaining_ratio Remaining request error budget ratio.",
             "# TYPE amaryllis_error_budget_remaining_ratio gauge",
             f"amaryllis_error_budget_remaining_ratio{{scope=\"requests\"}} "
@@ -468,6 +474,11 @@ class SREMonitor:
             for item in generation_events
             if str(item.get("kv_pressure_state") or "").strip().lower() in {"high", "critical"}
         )
+        generation_thermal_hot_events = sum(
+            1
+            for item in generation_events
+            if str(item.get("thermal_state") or "").strip().lower() in {"hot", "critical"}
+        )
         generation_fallback_rate = (
             float(generation_fallback_total) / float(generation_total)
             if generation_total
@@ -507,6 +518,7 @@ class SREMonitor:
                     "ttft_p95_ms": round(self._quantile(generation_ttft_values, 0.95), 3),
                     "total_latency_p95_ms": round(self._quantile(generation_total_latency_values, 0.95), 3),
                     "kv_pressure_events": generation_kv_pressure_events,
+                    "thermal_hot_events": generation_thermal_hot_events,
                 },
             },
             "error_budget": {

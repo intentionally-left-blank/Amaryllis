@@ -196,10 +196,13 @@ def _emit_generation_loop_metrics(
     if not mode:
         mode = str((payload.routing.model_dump(exclude_none=True) if payload.routing else {}).get("mode") or "balanced")
     qos_mode = "balanced"
+    qos_thermal_state = "unknown"
     try:
         qos_mode = str(services.qos_governor.mode or "balanced")
+        qos_thermal_state = str(services.qos_governor.thermal_state or "unknown")
     except Exception:
         qos_mode = "balanced"
+        qos_thermal_state = "unknown"
     event = {
         "request_id": _request_id(request),
         "session_id": payload.session_id,
@@ -208,6 +211,7 @@ def _emit_generation_loop_metrics(
         "model": model,
         "mode": mode,
         "qos_mode": qos_mode,
+        "thermal_state": qos_thermal_state,
         "stream": bool(stream),
         "fallback_used": _routing_fallback_used(routing),
         "ttft_ms": round(float(ttft_ms), 3) if ttft_ms is not None else None,

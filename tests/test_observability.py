@@ -166,6 +166,7 @@ class ObservabilityTests(unittest.TestCase):
                 "fallback_used": True,
                 "ttft_ms": 120.5,
                 "total_latency_ms": 530.0,
+                "thermal_state": "hot",
                 "kv_cache": {"pressure_state": "high"},
             },
         )
@@ -177,10 +178,12 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(int(generation["fallback_total"]), 1)
         self.assertGreater(float(generation["ttft_p95_ms"]), 0.0)
         self.assertEqual(int(generation["kv_pressure_events"]), 1)
+        self.assertEqual(int(generation["thermal_hot_events"]), 1)
 
         metrics = manager.sre.render_prometheus_metrics()
         self.assertIn("amaryllis_generation_events_total 1", metrics)
         self.assertIn("amaryllis_generation_kv_pressure_events_total 1", metrics)
+        self.assertIn("amaryllis_generation_thermal_hot_events_total 1", metrics)
 
 
 if __name__ == "__main__":

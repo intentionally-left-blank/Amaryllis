@@ -74,6 +74,7 @@ QoS governor controls runtime mode switching (`quality` / `balanced` / `power_sa
 
 - `AMARYLLIS_QOS_MODE`
 - `AMARYLLIS_QOS_AUTO_ENABLED`
+- `AMARYLLIS_QOS_THERMAL_STATE`
 - `AMARYLLIS_QOS_TTFT_TARGET_MS`
 - `AMARYLLIS_QOS_TTFT_CRITICAL_MS`
 - `AMARYLLIS_QOS_REQUEST_LATENCY_TARGET_MS`
@@ -83,8 +84,9 @@ QoS governor controls runtime mode switching (`quality` / `balanced` / `power_sa
 
 Runtime service endpoints:
 
-- `GET /service/qos` (current mode, route mode, thresholds, observed metrics)
-- `POST /service/qos/mode` (manual mode/auto toggle update for service scope)
+- `GET /service/qos` (current mode, route mode, thermal state, thresholds, observed metrics)
+- `POST /service/qos/mode` (manual mode/auto toggle/thermal override update for service scope)
+- `POST /service/qos/thermal` (explicit thermal-state update: `unknown/cool/warm/hot/critical`)
 
 ## Drift Check (CI)
 

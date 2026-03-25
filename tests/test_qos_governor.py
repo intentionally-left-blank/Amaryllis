@@ -27,6 +27,7 @@ class QoSGovernorTests(unittest.TestCase):
         request_latency_p95_ms: float,
         kv_pressure_events: int,
         fallback_rate: float = 0.0,
+        thermal_hot_events: int = 0,
     ) -> dict:
         return {
             "sli": {
@@ -35,6 +36,7 @@ class QoSGovernorTests(unittest.TestCase):
                     "ttft_p95_ms": ttft_p95_ms,
                     "kv_pressure_events": kv_pressure_events,
                     "fallback_rate": fallback_rate,
+                    "thermal_hot_events": thermal_hot_events,
                 },
             }
         }
@@ -87,6 +89,38 @@ class QoSGovernorTests(unittest.TestCase):
         governor = self._build_governor()
         with self.assertRaisesRegex(ValueError, "qos mode must be one of"):
             governor.set_mode(mode="ultra")
+
+    def test_manual_thermal_update_rejects_invalid_value(self) -> None:
+        governor = self._build_governor()
+        with self.assertRaisesRegex(ValueError, "thermal_state must be one of"):
+            governor.set_thermal_state(thermal_state="lava")
+
+    def test_thermal_critical_forces_power_save(self) -> None:
+        governor = self._build_governor(mode="quality", auto_enabled=True)
+        status = governor.reconcile(
+            snapshot=self._snapshot(
+                ttft_p95_ms=200.0,
+                request_latency_p95_ms=180.0,
+                kv_pressure_events=0,
+            ),
+            thermal_state="critical",
+        )
+        self.assertEqual(str(status.get("active_mode")), "power_save")
+        self.assertEqual(str(status.get("reason")), "thermal_critical")
+        self.assertEqual(str(status.get("thermal_state")), "critical")
+
+    def test_thermal_warm_demotes_quality(self) -> None:
+        governor = self._build_governor(mode="quality", auto_enabled=True)
+        status = governor.reconcile(
+            snapshot=self._snapshot(
+                ttft_p95_ms=250.0,
+                request_latency_p95_ms=210.0,
+                kv_pressure_events=0,
+            ),
+            thermal_state="warm",
+        )
+        self.assertEqual(str(status.get("active_mode")), "balanced")
+        self.assertEqual(str(status.get("reason")), "thermal_warm_demote_quality")
 
 
 if __name__ == "__main__":

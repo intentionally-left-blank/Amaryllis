@@ -134,6 +134,7 @@ jobs:
             tests.test_runtime_service_lifecycle \
             tests.test_runtime_lifecycle_smoke_gate \
             tests.test_qos_governor \
+            tests.test_qos_governor_gate \
             tests.test_api_quickstart_compatibility_gate \
             tests.test_sdk_openai_compat_client \
             -v
@@ -189,6 +190,21 @@ jobs:
         with:
           name: perf-smoke-report
           path: artifacts/perf-smoke-report.json
+          if-no-files-found: error
+
+      - name: Run QoS governor gate (blocking)
+        run: |
+          python scripts/release/qos_governor_gate.py \
+            --initial-mode "${AMARYLLIS_QOS_MODE:-balanced}" \
+            --expect-critical-mode "${AMARYLLIS_QOS_GATE_EXPECT_CRITICAL_MODE:-power_save}" \
+            --expect-final-mode "${AMARYLLIS_QOS_GATE_EXPECT_FINAL_MODE:-quality}" \
+            --output "artifacts/qos-governor-gate-report.json"
+
+      - name: Upload QoS governor gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: qos-governor-gate-report
+          path: artifacts/qos-governor-gate-report.json
           if-no-files-found: error
 
       - name: Run runtime lifecycle smoke + startup SLO gate (blocking)

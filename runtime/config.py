@@ -56,6 +56,7 @@ class AppConfig:
     perf_budget_max_error_rate_pct: float
     qos_mode: str
     qos_auto_enabled: bool
+    qos_thermal_state: str
     qos_ttft_target_ms: float
     qos_ttft_critical_ms: float
     qos_request_latency_target_ms: float
@@ -324,6 +325,9 @@ class AppConfig:
         if qos_mode not in {"quality", "balanced", "power_save"}:
             qos_mode = "balanced"
         qos_auto_enabled = _parse_bool(env.get("AMARYLLIS_QOS_AUTO_ENABLED", "true"))
+        qos_thermal_state = env.get("AMARYLLIS_QOS_THERMAL_STATE", "unknown").strip().lower()
+        if qos_thermal_state not in {"unknown", "cool", "warm", "hot", "critical"}:
+            qos_thermal_state = "unknown"
         qos_ttft_target_ms = max(
             1.0,
             float(
@@ -455,6 +459,7 @@ class AppConfig:
             ),
             qos_mode=qos_mode,
             qos_auto_enabled=qos_auto_enabled,
+            qos_thermal_state=qos_thermal_state,
             qos_ttft_target_ms=qos_ttft_target_ms,
             qos_ttft_critical_ms=qos_ttft_critical_ms,
             qos_request_latency_target_ms=qos_request_latency_target_ms,

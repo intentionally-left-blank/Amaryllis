@@ -82,6 +82,14 @@ jobs:
             --output "artifacts/nightly-user-journey-benchmark-report.json" \
             --strict
 
+      - name: Run nightly QoS governor gate (blocking)
+        run: |
+          python scripts/release/qos_governor_gate.py \
+            --initial-mode "${AMARYLLIS_NIGHTLY_QOS_MODE:-balanced}" \
+            --expect-critical-mode "${AMARYLLIS_NIGHTLY_QOS_EXPECT_CRITICAL_MODE:-power_save}" \
+            --expect-final-mode "${AMARYLLIS_NIGHTLY_QOS_EXPECT_FINAL_MODE:-quality}" \
+            --output "artifacts/nightly-qos-governor-gate-report.json"
+
       - name: Run nightly injection containment gate (blocking)
         run: |
           python scripts/release/injection_containment_gate.py \
@@ -178,6 +186,14 @@ jobs:
         with:
           name: nightly-user-journey-benchmark-report
           path: artifacts/nightly-user-journey-benchmark-report.json
+          if-no-files-found: error
+
+      - name: Upload nightly QoS governor gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-qos-governor-gate-report
+          path: artifacts/nightly-qos-governor-gate-report.json
           if-no-files-found: error
 
       - name: Upload nightly injection containment report

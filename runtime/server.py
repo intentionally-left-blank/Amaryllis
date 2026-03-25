@@ -53,7 +53,7 @@ from runtime.auth import AuthContext, AuthManager, auth_context_from_request
 from runtime.config import AppConfig
 from runtime.errors import AmaryllisError, InternalError, PermissionDeniedError, ProviderError, ValidationError
 from runtime.observability import ObservabilityManager, ObservabilityTelemetry, SLOTargets
-from runtime.qos_governor import QoSGovernor, QoSThresholds
+from runtime.qos_governor import QoSGovernor, QoSThresholds, SUPPORTED_THERMAL_STATES
 from runtime.security import LocalIdentityManager, SecurityManager
 from runtime.telemetry import LocalTelemetry
 from storage.database import Database
@@ -125,6 +125,18 @@ class RunKillSwitchRequest(BaseModel):
 class QoSModeUpdateRequest(BaseModel):
     mode: str | None = Field(default=None)
     auto_enabled: bool | None = None
+    thermal_state: str | None = Field(default=None)
+
+
+class QoSThermalUpdateRequest(BaseModel):
+    thermal_state: str = Field(default="unknown")
+
+
+def _validate_thermal_state(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized not in SUPPORTED_THERMAL_STATES:
+        raise ValidationError("thermal_state must be one of: " + ", ".join(SUPPORTED_THERMAL_STATES))
+    return normalized
 
 
 logging.basicConfig(
@@ -160,6 +172,7 @@ def create_services() -> ServiceContainer:
     )
     qos_governor = QoSGovernor(
         initial_mode=config.qos_mode,
+        initial_thermal_state=config.qos_thermal_state,
         auto_enabled=config.qos_auto_enabled,
         thresholds=QoSThresholds(
             ttft_target_ms=config.qos_ttft_target_ms,
@@ -822,17 +835,38 @@ def create_app() -> FastAPI:
     def service_qos_set_mode(payload: QoSModeUpdateRequest, request: Request) -> dict[str, Any]:
         auth = auth_context_from_request(request)
         request_id = request_id_from_request(request)
-        if payload.mode is None and payload.auto_enabled is None:
-            raise ValidationError("mode or auto_enabled must be provided")
+        if payload.mode is None and payload.auto_enabled is None and payload.thermal_state is None:
+            raise ValidationError("mode, auto_enabled, or thermal_state must be provided")
+        thermal_state: str | None = None
+        if payload.thermal_state is not None:
+            thermal_state = _validate_thermal_state(payload.thermal_state)
         snapshot = services.observability.sre.snapshot()
         try:
             qos = services.qos_governor.set_mode(
                 mode=payload.mode,
                 auto_enabled=payload.auto_enabled,
+                thermal_state=thermal_state,
                 snapshot=snapshot,
             )
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
+        return {
+            "request_id": request_id,
+            "actor": auth.user_id,
+            "scopes": sorted(auth.scopes),
+            "qos": qos,
+        }
+
+    @app.post("/service/qos/thermal")
+    def service_qos_set_thermal(payload: QoSThermalUpdateRequest, request: Request) -> dict[str, Any]:
+        auth = auth_context_from_request(request)
+        request_id = request_id_from_request(request)
+        thermal_state = _validate_thermal_state(payload.thermal_state)
+        snapshot = services.observability.sre.snapshot()
+        qos = services.qos_governor.set_thermal_state(
+            thermal_state=thermal_state,
+            snapshot=snapshot,
+        )
         return {
             "request_id": request_id,
             "actor": auth.user_id,
