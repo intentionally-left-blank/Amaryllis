@@ -44,6 +44,7 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
         runtime = base / "runtime.json"
         journey = base / "journey.json"
         distribution = base / "distribution.json"
+        distribution_channel_manifest = base / "distribution-channel-manifest.json"
         macos = base / "macos-desktop-parity.json"
         injection = base / "injection-containment.json"
         model_admission = base / "model-artifact-admission.json"
@@ -122,6 +123,12 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
                         "max_p95_plan_dispatch_latency_ms": 1200.0,
                         "max_p95_execute_dispatch_latency_ms": 1200.0,
                         "min_plan_to_execute_conversion_rate_pct": 100.0,
+                        "min_activation_success_rate_pct": 100.0,
+                        "max_blocked_activation_rate_pct": 0.0,
+                        "max_p95_activation_latency_ms": 600000.0,
+                        "min_install_success_rate_pct": 100.0,
+                        "min_retention_proxy_success_rate_pct": 100.0,
+                        "min_feature_adoption_rate_pct": 100.0,
                     }
                 },
                 "summary": {
@@ -130,6 +137,12 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
                     "p95_plan_dispatch_latency_ms": 250.0,
                     "p95_execute_dispatch_latency_ms": 300.0,
                     "plan_to_execute_conversion_rate_pct": 100.0,
+                    "activation_success_rate_pct": 100.0,
+                    "activation_blocked_rate_pct": 0.0,
+                    "p95_activation_latency_ms": 500.0,
+                    "install_success_rate_pct": 100.0,
+                    "retention_proxy_success_rate_pct": 100.0,
+                    "feature_adoption_rate_pct": 100.0,
                 },
             },
         )
@@ -144,6 +157,19 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
                     "checks_failed": 0 if distribution_status == "pass" else 2,
                     "score_pct": 100.0 if distribution_status == "pass" else 85.7143,
                     "status": distribution_status,
+                },
+            },
+        )
+        self._write_json(
+            distribution_channel_manifest,
+            {
+                "suite": "distribution_channel_manifest_gate_v1",
+                "generated_at": "2026-03-21T00:00:00+00:00",
+                "summary": {
+                    "status": "pass",
+                    "checks_total": 4,
+                    "checks_failed": 0,
+                    "root": "/tmp/channels",
                 },
             },
         )
@@ -276,6 +302,7 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
             "runtime": runtime,
             "journey": journey,
             "distribution": distribution,
+            "distribution_channel_manifest": distribution_channel_manifest,
             "macos": macos,
             "injection": injection,
             "model_admission": model_admission,
@@ -306,11 +333,21 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
                 {"metric_id": "user_journey.p95_plan_dispatch_latency_ms", "value": 1200.0},
                 {"metric_id": "user_journey.p95_execute_dispatch_latency_ms", "value": 1200.0},
                 {"metric_id": "user_journey.plan_to_execute_conversion_rate_pct", "value": 100.0},
+                {"metric_id": "user_journey.activation_success_rate_pct", "value": 100.0},
+                {"metric_id": "user_journey.activation_blocked_rate_pct", "value": 0.0},
+                {"metric_id": "user_journey.p95_activation_latency_ms", "value": 600000.0},
+                {"metric_id": "user_journey.install_success_rate_pct", "value": 100.0},
+                {"metric_id": "user_journey.retention_proxy_success_rate_pct", "value": 100.0},
+                {"metric_id": "user_journey.feature_adoption_rate_pct", "value": 100.0},
                 {"metric_id": "distribution_resilience.status", "value": 1.0},
                 {"metric_id": "distribution_resilience.checks_failed", "value": 0.0},
                 {"metric_id": "distribution_resilience.score_pct", "value": 100.0},
+                {"metric_id": "distribution_channel_manifest.status", "value": 1.0},
+                {"metric_id": "distribution_channel_manifest.checks_failed", "value": 0.0},
+                {"metric_id": "distribution_channel_manifest.coverage_pct", "value": 100.0},
                 {"metric_id": "api_quickstart_compat.status", "value": 1.0},
                 {"metric_id": "api_quickstart_compat.checks_failed", "value": 0.0},
+                {"metric_id": "api_quickstart_compat.pass_rate_pct", "value": 100.0},
                 {"metric_id": "qos_governor.status", "value": 1.0},
                 {"metric_id": "qos_governor.checks_failed", "value": 0.0},
                 {"metric_id": "long_context.status", "value": 1.0},
@@ -371,11 +408,19 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
             payload = json.loads(snapshot.read_text(encoding="utf-8"))
             self.assertEqual(payload.get("suite"), "release_quality_dashboard_v1")
             self.assertEqual(payload.get("summary", {}).get("status"), "pass")
-            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 15)
+            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 21)
+            metric_ids = {
+                str(item.get("metric_id"))
+                for item in payload.get("signals", [])
+                if isinstance(item, dict)
+            }
+            self.assertIn("user_journey.install_success_rate_pct", metric_ids)
+            self.assertIn("user_journey.retention_proxy_success_rate_pct", metric_ids)
+            self.assertIn("user_journey.feature_adoption_rate_pct", metric_ids)
 
             trend_payload = json.loads(trend.read_text(encoding="utf-8"))
             self.assertEqual(trend_payload.get("suite"), "release_quality_dashboard_trend_v1")
-            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 15)
+            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 21)
 
     def test_snapshot_and_trend_include_distribution_when_report_provided(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-quality-dashboard-") as tmp:
@@ -409,9 +454,9 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, msg=f"stdout={proc.stdout}\nstderr={proc.stderr}")
             payload = json.loads(snapshot.read_text(encoding="utf-8"))
             self.assertEqual(payload.get("summary", {}).get("status"), "pass")
-            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 18)
+            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 24)
             trend_payload = json.loads(trend.read_text(encoding="utf-8"))
-            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 18)
+            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 24)
 
     def test_snapshot_and_trend_include_api_quickstart_when_report_provided(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-quality-dashboard-") as tmp:
@@ -445,9 +490,9 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, msg=f"stdout={proc.stdout}\nstderr={proc.stderr}")
             payload = json.loads(snapshot.read_text(encoding="utf-8"))
             self.assertEqual(payload.get("summary", {}).get("status"), "pass")
-            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 17)
+            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 24)
             trend_payload = json.loads(trend.read_text(encoding="utf-8"))
-            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 17)
+            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 24)
             metric_ids = {
                 str(item.get("metric_id"))
                 for item in payload.get("signals", [])
@@ -455,6 +500,51 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
             }
             self.assertIn("api_quickstart_compat.status", metric_ids)
             self.assertIn("api_quickstart_compat.checks_failed", metric_ids)
+            self.assertIn("api_quickstart_compat.pass_rate_pct", metric_ids)
+
+    def test_snapshot_and_trend_include_distribution_channel_manifest_when_report_provided(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="amaryllis-quality-dashboard-") as tmp:
+            base = Path(tmp)
+            reports = self._write_reports(base=base)
+            baseline = base / "baseline.json"
+            snapshot = base / "dashboard.json"
+            trend = base / "trend.json"
+            self._write_baseline(baseline)
+
+            proc = self._run(
+                "--perf-report",
+                str(reports["perf"]),
+                "--fault-injection-report",
+                str(reports["fault"]),
+                "--mission-queue-report",
+                str(reports["mission"]),
+                "--runtime-lifecycle-report",
+                str(reports["runtime"]),
+                "--user-journey-report",
+                str(reports["journey"]),
+                "--distribution-channel-manifest-report",
+                str(reports["distribution_channel_manifest"]),
+                "--baseline",
+                str(baseline),
+                "--output",
+                str(snapshot),
+                "--trend-output",
+                str(trend),
+            )
+            self.assertEqual(proc.returncode, 0, msg=f"stdout={proc.stdout}\nstderr={proc.stderr}")
+            payload = json.loads(snapshot.read_text(encoding="utf-8"))
+            self.assertEqual(payload.get("summary", {}).get("status"), "pass")
+            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 24)
+            trend_payload = json.loads(trend.read_text(encoding="utf-8"))
+            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 24)
+            metric_ids = {
+                str(item.get("metric_id"))
+                for item in payload.get("signals", [])
+                if isinstance(item, dict)
+            }
+            self.assertIn("distribution_channel_manifest.status", metric_ids)
+            self.assertIn("distribution_channel_manifest.checks_failed", metric_ids)
+            self.assertIn("distribution_channel_manifest.coverage_pct", metric_ids)
 
     def test_snapshot_and_trend_include_qos_governor_when_report_provided(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-quality-dashboard-") as tmp:
@@ -488,9 +578,9 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, msg=f"stdout={proc.stdout}\nstderr={proc.stderr}")
             payload = json.loads(snapshot.read_text(encoding="utf-8"))
             self.assertEqual(payload.get("summary", {}).get("status"), "pass")
-            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 17)
+            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 23)
             trend_payload = json.loads(trend.read_text(encoding="utf-8"))
-            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 17)
+            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 23)
             metric_ids = {
                 str(item.get("metric_id"))
                 for item in payload.get("signals", [])
@@ -531,9 +621,9 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, msg=f"stdout={proc.stdout}\nstderr={proc.stderr}")
             payload = json.loads(snapshot.read_text(encoding="utf-8"))
             self.assertEqual(payload.get("summary", {}).get("status"), "pass")
-            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 17)
+            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 23)
             trend_payload = json.loads(trend.read_text(encoding="utf-8"))
-            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 17)
+            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 23)
             metric_ids = {
                 str(item.get("metric_id"))
                 for item in payload.get("signals", [])
@@ -574,9 +664,9 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, msg=f"stdout={proc.stdout}\nstderr={proc.stderr}")
             payload = json.loads(snapshot.read_text(encoding="utf-8"))
             self.assertEqual(payload.get("summary", {}).get("status"), "pass")
-            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 18)
+            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 24)
             trend_payload = json.loads(trend.read_text(encoding="utf-8"))
-            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 18)
+            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 24)
             metric_ids = {
                 str(item.get("metric_id"))
                 for item in payload.get("signals", [])
@@ -618,9 +708,9 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, msg=f"stdout={proc.stdout}\nstderr={proc.stderr}")
             payload = json.loads(snapshot.read_text(encoding="utf-8"))
             self.assertEqual(payload.get("summary", {}).get("status"), "pass")
-            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 17)
+            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 23)
             trend_payload = json.loads(trend.read_text(encoding="utf-8"))
-            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 17)
+            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 23)
             metric_ids = {
                 str(item.get("metric_id"))
                 for item in payload.get("signals", [])
@@ -661,9 +751,9 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, msg=f"stdout={proc.stdout}\nstderr={proc.stderr}")
             payload = json.loads(snapshot.read_text(encoding="utf-8"))
             self.assertEqual(payload.get("summary", {}).get("status"), "pass")
-            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 17)
+            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 23)
             trend_payload = json.loads(trend.read_text(encoding="utf-8"))
-            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 17)
+            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 23)
             metric_ids = {
                 str(item.get("metric_id"))
                 for item in payload.get("signals", [])
@@ -704,9 +794,9 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, msg=f"stdout={proc.stdout}\nstderr={proc.stderr}")
             payload = json.loads(snapshot.read_text(encoding="utf-8"))
             self.assertEqual(payload.get("summary", {}).get("status"), "pass")
-            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 17)
+            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 23)
             trend_payload = json.loads(trend.read_text(encoding="utf-8"))
-            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 17)
+            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 23)
             metric_ids = {
                 str(item.get("metric_id"))
                 for item in payload.get("signals", [])
@@ -747,9 +837,9 @@ class ReleaseQualityDashboardSnapshotTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, msg=f"stdout={proc.stdout}\nstderr={proc.stderr}")
             payload = json.loads(snapshot.read_text(encoding="utf-8"))
             self.assertEqual(payload.get("summary", {}).get("status"), "pass")
-            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 17)
+            self.assertEqual(int(payload.get("summary", {}).get("signals_total", 0)), 23)
             trend_payload = json.loads(trend.read_text(encoding="utf-8"))
-            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 17)
+            self.assertEqual(int(trend_payload.get("summary", {}).get("compared_metrics", 0)), 23)
             metric_ids = {
                 str(item.get("metric_id"))
                 for item in payload.get("signals", [])

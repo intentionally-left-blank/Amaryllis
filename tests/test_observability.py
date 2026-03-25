@@ -72,6 +72,11 @@ class ObservabilityTests(unittest.TestCase):
                     {"metric_id": "macos_desktop_parity.checks_failed", "value": 0.0},
                     {"metric_id": "qos_governor.status", "value": 1.0},
                     {"metric_id": "qos_governor.checks_failed", "value": 0.0},
+                    {"metric_id": "user_journey.install_success_rate_pct", "value": 100.0},
+                    {"metric_id": "user_journey.retention_proxy_success_rate_pct", "value": 100.0},
+                    {"metric_id": "user_journey.feature_adoption_rate_pct", "value": 100.0},
+                    {"metric_id": "distribution_channel_manifest.coverage_pct", "value": 100.0},
+                    {"metric_id": "api_quickstart_compat.pass_rate_pct", "value": 100.0},
                 ],
             }
             snapshot_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -93,6 +98,11 @@ class ObservabilityTests(unittest.TestCase):
             self.assertIn("amaryllis_release_qos_signal_present 1", metrics)
             self.assertIn("amaryllis_release_qos_status 1.000000", metrics)
             self.assertIn("amaryllis_release_qos_checks_failed 0.000000", metrics)
+            self.assertIn("amaryllis_release_adoption_install_success_rate_pct 100.000000", metrics)
+            self.assertIn("amaryllis_release_adoption_retention_proxy_success_rate_pct 100.000000", metrics)
+            self.assertIn("amaryllis_release_adoption_feature_adoption_rate_pct 100.000000", metrics)
+            self.assertIn("amaryllis_release_adoption_channel_manifest_coverage_pct 100.000000", metrics)
+            self.assertIn("amaryllis_release_adoption_api_quickstart_pass_rate_pct 100.000000", metrics)
 
     def test_nightly_mission_snapshot_metrics_are_exported_when_configured(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-observability-") as tmp:

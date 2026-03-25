@@ -14,7 +14,8 @@ def _parse_args() -> argparse.Namespace:
         description=(
             "Build consolidated release quality dashboard snapshot from gate reports "
             "(perf/fault/injection-containment/model-artifact-admission/environment-passport/mission-queue/runtime-lifecycle/user-journey "
-            "with optional license admission, distribution resilience, API quickstart compatibility, QoS governor gate, and macOS desktop parity staging)."
+            "with optional license admission, distribution resilience, distribution channel manifest, "
+            "API quickstart compatibility, QoS governor gate, and macOS desktop parity staging)."
         )
     )
     parser.add_argument(
@@ -66,6 +67,11 @@ def _parse_args() -> argparse.Namespace:
         "--distribution-resilience-report",
         default="",
         help="Optional path to distribution resilience report JSON.",
+    )
+    parser.add_argument(
+        "--distribution-channel-manifest-report",
+        default="",
+        help="Optional path to distribution channel manifest gate report JSON.",
     )
     parser.add_argument(
         "--api-quickstart-report",
@@ -230,6 +236,13 @@ def _build_snapshot(
     distribution_summary = (
         distribution.get("summary")
         if isinstance(distribution, dict) and isinstance(distribution.get("summary"), dict)
+        else {}
+    )
+    distribution_channel_manifest = reports.get("distribution_channel_manifest")
+    distribution_channel_manifest_summary = (
+        distribution_channel_manifest.get("summary")
+        if isinstance(distribution_channel_manifest, dict)
+        and isinstance(distribution_channel_manifest.get("summary"), dict)
         else {}
     )
     api_quickstart = reports.get("api_quickstart_compat")
@@ -434,6 +447,78 @@ def _build_snapshot(
             comparator="gte",
             unit="pct",
         ),
+        _metric_signal(
+            metric_id="user_journey.activation_success_rate_pct",
+            source="user_journey",
+            category="user_flow",
+            value=_safe_float(user_journey_summary.get("activation_success_rate_pct")),
+            threshold=_safe_float(
+                user_journey_thresholds.get("min_activation_success_rate_pct"),
+                default=_safe_float(user_journey_summary.get("activation_success_rate_pct")),
+            ),
+            comparator="gte",
+            unit="pct",
+        ),
+        _metric_signal(
+            metric_id="user_journey.activation_blocked_rate_pct",
+            source="user_journey",
+            category="user_flow",
+            value=_safe_float(user_journey_summary.get("activation_blocked_rate_pct")),
+            threshold=_safe_float(
+                user_journey_thresholds.get("max_blocked_activation_rate_pct"),
+                default=_safe_float(user_journey_summary.get("activation_blocked_rate_pct")),
+            ),
+            comparator="lte",
+            unit="pct",
+        ),
+        _metric_signal(
+            metric_id="user_journey.p95_activation_latency_ms",
+            source="user_journey",
+            category="user_flow",
+            value=_safe_float(user_journey_summary.get("p95_activation_latency_ms")),
+            threshold=_safe_float(
+                user_journey_thresholds.get("max_p95_activation_latency_ms"),
+                default=_safe_float(user_journey_summary.get("p95_activation_latency_ms")),
+            ),
+            comparator="lte",
+            unit="ms",
+        ),
+        _metric_signal(
+            metric_id="user_journey.install_success_rate_pct",
+            source="user_journey",
+            category="user_flow",
+            value=_safe_float(user_journey_summary.get("install_success_rate_pct")),
+            threshold=_safe_float(
+                user_journey_thresholds.get("min_install_success_rate_pct"),
+                default=_safe_float(user_journey_summary.get("install_success_rate_pct")),
+            ),
+            comparator="gte",
+            unit="pct",
+        ),
+        _metric_signal(
+            metric_id="user_journey.retention_proxy_success_rate_pct",
+            source="user_journey",
+            category="user_flow",
+            value=_safe_float(user_journey_summary.get("retention_proxy_success_rate_pct")),
+            threshold=_safe_float(
+                user_journey_thresholds.get("min_retention_proxy_success_rate_pct"),
+                default=_safe_float(user_journey_summary.get("retention_proxy_success_rate_pct")),
+            ),
+            comparator="gte",
+            unit="pct",
+        ),
+        _metric_signal(
+            metric_id="user_journey.feature_adoption_rate_pct",
+            source="user_journey",
+            category="user_flow",
+            value=_safe_float(user_journey_summary.get("feature_adoption_rate_pct")),
+            threshold=_safe_float(
+                user_journey_thresholds.get("min_feature_adoption_rate_pct"),
+                default=_safe_float(user_journey_summary.get("feature_adoption_rate_pct")),
+            ),
+            comparator="gte",
+            unit="pct",
+        ),
     ]
     if distribution_summary:
         distribution_status = str(distribution_summary.get("status") or "").strip().lower()
@@ -468,8 +553,57 @@ def _build_snapshot(
                 ),
             ]
         )
+    if distribution_channel_manifest_summary:
+        manifest_status = str(distribution_channel_manifest_summary.get("status") or "").strip().lower()
+        manifest_checks_total = max(0.0, _safe_float(distribution_channel_manifest_summary.get("checks_total")))
+        manifest_checks_failed = max(0.0, _safe_float(distribution_channel_manifest_summary.get("checks_failed")))
+        manifest_checks_passed = max(0.0, manifest_checks_total - manifest_checks_failed)
+        manifest_coverage_pct = (
+            (manifest_checks_passed / manifest_checks_total) * 100.0
+            if manifest_checks_total > 0
+            else (100.0 if manifest_status == "pass" else 0.0)
+        )
+        signals.extend(
+            [
+                _metric_signal(
+                    metric_id="distribution_channel_manifest.status",
+                    source="distribution_channel_manifest",
+                    category="distribution",
+                    value=1.0 if manifest_status == "pass" else 0.0,
+                    threshold=1.0,
+                    comparator="gte",
+                    unit="bool",
+                ),
+                _metric_signal(
+                    metric_id="distribution_channel_manifest.checks_failed",
+                    source="distribution_channel_manifest",
+                    category="distribution",
+                    value=manifest_checks_failed,
+                    threshold=0.0,
+                    comparator="lte",
+                    unit="count",
+                ),
+                _metric_signal(
+                    metric_id="distribution_channel_manifest.coverage_pct",
+                    source="distribution_channel_manifest",
+                    category="distribution",
+                    value=manifest_coverage_pct,
+                    threshold=100.0,
+                    comparator="gte",
+                    unit="pct",
+                ),
+            ]
+        )
     if api_quickstart_summary:
         quickstart_status = str(api_quickstart_summary.get("status") or "").strip().lower()
+        quickstart_checks_total = max(0.0, _safe_float(api_quickstart_summary.get("checks_total")))
+        quickstart_checks_failed = max(0.0, _safe_float(api_quickstart_summary.get("checks_failed")))
+        quickstart_checks_passed = max(0.0, quickstart_checks_total - quickstart_checks_failed)
+        quickstart_pass_rate = (
+            (quickstart_checks_passed / quickstart_checks_total) * 100.0
+            if quickstart_checks_total > 0
+            else (100.0 if quickstart_status == "pass" else 0.0)
+        )
         signals.extend(
             [
                 _metric_signal(
@@ -485,10 +619,19 @@ def _build_snapshot(
                     metric_id="api_quickstart_compat.checks_failed",
                     source="api_quickstart_compat",
                     category="developer_adoption",
-                    value=_safe_float(api_quickstart_summary.get("checks_failed")),
+                    value=quickstart_checks_failed,
                     threshold=0.0,
                     comparator="lte",
                     unit="count",
+                ),
+                _metric_signal(
+                    metric_id="api_quickstart_compat.pass_rate_pct",
+                    source="api_quickstart_compat",
+                    category="developer_adoption",
+                    value=quickstart_pass_rate,
+                    threshold=100.0,
+                    comparator="gte",
+                    unit="pct",
                 ),
             ]
         )
@@ -794,6 +937,10 @@ def main() -> int:
     }
     distribution_raw = str(args.distribution_resilience_report or "").strip()
     distribution_path = _resolve_path(project_root, distribution_raw) if distribution_raw else None
+    distribution_manifest_raw = str(args.distribution_channel_manifest_report or "").strip()
+    distribution_manifest_path = (
+        _resolve_path(project_root, distribution_manifest_raw) if distribution_manifest_raw else None
+    )
     api_quickstart_raw = str(args.api_quickstart_report or "").strip()
     api_quickstart_path = _resolve_path(project_root, api_quickstart_raw) if api_quickstart_raw else None
     qos_governor_raw = str(args.qos_governor_report or "").strip()
@@ -834,6 +981,27 @@ def main() -> int:
         except Exception as exc:
             print(
                 f"[quality-dashboard] invalid report for distribution_resilience: {distribution_path} error={exc}",
+                file=sys.stderr,
+            )
+            return 2
+    if distribution_manifest_path is not None:
+        if not distribution_manifest_path.exists():
+            print(
+                (
+                    "[quality-dashboard] missing report for distribution_channel_manifest: "
+                    f"{distribution_manifest_path}"
+                ),
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            reports["distribution_channel_manifest"] = _load_json_object(distribution_manifest_path)
+        except Exception as exc:
+            print(
+                (
+                    "[quality-dashboard] invalid report for distribution_channel_manifest: "
+                    f"{distribution_manifest_path} error={exc}"
+                ),
                 file=sys.stderr,
             )
             return 2

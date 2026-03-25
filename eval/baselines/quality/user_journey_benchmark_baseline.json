@@ -5,6 +5,12 @@
     "p95_journey_latency_ms": 2500.0,
     "p95_plan_dispatch_latency_ms": 1000.0,
     "p95_execute_dispatch_latency_ms": 1000.0,
-    "plan_to_execute_conversion_rate_pct": 100.0
+    "plan_to_execute_conversion_rate_pct": 100.0,
+    "activation_success_rate_pct": 100.0,
+    "activation_blocked_rate_pct": 0.0,
+    "p95_activation_latency_ms": 600000.0,
+    "install_success_rate_pct": 100.0,
+    "retention_proxy_success_rate_pct": 100.0,
+    "feature_adoption_rate_pct": 100.0
   }
 }

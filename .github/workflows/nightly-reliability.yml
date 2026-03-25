@@ -78,6 +78,12 @@ jobs:
             --max-p95-plan-dispatch-latency-ms "${AMARYLLIS_NIGHTLY_USER_JOURNEY_MAX_P95_PLAN_MS:-1500}" \
             --max-p95-execute-dispatch-latency-ms "${AMARYLLIS_NIGHTLY_USER_JOURNEY_MAX_P95_EXECUTE_MS:-1500}" \
             --min-plan-to-execute-conversion-rate-pct "${AMARYLLIS_NIGHTLY_USER_JOURNEY_MIN_CONVERSION_PCT:-100}" \
+            --min-activation-success-rate-pct "${AMARYLLIS_NIGHTLY_USER_JOURNEY_MIN_ACTIVATION_SUCCESS_RATE_PCT:-100}" \
+            --max-blocked-activation-rate-pct "${AMARYLLIS_NIGHTLY_USER_JOURNEY_MAX_BLOCKED_ACTIVATION_RATE_PCT:-0}" \
+            --max-p95-activation-latency-ms "${AMARYLLIS_NIGHTLY_USER_JOURNEY_MAX_P95_ACTIVATION_MS:-600000}" \
+            --min-install-success-rate-pct "${AMARYLLIS_NIGHTLY_USER_JOURNEY_MIN_INSTALL_SUCCESS_RATE_PCT:-100}" \
+            --min-retention-proxy-success-rate-pct "${AMARYLLIS_NIGHTLY_USER_JOURNEY_MIN_RETENTION_PROXY_SUCCESS_RATE_PCT:-100}" \
+            --min-feature-adoption-rate-pct "${AMARYLLIS_NIGHTLY_USER_JOURNEY_MIN_FEATURE_ADOPTION_RATE_PCT:-100}" \
             --baseline "eval/baselines/quality/user_journey_benchmark_baseline.json" \
             --output "artifacts/nightly-user-journey-benchmark-report.json" \
             --strict

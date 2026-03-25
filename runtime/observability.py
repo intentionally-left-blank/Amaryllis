@@ -314,6 +314,21 @@ class SREMonitor:
             "# HELP amaryllis_release_qos_checks_failed QoS governor gate failed checks in release quality snapshot.",
             "# TYPE amaryllis_release_qos_checks_failed gauge",
             f"amaryllis_release_qos_checks_failed {float(release_quality['qos_checks_failed']):.6f}",
+            "# HELP amaryllis_release_adoption_install_success_rate_pct Install success-rate percent from release adoption funnel.",
+            "# TYPE amaryllis_release_adoption_install_success_rate_pct gauge",
+            f"amaryllis_release_adoption_install_success_rate_pct {float(release_quality['adoption_install_success_rate_pct']):.6f}",
+            "# HELP amaryllis_release_adoption_retention_proxy_success_rate_pct Retention-proxy success-rate percent from release adoption funnel.",
+            "# TYPE amaryllis_release_adoption_retention_proxy_success_rate_pct gauge",
+            f"amaryllis_release_adoption_retention_proxy_success_rate_pct {float(release_quality['adoption_retention_proxy_success_rate_pct']):.6f}",
+            "# HELP amaryllis_release_adoption_feature_adoption_rate_pct Feature-adoption rate percent from release adoption funnel.",
+            "# TYPE amaryllis_release_adoption_feature_adoption_rate_pct gauge",
+            f"amaryllis_release_adoption_feature_adoption_rate_pct {float(release_quality['adoption_feature_adoption_rate_pct']):.6f}",
+            "# HELP amaryllis_release_adoption_channel_manifest_coverage_pct Distribution channel manifest coverage percent.",
+            "# TYPE amaryllis_release_adoption_channel_manifest_coverage_pct gauge",
+            f"amaryllis_release_adoption_channel_manifest_coverage_pct {float(release_quality['adoption_channel_manifest_coverage_pct']):.6f}",
+            "# HELP amaryllis_release_adoption_api_quickstart_pass_rate_pct API quickstart pass-rate percent from release adoption funnel.",
+            "# TYPE amaryllis_release_adoption_api_quickstart_pass_rate_pct gauge",
+            f"amaryllis_release_adoption_api_quickstart_pass_rate_pct {float(release_quality['adoption_api_quickstart_pass_rate_pct']):.6f}",
             "# HELP amaryllis_nightly_mission_snapshot_loaded Nightly mission report snapshot availability (0/1).",
             "# TYPE amaryllis_nightly_mission_snapshot_loaded gauge",
             f"amaryllis_nightly_mission_snapshot_loaded {float(nightly_mission['snapshot_loaded']):.0f}",
@@ -371,6 +386,11 @@ class SREMonitor:
             "qos_signal_present": 0.0,
             "qos_status": 0.0,
             "qos_checks_failed": 0.0,
+            "adoption_install_success_rate_pct": 0.0,
+            "adoption_retention_proxy_success_rate_pct": 0.0,
+            "adoption_feature_adoption_rate_pct": 0.0,
+            "adoption_channel_manifest_coverage_pct": 0.0,
+            "adoption_api_quickstart_pass_rate_pct": 0.0,
         }
         path_raw = str(self._release_quality_dashboard_path or "").strip()
         if not path_raw:
@@ -410,6 +430,22 @@ class SREMonitor:
             metrics["qos_status"] = 1.0 if float(qos_status) >= 1.0 else 0.0
         if qos_checks_failed is not None:
             metrics["qos_checks_failed"] = max(0.0, float(qos_checks_failed))
+
+        install_success = self._signal_value(payload, "user_journey.install_success_rate_pct")
+        retention_proxy = self._signal_value(payload, "user_journey.retention_proxy_success_rate_pct")
+        feature_adoption = self._signal_value(payload, "user_journey.feature_adoption_rate_pct")
+        channel_coverage = self._signal_value(payload, "distribution_channel_manifest.coverage_pct")
+        quickstart_pass_rate = self._signal_value(payload, "api_quickstart_compat.pass_rate_pct")
+        if install_success is not None:
+            metrics["adoption_install_success_rate_pct"] = max(0.0, float(install_success))
+        if retention_proxy is not None:
+            metrics["adoption_retention_proxy_success_rate_pct"] = max(0.0, float(retention_proxy))
+        if feature_adoption is not None:
+            metrics["adoption_feature_adoption_rate_pct"] = max(0.0, float(feature_adoption))
+        if channel_coverage is not None:
+            metrics["adoption_channel_manifest_coverage_pct"] = max(0.0, float(channel_coverage))
+        if quickstart_pass_rate is not None:
+            metrics["adoption_api_quickstart_pass_rate_pct"] = max(0.0, float(quickstart_pass_rate))
         return metrics
 
     def _nightly_mission_snapshot_metrics(self) -> dict[str, float]:

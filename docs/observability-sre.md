@@ -27,6 +27,11 @@ Optional release-quality metric export:
   - `amaryllis_release_qos_signal_present` (`0|1`)
   - `amaryllis_release_qos_status` (`1=pass`, `0=fail`)
   - `amaryllis_release_qos_checks_failed`
+  - `amaryllis_release_adoption_install_success_rate_pct`
+  - `amaryllis_release_adoption_retention_proxy_success_rate_pct`
+  - `amaryllis_release_adoption_feature_adoption_rate_pct`
+  - `amaryllis_release_adoption_channel_manifest_coverage_pct`
+  - `amaryllis_release_adoption_api_quickstart_pass_rate_pct`
 
 Optional nightly mission metric export:
 

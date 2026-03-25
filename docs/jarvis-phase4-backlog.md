@@ -95,7 +95,7 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 | P4-H05 | done | Productize developer adoption path | OpenAI-compatible API starter pack + SDK quickstarts + integration examples | Dev can run local API and complete first integration in under 15 minutes |
 | P4-H06 | todo | Add RU/EN localization and template packs | i18n baseline + localized docs + starter prompts/workflows | RU and EN users have first-class UI/docs/templates with release-level coverage checks |
 | P4-H07 | todo | Harden OSS governance and contribution policy | licensing/trademark policy + DCO/CoC + maintainer map + release discipline | External contributors onboard without legal ambiguity and release governance is explicit |
-| P4-H08 | todo | Add adoption KPI funnel and growth dashboards | install/activation/retention/feature-adoption metrics + dashboard | Team can trace product changes to adoption impact while preserving privacy constraints |
+| P4-H08 | in_progress | Add adoption KPI funnel and growth dashboards | install/activation/retention/feature-adoption metrics + dashboard | Team can trace product changes to adoption impact while preserving privacy constraints |
 
 ## Current Sprint (P4-S0)
 
@@ -138,7 +138,7 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 | P4-H05 | done | developer quickstart pack for OpenAI-compatible API integration |
 | P4-H06 | todo | RU/EN localization baseline and template starter packs |
 | P4-H07 | todo | governance baseline (license/trademark/DCO/CoC/release conventions) |
-| P4-H08 | todo | adoption KPI funnel and privacy-safe analytics surface |
+| P4-H08 | in_progress | adoption KPI funnel and privacy-safe analytics surface |
 
 ## Execution Playbook (Start-Now)
 - Detailed implementation-ready program: `/Users/bogdan/Amaryllis/docs/jarvis-phase4-execution-plan.md`

@@ -43,6 +43,14 @@ The script accepts any subset and produces a normalized report with:
 - summary status (`pass` / `fail`)
 - class-level KPI/check breakdown (`mission_execution`, `recovery`, `quality`, `runtime_qos`, `distribution`, `desktop_staging`, `user_flow`, `nightly_reliability`)
 
+User-flow slice includes onboarding activation KPIs when present in journey source:
+- activation success rate
+- blocked activation rate
+- p95 activation latency
+- install success rate
+- retention proxy success rate
+- feature adoption rate (`plan -> execute -> result`)
+
 Optional user-flow source flag:
 - `--user-journey-report <path>`
 

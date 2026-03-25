@@ -498,6 +498,12 @@ def main() -> int:
         p95_plan = _safe_float(summary.get("p95_plan_dispatch_latency_ms"))
         p95_execute = _safe_float(summary.get("p95_execute_dispatch_latency_ms"))
         conversion = _safe_float(summary.get("plan_to_execute_conversion_rate_pct"))
+        activation_success = _safe_float(summary.get("activation_success_rate_pct"))
+        activation_blocked = _safe_float(summary.get("activation_blocked_rate_pct"))
+        p95_activation = _safe_float(summary.get("p95_activation_latency_ms"))
+        install_success = _safe_float(summary.get("install_success_rate_pct"))
+        retention_proxy = _safe_float(summary.get("retention_proxy_success_rate_pct"))
+        feature_adoption = _safe_float(summary.get("feature_adoption_rate_pct"))
         checks.extend(
             [
                 _check(
@@ -552,6 +558,72 @@ def main() -> int:
                     comparator="gte",
                     unit="pct",
                 ),
+                _check(
+                    check_id="journey.activation_success_rate_pct",
+                    source="user_journey",
+                    value=activation_success,
+                    threshold=_safe_float(
+                        thresholds.get("min_activation_success_rate_pct"),
+                        default=activation_success,
+                    ),
+                    comparator="gte",
+                    unit="pct",
+                ),
+                _check(
+                    check_id="journey.activation_blocked_rate_pct",
+                    source="user_journey",
+                    value=activation_blocked,
+                    threshold=_safe_float(
+                        thresholds.get("max_blocked_activation_rate_pct"),
+                        default=activation_blocked,
+                    ),
+                    comparator="lte",
+                    unit="pct",
+                ),
+                _check(
+                    check_id="journey.p95_activation_latency_ms",
+                    source="user_journey",
+                    value=p95_activation,
+                    threshold=_safe_float(
+                        thresholds.get("max_p95_activation_latency_ms"),
+                        default=p95_activation,
+                    ),
+                    comparator="lte",
+                    unit="ms",
+                ),
+                _check(
+                    check_id="journey.install_success_rate_pct",
+                    source="user_journey",
+                    value=install_success,
+                    threshold=_safe_float(
+                        thresholds.get("min_install_success_rate_pct"),
+                        default=install_success,
+                    ),
+                    comparator="gte",
+                    unit="pct",
+                ),
+                _check(
+                    check_id="journey.retention_proxy_success_rate_pct",
+                    source="user_journey",
+                    value=retention_proxy,
+                    threshold=_safe_float(
+                        thresholds.get("min_retention_proxy_success_rate_pct"),
+                        default=retention_proxy,
+                    ),
+                    comparator="gte",
+                    unit="pct",
+                ),
+                _check(
+                    check_id="journey.feature_adoption_rate_pct",
+                    source="user_journey",
+                    value=feature_adoption,
+                    threshold=_safe_float(
+                        thresholds.get("min_feature_adoption_rate_pct"),
+                        default=feature_adoption,
+                    ),
+                    comparator="gte",
+                    unit="pct",
+                ),
             ]
         )
         kpis["journey_success_rate_pct"] = round(success_rate, 4)
@@ -559,6 +631,12 @@ def main() -> int:
         kpis["journey_p95_plan_dispatch_ms"] = round(p95_plan, 2)
         kpis["journey_p95_execute_dispatch_ms"] = round(p95_execute, 2)
         kpis["journey_plan_to_execute_conversion_rate_pct"] = round(conversion, 4)
+        kpis["journey_activation_success_rate_pct"] = round(activation_success, 4)
+        kpis["journey_activation_blocked_rate_pct"] = round(activation_blocked, 4)
+        kpis["journey_p95_activation_latency_ms"] = round(p95_activation, 2)
+        kpis["journey_install_success_rate_pct"] = round(install_success, 4)
+        kpis["journey_retention_proxy_success_rate_pct"] = round(retention_proxy, 4)
+        kpis["journey_feature_adoption_rate_pct"] = round(feature_adoption, 4)
 
     nightly = reports.get("nightly_reliability")
     if isinstance(nightly, dict):

@@ -39,6 +39,12 @@ python3 scripts/release/user_journey_benchmark.py \
   --max-p95-plan-dispatch-latency-ms 1500 \
   --max-p95-execute-dispatch-latency-ms 1500 \
   --min-plan-to-execute-conversion-rate-pct 100 \
+  --min-activation-success-rate-pct 100 \
+  --max-blocked-activation-rate-pct 0 \
+  --max-p95-activation-latency-ms 600000 \
+  --min-install-success-rate-pct 100 \
+  --min-retention-proxy-success-rate-pct 100 \
+  --min-feature-adoption-rate-pct 100 \
   --baseline eval/baselines/quality/user_journey_benchmark_baseline.json \
   --output artifacts/nightly-user-journey-benchmark-report.json \
   --strict

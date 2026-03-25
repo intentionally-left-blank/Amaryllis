@@ -100,6 +100,30 @@
       "value": 100.0
     },
     {
+      "metric_id": "user_journey.activation_success_rate_pct",
+      "value": 100.0
+    },
+    {
+      "metric_id": "user_journey.activation_blocked_rate_pct",
+      "value": 0.0
+    },
+    {
+      "metric_id": "user_journey.p95_activation_latency_ms",
+      "value": 600000.0
+    },
+    {
+      "metric_id": "user_journey.install_success_rate_pct",
+      "value": 100.0
+    },
+    {
+      "metric_id": "user_journey.retention_proxy_success_rate_pct",
+      "value": 100.0
+    },
+    {
+      "metric_id": "user_journey.feature_adoption_rate_pct",
+      "value": 100.0
+    },
+    {
       "metric_id": "distribution_resilience.status",
       "value": 1.0
     },
@@ -112,12 +136,28 @@
       "value": 100.0
     },
     {
+      "metric_id": "distribution_channel_manifest.status",
+      "value": 1.0
+    },
+    {
+      "metric_id": "distribution_channel_manifest.checks_failed",
+      "value": 0.0
+    },
+    {
+      "metric_id": "distribution_channel_manifest.coverage_pct",
+      "value": 100.0
+    },
+    {
       "metric_id": "api_quickstart_compat.status",
       "value": 1.0
     },
     {
       "metric_id": "api_quickstart_compat.checks_failed",
       "value": 0.0
+    },
+    {
+      "metric_id": "api_quickstart_compat.pass_rate_pct",
+      "value": 100.0
     },
     {
       "metric_id": "qos_governor.status",

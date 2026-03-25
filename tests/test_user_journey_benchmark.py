@@ -42,6 +42,12 @@ class UserJourneyBenchmarkTests(unittest.TestCase):
                         "p95_plan_dispatch_latency_ms": 1200.0,
                         "p95_execute_dispatch_latency_ms": 1200.0,
                         "plan_to_execute_conversion_rate_pct": 100.0,
+                        "activation_success_rate_pct": 100.0,
+                        "activation_blocked_rate_pct": 0.0,
+                        "p95_activation_latency_ms": 600000.0,
+                        "install_success_rate_pct": 100.0,
+                        "retention_proxy_success_rate_pct": 100.0,
+                        "feature_adoption_rate_pct": 100.0,
                     },
                 },
             )
@@ -75,6 +81,12 @@ class UserJourneyBenchmarkTests(unittest.TestCase):
             self.assertEqual(str(summary.get("status")), "pass")
             self.assertEqual(int(summary.get("journeys_total", 0)), 1)
             self.assertGreaterEqual(int(summary.get("checks_total", 0)), 1)
+            self.assertIn("activation_success_rate_pct", summary)
+            self.assertIn("activation_blocked_rate_pct", summary)
+            self.assertIn("p95_activation_latency_ms", summary)
+            self.assertIn("install_success_rate_pct", summary)
+            self.assertIn("retention_proxy_success_rate_pct", summary)
+            self.assertIn("feature_adoption_rate_pct", summary)
 
     def test_strict_mode_fails_when_threshold_is_impossible(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-user-journey-benchmark-") as tmp:

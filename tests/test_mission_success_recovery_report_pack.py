@@ -104,6 +104,12 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
                             "max_p95_plan_dispatch_latency_ms": 1200.0,
                             "max_p95_execute_dispatch_latency_ms": 1200.0,
                             "min_plan_to_execute_conversion_rate_pct": 100.0,
+                            "min_activation_success_rate_pct": 100.0,
+                            "max_blocked_activation_rate_pct": 0.0,
+                            "max_p95_activation_latency_ms": 10000.0,
+                            "min_install_success_rate_pct": 100.0,
+                            "min_retention_proxy_success_rate_pct": 100.0,
+                            "min_feature_adoption_rate_pct": 100.0,
                         }
                     },
                     "summary": {
@@ -112,6 +118,12 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
                         "p95_plan_dispatch_latency_ms": 300.0,
                         "p95_execute_dispatch_latency_ms": 350.0,
                         "plan_to_execute_conversion_rate_pct": 100.0,
+                        "activation_success_rate_pct": 100.0,
+                        "activation_blocked_rate_pct": 0.0,
+                        "p95_activation_latency_ms": 600.0,
+                        "install_success_rate_pct": 100.0,
+                        "retention_proxy_success_rate_pct": 100.0,
+                        "feature_adoption_rate_pct": 100.0,
                     },
                 },
             )
@@ -158,6 +170,10 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
             self.assertGreaterEqual(int(payload.get("summary", {}).get("checks_total", 0)), 1)
             self.assertIn("journey_success_rate_pct", payload.get("kpis", {}))
             self.assertIn("journey.plan_to_execute_conversion_rate_pct", [c.get("id") for c in payload.get("checks", [])])
+            self.assertIn("journey.activation_success_rate_pct", [c.get("id") for c in payload.get("checks", [])])
+            self.assertIn("journey.install_success_rate_pct", [c.get("id") for c in payload.get("checks", [])])
+            self.assertIn("journey.retention_proxy_success_rate_pct", [c.get("id") for c in payload.get("checks", [])])
+            self.assertIn("journey.feature_adoption_rate_pct", [c.get("id") for c in payload.get("checks", [])])
             self.assertIn("qos_governor.status", [c.get("id") for c in payload.get("checks", [])])
             class_breakdown = payload.get("class_breakdown", {})
             self.assertEqual(str(class_breakdown.get("mission_execution", {}).get("status")), "pass")
@@ -170,6 +186,13 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
                 class_breakdown.get("desktop_staging", {}).get("kpis", {}),
             )
             self.assertIn("journey_success_rate_pct", class_breakdown.get("user_flow", {}).get("kpis", {}))
+            self.assertIn("journey_activation_success_rate_pct", class_breakdown.get("user_flow", {}).get("kpis", {}))
+            self.assertIn("journey_install_success_rate_pct", class_breakdown.get("user_flow", {}).get("kpis", {}))
+            self.assertIn(
+                "journey_retention_proxy_success_rate_pct",
+                class_breakdown.get("user_flow", {}).get("kpis", {}),
+            )
+            self.assertIn("journey_feature_adoption_rate_pct", class_breakdown.get("user_flow", {}).get("kpis", {}))
             self.assertIn("qos_gate_checks_failed", class_breakdown.get("runtime_qos", {}).get("kpis", {}))
 
     def test_nightly_report_pack_marks_failed_summary_when_burn_gate_failed(self) -> None:

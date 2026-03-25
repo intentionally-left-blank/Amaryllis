@@ -1,7 +1,7 @@
 {
   "title": "Amaryllis Runtime SRE",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "panels": [
     {
       "type": "stat",
@@ -113,6 +113,51 @@
       "targets": [
         {
           "expr": "amaryllis_release_qos_checks_failed"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Adoption Install Success (%)",
+      "targets": [
+        {
+          "expr": "amaryllis_release_adoption_install_success_rate_pct"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Adoption Retention Proxy (%)",
+      "targets": [
+        {
+          "expr": "amaryllis_release_adoption_retention_proxy_success_rate_pct"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Adoption Feature Rate (%)",
+      "targets": [
+        {
+          "expr": "amaryllis_release_adoption_feature_adoption_rate_pct"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Channel Coverage (%)",
+      "targets": [
+        {
+          "expr": "amaryllis_release_adoption_channel_manifest_coverage_pct"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "API Quickstart Pass (%)",
+      "targets": [
+        {
+          "expr": "amaryllis_release_adoption_api_quickstart_pass_rate_pct"
         }
       ]
     },

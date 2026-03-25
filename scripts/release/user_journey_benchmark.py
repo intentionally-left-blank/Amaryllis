@@ -62,6 +62,42 @@ def _parse_args() -> argparse.Namespace:
         help="Minimum required plan-to-execute conversion rate percent.",
     )
     parser.add_argument(
+        "--min-activation-success-rate-pct",
+        type=float,
+        default=float(os.getenv("AMARYLLIS_USER_JOURNEY_MIN_ACTIVATION_SUCCESS_RATE_PCT", "100")),
+        help="Minimum required onboarding activation success rate percent.",
+    )
+    parser.add_argument(
+        "--max-blocked-activation-rate-pct",
+        type=float,
+        default=float(os.getenv("AMARYLLIS_USER_JOURNEY_MAX_BLOCKED_ACTIVATION_RATE_PCT", "0")),
+        help="Maximum allowed blocked onboarding activation rate percent.",
+    )
+    parser.add_argument(
+        "--max-p95-activation-latency-ms",
+        type=float,
+        default=float(os.getenv("AMARYLLIS_USER_JOURNEY_MAX_P95_ACTIVATION_MS", "600000")),
+        help="Maximum allowed p95 onboarding activation latency (includes first-answer smoke when enabled).",
+    )
+    parser.add_argument(
+        "--min-install-success-rate-pct",
+        type=float,
+        default=float(os.getenv("AMARYLLIS_USER_JOURNEY_MIN_INSTALL_SUCCESS_RATE_PCT", "100")),
+        help="Minimum required onboarding install success rate percent.",
+    )
+    parser.add_argument(
+        "--min-retention-proxy-success-rate-pct",
+        type=float,
+        default=float(os.getenv("AMARYLLIS_USER_JOURNEY_MIN_RETENTION_PROXY_SUCCESS_RATE_PCT", "100")),
+        help="Minimum required return-journey retention proxy success rate percent.",
+    )
+    parser.add_argument(
+        "--min-feature-adoption-rate-pct",
+        type=float,
+        default=float(os.getenv("AMARYLLIS_USER_JOURNEY_MIN_FEATURE_ADOPTION_RATE_PCT", "100")),
+        help="Minimum required feature-adoption rate (plan->execute->result) percent.",
+    )
+    parser.add_argument(
         "--baseline",
         default="eval/baselines/quality/user_journey_benchmark_baseline.json",
         help="Optional baseline report for trend delta calculation.",
@@ -80,6 +116,11 @@ def _parse_args() -> argparse.Namespace:
         "--qos-mode",
         default=os.getenv("AMARYLLIS_QOS_MODE", "balanced"),
         help="QoS mode to benchmark (`quality`, `balanced`, `power_save`).",
+    )
+    parser.add_argument(
+        "--cognition-backend",
+        default=os.getenv("AMARYLLIS_USER_JOURNEY_COGNITION_BACKEND", "deterministic"),
+        help="Cognition backend for benchmark runtime (`deterministic` or `model_manager`).",
     )
     return parser.parse_args()
 
@@ -100,6 +141,13 @@ def _normalize_qos_mode(value: str | None) -> str:
     if normalized in {"quality", "balanced", "power_save"}:
         return normalized
     return "balanced"
+
+
+def _normalize_cognition_backend(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"deterministic", "model_manager"}:
+        return normalized
+    return "deterministic"
 
 
 def _percentile(values: list[float], p: int) -> float:
@@ -223,6 +271,67 @@ def _run_journey(
         return step, response_payload
 
     try:
+        activation_step, activation_payload = _call(
+            name="onboarding_activate",
+            method="POST",
+            path="/models/onboarding/activate",
+            expected_status=200,
+            payload={
+                "profile": "balanced",
+                "include_remote_providers": True,
+                "limit": 20,
+                "require_metadata": False,
+                "activate": True,
+                "run_smoke_test": True,
+                "smoke_prompt": f"user journey benchmark smoke {iteration}",
+            },
+        )
+        journey["metrics"]["activation_latency_ms"] = float(activation_step.get("latency_ms") or 0.0)
+        activation_status = str(activation_payload.get("status") or "").strip().lower()
+        activation_ready = bool(activation_payload.get("ready", False))
+        activation_success = activation_status in {"activated", "activated_with_smoke_warning"}
+        activation_blocked = activation_status == "blocked"
+        smoke_payload = (
+            activation_payload.get("smoke_test")
+            if isinstance(activation_payload.get("smoke_test"), dict)
+            else {}
+        )
+        install_payload = (
+            activation_payload.get("install")
+            if isinstance(activation_payload.get("install"), dict)
+            else {}
+        )
+        install_steps = (
+            install_payload.get("steps")
+            if isinstance(install_payload.get("steps"), list)
+            else []
+        )
+        install_step_status: dict[str, str] = {}
+        for item in install_steps:
+            if not isinstance(item, dict):
+                continue
+            step_name = str(item.get("step") or "").strip().lower()
+            if not step_name:
+                continue
+            install_step_status[step_name] = str(item.get("status") or "").strip().lower()
+        smoke_status = str(smoke_payload.get("status") or "").strip().lower()
+        install_success = bool(
+            str(install_payload.get("package_id") or "").strip()
+            and str(install_payload.get("provider") or "").strip()
+            and str(install_payload.get("model") or "").strip()
+        )
+        journey["metrics"]["activation_status"] = activation_status
+        journey["metrics"]["activation_ready"] = activation_ready
+        journey["metrics"]["activation_success"] = activation_success
+        journey["metrics"]["activation_blocked"] = activation_blocked
+        journey["metrics"]["activation_smoke_status"] = smoke_status
+        journey["metrics"]["activation_smoke_passed"] = smoke_status == "passed"
+        journey["metrics"]["install_success"] = install_success
+        journey["metrics"]["install_download_status"] = install_step_status.get("download", "")
+        journey["metrics"]["install_activate_status"] = install_step_status.get("activate", "")
+        if not activation_success:
+            raise RuntimeError(f"onboarding_activate_not_ready status={activation_status}")
+
         start_step, start_payload = _call(
             name="flow_session_start",
             method="POST",
@@ -380,6 +489,7 @@ def _trend_status(*, delta: float, direction: str) -> str:
 def main() -> int:
     args = _parse_args()
     qos_mode = _normalize_qos_mode(args.qos_mode)
+    cognition_backend = _normalize_cognition_backend(args.cognition_backend)
     if args.iterations <= 0:
         print("[user-journey-benchmark] --iterations must be >= 1", file=sys.stderr)
         return 2
@@ -387,6 +497,11 @@ def main() -> int:
     for field_name in (
         "min_success_rate_pct",
         "min_plan_to_execute_conversion_rate_pct",
+        "min_activation_success_rate_pct",
+        "max_blocked_activation_rate_pct",
+        "min_install_success_rate_pct",
+        "min_retention_proxy_success_rate_pct",
+        "min_feature_adoption_rate_pct",
     ):
         value = float(getattr(args, field_name))
         if value < 0 or value > 100:
@@ -400,6 +515,7 @@ def main() -> int:
         "max_p95_journey_latency_ms",
         "max_p95_plan_dispatch_latency_ms",
         "max_p95_execute_dispatch_latency_ms",
+        "max_p95_activation_latency_ms",
     ):
         value = float(getattr(args, field_name))
         if value < 0:
@@ -435,6 +551,12 @@ def main() -> int:
                         "p95_plan_dispatch_latency_ms",
                         "p95_execute_dispatch_latency_ms",
                         "plan_to_execute_conversion_rate_pct",
+                        "activation_success_rate_pct",
+                        "activation_blocked_rate_pct",
+                        "p95_activation_latency_ms",
+                        "install_success_rate_pct",
+                        "retention_proxy_success_rate_pct",
+                        "feature_adoption_rate_pct",
                     )
                     if key in raw_summary
                 }
@@ -458,6 +580,7 @@ def main() -> int:
         os.environ["AMARYLLIS_MCP_ENDPOINTS"] = ""
         os.environ["AMARYLLIS_SECURITY_PROFILE"] = "production"
         os.environ["AMARYLLIS_QOS_MODE"] = qos_mode
+        os.environ["AMARYLLIS_COGNITION_BACKEND"] = cognition_backend
 
         import runtime.server as server_module
 
@@ -526,13 +649,22 @@ def main() -> int:
         for row in journeys
         if _safe_float(row.get("metrics", {}).get("execute_dispatch_latency_ms"), default=-1) >= 0
     ]
+    activation_latency_samples = [
+        _safe_float(row.get("metrics", {}).get("activation_latency_ms"))  # type: ignore[arg-type]
+        for row in journeys
+        if _safe_float(row.get("metrics", {}).get("activation_latency_ms"), default=-1) >= 0
+    ]
 
     plan_dispatch_succeeded = 0
     execute_dispatch_succeeded = 0
+    feature_adopted_journeys = 0
     for row in journeys:
         steps = row.get("steps")
         if not isinstance(steps, list):
             continue
+        feature_plan = False
+        feature_execute = False
+        feature_result_presented = False
         for step in steps:
             if not isinstance(step, dict):
                 continue
@@ -540,8 +672,14 @@ def main() -> int:
             ok = bool(step.get("ok"))
             if name == "dispatch_plan" and ok:
                 plan_dispatch_succeeded += 1
+                feature_plan = True
             if name == "dispatch_execute" and ok:
                 execute_dispatch_succeeded += 1
+                feature_execute = True
+            if name == "flow_activity_result_presented" and ok:
+                feature_result_presented = True
+        if feature_plan and feature_execute and feature_result_presented:
+            feature_adopted_journeys += 1
 
     success_rate_pct = 0.0
     if journeys:
@@ -551,6 +689,69 @@ def main() -> int:
         plan_to_execute_conversion_rate_pct = (
             execute_dispatch_succeeded / plan_dispatch_succeeded
         ) * 100.0
+    activation_attempts = 0
+    activation_succeeded = 0
+    activation_blocked = 0
+    activation_smoke_passed = 0
+    install_attempts = 0
+    install_succeeded = 0
+    for row in journeys:
+        metrics = row.get("metrics")
+        if not isinstance(metrics, dict):
+            continue
+        if "activation_success" not in metrics:
+            continue
+        activation_attempts += 1
+        if bool(metrics.get("activation_success")):
+            activation_succeeded += 1
+        if bool(metrics.get("activation_blocked")):
+            activation_blocked += 1
+        if bool(metrics.get("activation_smoke_passed")):
+            activation_smoke_passed += 1
+        if "install_success" in metrics:
+            install_attempts += 1
+            if bool(metrics.get("install_success")):
+                install_succeeded += 1
+    activation_success_rate_pct = (
+        (float(activation_succeeded) / float(activation_attempts)) * 100.0
+        if activation_attempts > 0
+        else 0.0
+    )
+    activation_blocked_rate_pct = (
+        (float(activation_blocked) / float(activation_attempts)) * 100.0
+        if activation_attempts > 0
+        else 0.0
+    )
+    activation_smoke_pass_rate_pct = (
+        (float(activation_smoke_passed) / float(activation_attempts)) * 100.0
+        if activation_attempts > 0
+        else 0.0
+    )
+    install_success_rate_pct = (
+        (float(install_succeeded) / float(install_attempts)) * 100.0
+        if install_attempts > 0
+        else 0.0
+    )
+    feature_adoption_rate_pct = (
+        (float(feature_adopted_journeys) / float(len(journeys))) * 100.0
+        if journeys
+        else 0.0
+    )
+    returning_journeys = []
+    for row in journeys:
+        try:
+            iteration = int(row.get("iteration"))  # type: ignore[arg-type]
+        except Exception:
+            iteration = 0
+        if iteration > 1:
+            returning_journeys.append(row)
+    returning_journeys_succeeded = sum(1 for row in returning_journeys if bool(row.get("success")))
+    retention_proxy_rate_pct = (
+        (float(returning_journeys_succeeded) / float(len(returning_journeys))) * 100.0
+        if returning_journeys
+        else success_rate_pct
+    )
+    retention_proxy_source = "returning_journeys" if returning_journeys else "all_journeys_fallback"
 
     summary = {
         "journeys_total": len(journeys),
@@ -564,6 +765,22 @@ def main() -> int:
         "plan_dispatch_succeeded": int(plan_dispatch_succeeded),
         "execute_dispatch_succeeded": int(execute_dispatch_succeeded),
         "plan_to_execute_conversion_rate_pct": round(plan_to_execute_conversion_rate_pct, 4),
+        "activation_attempts": int(activation_attempts),
+        "activation_succeeded": int(activation_succeeded),
+        "activation_blocked": int(activation_blocked),
+        "activation_success_rate_pct": round(activation_success_rate_pct, 4),
+        "activation_blocked_rate_pct": round(activation_blocked_rate_pct, 4),
+        "p95_activation_latency_ms": round(_percentile(activation_latency_samples, 95), 2),
+        "activation_smoke_pass_rate_pct": round(activation_smoke_pass_rate_pct, 4),
+        "install_attempts": int(install_attempts),
+        "install_succeeded": int(install_succeeded),
+        "install_success_rate_pct": round(install_success_rate_pct, 4),
+        "returning_journeys_total": len(returning_journeys),
+        "returning_journeys_succeeded": int(returning_journeys_succeeded),
+        "retention_proxy_success_rate_pct": round(retention_proxy_rate_pct, 4),
+        "retention_proxy_source": retention_proxy_source,
+        "feature_adopted_journeys": int(feature_adopted_journeys),
+        "feature_adoption_rate_pct": round(feature_adoption_rate_pct, 4),
     }
 
     checks = [
@@ -607,6 +824,54 @@ def main() -> int:
             comparator="gte",
             unit="pct",
         ),
+        _check(
+            check_id="journey.activation_success_rate_pct",
+            source="user_journey_benchmark",
+            value=_safe_float(summary.get("activation_success_rate_pct")),
+            threshold=float(args.min_activation_success_rate_pct),
+            comparator="gte",
+            unit="pct",
+        ),
+        _check(
+            check_id="journey.activation_blocked_rate_pct",
+            source="user_journey_benchmark",
+            value=_safe_float(summary.get("activation_blocked_rate_pct")),
+            threshold=float(args.max_blocked_activation_rate_pct),
+            comparator="lte",
+            unit="pct",
+        ),
+        _check(
+            check_id="journey.p95_activation_latency_ms",
+            source="user_journey_benchmark",
+            value=_safe_float(summary.get("p95_activation_latency_ms")),
+            threshold=float(args.max_p95_activation_latency_ms),
+            comparator="lte",
+            unit="ms",
+        ),
+        _check(
+            check_id="journey.install_success_rate_pct",
+            source="user_journey_benchmark",
+            value=_safe_float(summary.get("install_success_rate_pct")),
+            threshold=float(args.min_install_success_rate_pct),
+            comparator="gte",
+            unit="pct",
+        ),
+        _check(
+            check_id="journey.retention_proxy_success_rate_pct",
+            source="user_journey_benchmark",
+            value=_safe_float(summary.get("retention_proxy_success_rate_pct")),
+            threshold=float(args.min_retention_proxy_success_rate_pct),
+            comparator="gte",
+            unit="pct",
+        ),
+        _check(
+            check_id="journey.feature_adoption_rate_pct",
+            source="user_journey_benchmark",
+            value=_safe_float(summary.get("feature_adoption_rate_pct")),
+            threshold=float(args.min_feature_adoption_rate_pct),
+            comparator="gte",
+            unit="pct",
+        ),
     ]
 
     trend_rows: list[dict[str, Any]] = []
@@ -616,6 +881,12 @@ def main() -> int:
         "p95_plan_dispatch_latency_ms": "lower_better",
         "p95_execute_dispatch_latency_ms": "lower_better",
         "plan_to_execute_conversion_rate_pct": "higher_better",
+        "activation_success_rate_pct": "higher_better",
+        "activation_blocked_rate_pct": "lower_better",
+        "p95_activation_latency_ms": "lower_better",
+        "install_success_rate_pct": "higher_better",
+        "retention_proxy_success_rate_pct": "higher_better",
+        "feature_adoption_rate_pct": "higher_better",
     }
     for metric_id, direction in metric_directions.items():
         if metric_id not in baseline_summary:
@@ -652,6 +923,7 @@ def main() -> int:
             "qos": {
                 "requested_mode": qos_mode,
                 "runtime": qos_runtime,
+                "cognition_backend": cognition_backend,
             },
             "thresholds": {
                 "min_success_rate_pct": float(args.min_success_rate_pct),
@@ -659,6 +931,12 @@ def main() -> int:
                 "max_p95_plan_dispatch_latency_ms": float(args.max_p95_plan_dispatch_latency_ms),
                 "max_p95_execute_dispatch_latency_ms": float(args.max_p95_execute_dispatch_latency_ms),
                 "min_plan_to_execute_conversion_rate_pct": float(args.min_plan_to_execute_conversion_rate_pct),
+                "min_activation_success_rate_pct": float(args.min_activation_success_rate_pct),
+                "max_blocked_activation_rate_pct": float(args.max_blocked_activation_rate_pct),
+                "max_p95_activation_latency_ms": float(args.max_p95_activation_latency_ms),
+                "min_install_success_rate_pct": float(args.min_install_success_rate_pct),
+                "min_retention_proxy_success_rate_pct": float(args.min_retention_proxy_success_rate_pct),
+                "min_feature_adoption_rate_pct": float(args.min_feature_adoption_rate_pct),
             },
         },
         "baseline": {
