@@ -364,7 +364,7 @@ class AppConfig:
             vector_index_path=vector_index_path,
             telemetry_path=telemetry_path,
             observability_otel_enabled=_parse_bool(
-                env.get("AMARYLLIS_OTEL_ENABLED", "true")
+                env.get("AMARYLLIS_OTEL_ENABLED", "false")
             ),
             observability_otlp_endpoint=(env.get("AMARYLLIS_OTEL_OTLP_ENDPOINT") or "").strip() or None,
             observability_slo_window_sec=max(

@@ -24,6 +24,7 @@ from api.flow_api import router as flow_router
 from api.inbox_api import router as inbox_router
 from api.memory_api import router as memory_router
 from api.model_api import router as model_router
+from api.privacy_api import router as privacy_router
 from api.security_api import router as security_router
 from api.supervisor_api import router as supervisor_router
 from api.tool_api import router as tool_router
@@ -702,6 +703,7 @@ def create_app() -> FastAPI:
     app.include_router(flow_router)
     app.include_router(inbox_router)
     app.include_router(memory_router)
+    app.include_router(privacy_router)
     app.include_router(supervisor_router)
     app.include_router(tool_router)
     app.include_router(voice_router)
@@ -713,6 +715,7 @@ def create_app() -> FastAPI:
     app.include_router(flow_router, prefix="/v1")
     app.include_router(inbox_router, prefix="/v1")
     app.include_router(memory_router, prefix="/v1")
+    app.include_router(privacy_router, prefix="/v1")
     app.include_router(supervisor_router, prefix="/v1")
     app.include_router(tool_router, prefix="/v1")
     app.include_router(voice_router, prefix="/v1")

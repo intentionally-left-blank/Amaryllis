@@ -115,6 +115,9 @@ jobs:
             tests.test_model_artifact_admission_api \
             tests.test_model_artifact_admission_gate \
             tests.test_environment_passport_gate \
+            tests.test_privacy_transparency_contract \
+            tests.test_privacy_transparency_api \
+            tests.test_offline_transparency_gate \
             tests.test_unified_session_manager \
             tests.test_flow_api \
             tests.test_supervisor_task_graph_manager \
@@ -211,6 +214,19 @@ jobs:
         with:
           name: injection-containment-report
           path: artifacts/injection-containment-report.json
+          if-no-files-found: error
+
+      - name: Run offline transparency gate (blocking)
+        run: |
+          python scripts/release/offline_transparency_gate.py \
+            --min-local-providers "${AMARYLLIS_OFFLINE_GATE_MIN_LOCAL_PROVIDERS:-1}" \
+            --output "artifacts/offline-transparency-report.json"
+
+      - name: Upload offline transparency report
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-transparency-report
+          path: artifacts/offline-transparency-report.json
           if-no-files-found: error
 
       - name: Run model artifact admission gate (blocking)

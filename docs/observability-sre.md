@@ -86,7 +86,9 @@ Reference:
 
 ## OpenTelemetry
 
-Enable OTel export:
+OTel export is opt-in and disabled by default.
+
+Enable export explicitly:
 
 - `AMARYLLIS_OTEL_ENABLED=true`
 - `AMARYLLIS_OTEL_OTLP_ENDPOINT=http://collector:4318/v1/traces`

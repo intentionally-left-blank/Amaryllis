@@ -56,6 +56,10 @@ final class AmaryllisAPIClient {
         return try await request(path: path, method: "GET", body: Optional<Data>.none)
     }
 
+    func privacyTransparency() async throws -> APIPrivacyTransparencyContract {
+        try await request(path: "/privacy/transparency", method: "GET", body: Optional<Data>.none)
+    }
+
     func listModelPackages(
         profile: String? = nil,
         includeRemoteProviders: Bool = true,

@@ -254,6 +254,100 @@ struct APIModelPackageInstallResponse: Decodable {
     }
 }
 
+struct APIPrivacyTransparencyContract: Decodable {
+    struct Active: Decodable {
+        let provider: String
+        let model: String
+    }
+
+    struct Offline: Decodable {
+        let preferredMode: String
+        let offlinePossible: Bool
+        let offlineReadyNow: Bool
+        let networkRequiredNow: Bool
+        let activeProviderLocal: Bool
+        let localProviders: [String]
+        let cloudProviders: [String]
+
+        private enum CodingKeys: String, CodingKey {
+            case preferredMode = "preferred_mode"
+            case offlinePossible = "offline_possible"
+            case offlineReadyNow = "offline_ready_now"
+            case networkRequiredNow = "network_required_now"
+            case activeProviderLocal = "active_provider_local"
+            case localProviders = "local_providers"
+            case cloudProviders = "cloud_providers"
+        }
+    }
+
+    struct Telemetry: Decodable {
+        let mode: String
+        let localEventsEnabled: Bool
+        let localEventsPath: String
+        let exportOptInDefault: Bool
+        let exportEnabled: Bool
+        let exportActive: Bool
+        let exportEndpoint: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case mode
+            case localEventsEnabled = "local_events_enabled"
+            case localEventsPath = "local_events_path"
+            case exportOptInDefault = "export_opt_in_default"
+            case exportEnabled = "export_enabled"
+            case exportActive = "export_active"
+            case exportEndpoint = "export_endpoint"
+        }
+    }
+
+    struct NetworkIntent: Decodable, Identifiable {
+        let id: String
+        let label: String
+        let requiresNetwork: Bool
+        let when: String
+        let destinations: [String]
+        let controls: [String]
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case label
+            case requiresNetwork = "requires_network"
+            case when
+            case destinations
+            case controls
+        }
+    }
+
+    struct PolicyDoc: Decodable, Identifiable {
+        let id: String
+        let path: String
+    }
+
+    let contractVersion: String
+    let generatedAt: String
+    let active: Active
+    let offline: Offline
+    let telemetry: Telemetry
+    let networkIntents: [NetworkIntent]
+    let policyDocs: [PolicyDoc]
+    let requestID: String?
+    let actor: String?
+    let scopes: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case contractVersion = "contract_version"
+        case generatedAt = "generated_at"
+        case active
+        case offline
+        case telemetry
+        case networkIntents = "network_intents"
+        case policyDocs = "policy_docs"
+        case requestID = "request_id"
+        case actor
+        case scopes
+    }
+}
+
 struct APIModelDownloadJob: Decodable, Identifiable {
     let id: String
     let provider: String

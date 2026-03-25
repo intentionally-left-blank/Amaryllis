@@ -89,6 +89,12 @@ jobs:
             --max-failed-scenarios "${AMARYLLIS_NIGHTLY_INJECTION_MAX_FAILED_SCENARIOS:-0}" \
             --output "artifacts/nightly-injection-containment-report.json"
 
+      - name: Run nightly offline transparency gate (blocking)
+        run: |
+          python scripts/release/offline_transparency_gate.py \
+            --min-local-providers "${AMARYLLIS_NIGHTLY_OFFLINE_GATE_MIN_LOCAL_PROVIDERS:-1}" \
+            --output "artifacts/nightly-offline-transparency-report.json"
+
       - name: Run nightly model artifact admission gate (blocking)
         run: |
           python scripts/release/model_artifact_admission_gate.py \
@@ -170,6 +176,14 @@ jobs:
         with:
           name: nightly-injection-containment-report
           path: artifacts/nightly-injection-containment-report.json
+          if-no-files-found: error
+
+      - name: Upload nightly offline transparency report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-offline-transparency-report
+          path: artifacts/nightly-offline-transparency-report.json
           if-no-files-found: error
 
       - name: Upload nightly model artifact admission report

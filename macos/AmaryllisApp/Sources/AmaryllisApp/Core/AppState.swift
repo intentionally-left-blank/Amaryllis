@@ -8,6 +8,7 @@ final class AppState: ObservableObject {
     @Published var runtimeDirectory: String
     @Published var modelCatalog: APIModelCatalog?
     @Published var modelPackageCatalog: APIModelPackageCatalog?
+    @Published var privacyTransparency: APIPrivacyTransparencyContract?
     @Published var selectedModel: String?
     @Published var selectedProvider: String?
     @Published var openAIBaseURL: String
@@ -190,6 +191,7 @@ final class AppState: ObservableObject {
 
         await refreshModels(includeSuggested: false)
         await refreshToolingState()
+        await refreshPrivacyTransparency()
 
         if !hasActiveModelConfigured {
             lastError = "Runtime is online, but no model is active yet. Open Models and press Install & Use on a recommended model."
@@ -202,9 +204,11 @@ final class AppState: ObservableObject {
         do {
             _ = try await apiClient.health()
             runtimeManager.connectionState = .online
+            await refreshPrivacyTransparency(ensureRuntime: false)
             lastError = nil
         } catch {
             runtimeManager.connectionState = .offline
+            privacyTransparency = nil
             lastError = error.localizedDescription
         }
     }
@@ -245,6 +249,7 @@ final class AppState: ObservableObject {
                 includeRemoteProviders: includeRemoteProviders,
                 limit: 80
             )
+            await refreshPrivacyTransparency(ensureRuntime: false)
             lastError = nil
         } catch {
             lastError = error.localizedDescription
@@ -275,6 +280,24 @@ final class AppState: ObservableObject {
         } catch {
             if isLikelyMissingModelPackageEndpoints(error) {
                 modelPackageCatalog = nil
+                return
+            }
+            lastError = error.localizedDescription
+        }
+    }
+
+    func refreshPrivacyTransparency(ensureRuntime: Bool = true) async {
+        if ensureRuntime {
+            guard await ensureRuntimeOnline() else {
+                return
+            }
+        }
+        do {
+            let payload = try await apiClient.privacyTransparency()
+            privacyTransparency = payload
+        } catch {
+            if isLikelyMissingPrivacyTransparencyEndpoint(error) {
+                privacyTransparency = nil
                 return
             }
             lastError = error.localizedDescription
@@ -932,6 +955,7 @@ final class AppState: ObservableObject {
         }
 
         runtimeManager.connectionState = .offline
+        privacyTransparency = nil
         let logsHint = runtimeManager.logs.suffix(2).joined(separator: " | ")
         if logsHint.isEmpty {
             lastError = "Could not connect to the server. Open Settings and set Runtime Directory to your Amaryllis project root."
@@ -949,6 +973,7 @@ final class AppState: ObservableObject {
             return true
         } catch {
             runtimeManager.connectionState = .offline
+            privacyTransparency = nil
             return false
         }
     }
@@ -1018,6 +1043,11 @@ final class AppState: ObservableObject {
     }
 
     private func isLikelyMissingModelPackageEndpoints(_ error: Error) -> Bool {
+        let detail = error.localizedDescription.lowercased()
+        return detail.contains("404") || detail.contains("not found")
+    }
+
+    private func isLikelyMissingPrivacyTransparencyEndpoint(_ error: Error) -> Bool {
         let detail = error.localizedDescription.lowercased()
         return detail.contains("404") || detail.contains("not found")
     }

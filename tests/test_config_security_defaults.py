@@ -31,7 +31,7 @@ class ConfigSecurityDefaultsTests(unittest.TestCase):
         self.assertGreaterEqual(config.run_lease_ttl_sec, config.run_attempt_timeout_sec + 5.0)
         self.assertEqual(config.api_version, "v1")
         self.assertEqual(config.api_release_channel, "stable")
-        self.assertTrue(config.observability_otel_enabled)
+        self.assertFalse(config.observability_otel_enabled)
         self.assertTrue(config.backup_enabled)
         self.assertTrue(config.backup_verify_on_create)
         self.assertTrue(config.backup_restore_drill_enabled)
@@ -187,6 +187,24 @@ class ConfigSecurityDefaultsTests(unittest.TestCase):
         self.assertEqual(config.security_profile, "development")
         self.assertEqual(config.tool_approval_enforcement, "prompt_and_allow")
         self.assertEqual(config.plugin_signing_mode, "warn")
+
+    def test_otel_export_can_be_explicitly_enabled(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="amaryllis-config-tests-") as tmp:
+            support_dir = Path(tmp) / "support"
+            with patch.dict(
+                os.environ,
+                {
+                    "AMARYLLIS_SUPPORT_DIR": str(support_dir),
+                    "AMARYLLIS_AUTH_TOKENS": "token-1:user-1:user",
+                    "AMARYLLIS_OTEL_ENABLED": "true",
+                    "AMARYLLIS_OTEL_OTLP_ENDPOINT": "http://collector:4318/v1/traces",
+                },
+                clear=True,
+            ):
+                config = AppConfig.from_env()
+
+        self.assertTrue(config.observability_otel_enabled)
+        self.assertEqual(config.observability_otlp_endpoint, "http://collector:4318/v1/traces")
 
     def test_parse_auth_tokens_from_csv(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-config-tests-") as tmp:

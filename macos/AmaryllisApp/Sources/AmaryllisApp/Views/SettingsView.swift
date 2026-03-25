@@ -18,6 +18,7 @@ struct SettingsView: View {
     @State private var memoryRawJSON: String = "{}"
     @State private var isDebugLoading: Bool = false
     @State private var isToolsLoading: Bool = false
+    @State private var isPrivacyLoading: Bool = false
 
     var body: some View {
         ScrollView {
@@ -365,6 +366,96 @@ struct SettingsView: View {
             .amaryllisCard()
 
             VStack(alignment: .leading, spacing: 10) {
+                Text("Privacy & Offline")
+                    .font(AmaryllisTheme.sectionFont(size: 17))
+                    .foregroundStyle(AmaryllisTheme.textPrimary)
+
+                HStack(spacing: 8) {
+                    Button("Refresh Privacy State") {
+                        Task { await refreshPrivacyState() }
+                    }
+                    .buttonStyle(AmaryllisSecondaryButtonStyle())
+                    .disabled(isPrivacyLoading)
+
+                    if isPrivacyLoading {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+
+                if let contract = appState.privacyTransparency {
+                    HStack(spacing: 8) {
+                        privacyBadge(
+                            title: "Offline Ready",
+                            value: contract.offline.offlineReadyNow
+                        )
+                        privacyBadge(
+                            title: "Network Required",
+                            value: contract.offline.networkRequiredNow
+                        )
+                        privacyBadge(
+                            title: "Telemetry Export",
+                            value: contract.telemetry.exportEnabled
+                        )
+                    }
+
+                    Text("Active: \(contract.active.provider) / \(contract.active.model)")
+                        .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+
+                    Text("Local providers: \(contract.offline.localProviders.joined(separator: ", "))")
+                        .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+
+                    Text("Cloud providers: \(contract.offline.cloudProviders.joined(separator: ", "))")
+                        .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+
+                    Text("Telemetry mode: \(contract.telemetry.mode) | local events: \(contract.telemetry.localEventsPath)")
+                        .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+
+                    if !contract.networkIntents.isEmpty {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 8) {
+                                ForEach(Array(contract.networkIntents.prefix(8))) { intent in
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("\(intent.label) [\(intent.requiresNetwork ? "network" : "local")]")
+                                            .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                                            .foregroundStyle(AmaryllisTheme.textPrimary)
+                                        Text(intent.when)
+                                            .font(AmaryllisTheme.bodyFont(size: 10, weight: .medium))
+                                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                                        if !intent.destinations.isEmpty {
+                                            Text("destinations: \(intent.destinations.joined(separator: ", "))")
+                                                .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                                                .foregroundStyle(AmaryllisTheme.textSecondary)
+                                                .lineLimit(2)
+                                        }
+                                        if !intent.controls.isEmpty {
+                                            Text("controls: \(intent.controls.joined(separator: " | "))")
+                                                .font(AmaryllisTheme.bodyFont(size: 10, weight: .medium))
+                                                .foregroundStyle(AmaryllisTheme.textSecondary)
+                                                .lineLimit(2)
+                                        }
+                                    }
+                                    .padding(8)
+                                    .background(AmaryllisTheme.surface)
+                                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 90, maxHeight: 190)
+                    }
+                } else {
+                    Text("Privacy contract not available yet. Start runtime and refresh this section.")
+                        .font(AmaryllisTheme.bodyFont(size: 12, weight: .medium))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                }
+            }
+            .amaryllisCard()
+
+            VStack(alignment: .leading, spacing: 10) {
                 Text("Memory Debug")
                     .font(AmaryllisTheme.sectionFont(size: 17))
                     .foregroundStyle(AmaryllisTheme.textPrimary)
@@ -528,7 +619,10 @@ struct SettingsView: View {
         }
         .onAppear {
             appState.runtimeManager.setLogCaptureEnabled(true)
-            Task { await refreshToolingState() }
+            Task {
+                await refreshToolingState()
+                await refreshPrivacyState()
+            }
         }
         .onDisappear {
             appState.runtimeManager.setLogCaptureEnabled(false)
@@ -811,6 +905,12 @@ struct SettingsView: View {
         await appState.refreshToolingState()
     }
 
+    private func refreshPrivacyState() async {
+        isPrivacyLoading = true
+        defer { isPrivacyLoading = false }
+        await appState.refreshPrivacyTransparency()
+    }
+
     private func renderArgumentsPreview(_ arguments: [String: JSONValue]) -> String {
         guard let data = try? JSONEncoder().encode(arguments),
               let object = try? JSONSerialization.jsonObject(with: data, options: []),
@@ -826,5 +926,19 @@ struct SettingsView: View {
             return "Strict profile: high-risk tools are denied by default unless listed in Allowed High-Risk Tools. Filesystem write can be disabled and tool budgets cap bursty execution."
         }
         return "Balanced profile: tools follow approval mode, per-tool guards, and tool budgets (window/per-tool/total/high-risk). Use strict profile for deny-by-default behavior."
+    }
+
+    private func privacyBadge(title: String, value: Bool) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+            Text(value ? "yes" : "no")
+                .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                .foregroundStyle(value ? Color.green : AmaryllisTheme.textSecondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(AmaryllisTheme.surface)
+        .clipShape(Capsule())
     }
 }
