@@ -1,0 +1,51 @@
+{
+  "generated_at": "2026-03-26T00:00:00+00:00",
+  "suite": "adoption_kpi_snapshot_baseline_v1",
+  "release": {
+    "release_id": "baseline",
+    "release_channel": "baseline",
+    "commit_sha": "baseline"
+  },
+  "signals": [
+    {
+      "metric_id": "adoption_schema_gate.status",
+      "value": 1.0
+    },
+    {
+      "metric_id": "adoption_schema_gate.checks_failed",
+      "value": 0.0
+    },
+    {
+      "metric_id": "user_journey.activation_success_rate_pct",
+      "value": 100.0
+    },
+    {
+      "metric_id": "user_journey.activation_blocked_rate_pct",
+      "value": 0.0
+    },
+    {
+      "metric_id": "user_journey.install_success_rate_pct",
+      "value": 100.0
+    },
+    {
+      "metric_id": "user_journey.retention_proxy_success_rate_pct",
+      "value": 100.0
+    },
+    {
+      "metric_id": "user_journey.feature_adoption_rate_pct",
+      "value": 100.0
+    },
+    {
+      "metric_id": "api_quickstart_compat.pass_rate_pct",
+      "value": 100.0
+    },
+    {
+      "metric_id": "distribution_channel_manifest.coverage_pct",
+      "value": 100.0
+    },
+    {
+      "metric_id": "distribution_channel_manifest.checks_failed",
+      "value": 0.0
+    }
+  ]
+}

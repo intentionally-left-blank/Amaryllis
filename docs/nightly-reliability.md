@@ -73,6 +73,18 @@ python3 scripts/release/build_adoption_kpi_snapshot.py \
   --release-channel nightly \
   --commit-sha "<sha>"
 
+python3 scripts/release/adoption_kpi_trend_gate.py \
+  --snapshot-report artifacts/nightly-adoption-kpi-snapshot-report.json \
+  --baseline eval/baselines/quality/adoption_kpi_snapshot_baseline.json \
+  --max-activation-success-regression-pct 1 \
+  --max-activation-blocked-rate-increase-pct 0 \
+  --max-install-success-regression-pct 1 \
+  --max-retention-proxy-regression-pct 1 \
+  --max-feature-adoption-regression-pct 2 \
+  --max-api-quickstart-pass-rate-regression-pct 1 \
+  --max-channel-coverage-regression-pct 1 \
+  --output artifacts/nightly-adoption-kpi-trend-gate-report.json
+
 python3 scripts/release/publish_adoption_kpi_snapshot.py \
   --snapshot-report artifacts/nightly-adoption-kpi-snapshot-report.json \
   --channel nightly \
@@ -116,6 +128,7 @@ Nightly adoption KPI snapshot artifacts:
 
 ```text
 artifacts/nightly-adoption-kpi-snapshot-report.json
+artifacts/nightly-adoption-kpi-trend-gate-report.json
 artifacts/nightly-adoption-kpi-snapshot-runtime-export.json
 ```
 
@@ -163,6 +176,7 @@ Baseline file:
 
 ```text
 eval/baselines/reliability/nightly_smoke_baseline.json
+eval/baselines/quality/adoption_kpi_snapshot_baseline.json
 ```
 
 Used for trend deltas only. Strict pass/fail is governed by explicit threshold flags/env vars.

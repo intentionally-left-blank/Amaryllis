@@ -6,6 +6,7 @@
 
 Scripts:
 - `scripts/release/build_adoption_kpi_snapshot.py`
+- `scripts/release/adoption_kpi_trend_gate.py`
 - `scripts/release/publish_adoption_kpi_snapshot.py`
 
 ## Inputs
@@ -31,18 +32,34 @@ Optional:
 
 Builder returns non-zero when `summary.status != pass` (blocking behavior).
 
+Trend gate contract:
+- `suite`: `adoption_kpi_trend_gate_v1`
+- validates regression budgets against baseline:
+  - activation success
+  - activation blocked rate (increase)
+  - install success
+  - retention proxy
+  - feature adoption
+  - API quickstart pass rate
+  - distribution channel coverage
+
+Baseline:
+- `eval/baselines/quality/adoption_kpi_snapshot_baseline.json`
+
 ## CI Integration
 
 Release workflow (`release-gate.yml`, `Release KPI Pack`):
 - runs schema gate (blocking),
 - builds `artifacts/adoption-kpi-snapshot-final.json` (blocking),
+- runs `artifacts/adoption-kpi-trend-gate-report.json` gate (blocking),
 - publishes runtime-export copy `artifacts/adoption-kpi-snapshot-runtime-export.json`,
-- uploads both artifacts.
+- uploads all artifacts.
 
 Nightly workflow (`nightly-reliability.yml`):
 - builds `artifacts/nightly-adoption-kpi-snapshot-report.json` (blocking),
+- runs `artifacts/nightly-adoption-kpi-trend-gate-report.json` gate (blocking),
 - publishes runtime-export copy `artifacts/nightly-adoption-kpi-snapshot-runtime-export.json`,
-- uploads both artifacts.
+- uploads all artifacts.
 
 ## Runtime Export
 
@@ -53,6 +70,11 @@ Default runtime path:
 Publisher example:
 
 ```bash
+python scripts/release/adoption_kpi_trend_gate.py \
+  --snapshot-report artifacts/adoption-kpi-snapshot-final.json \
+  --baseline eval/baselines/quality/adoption_kpi_snapshot_baseline.json \
+  --output artifacts/adoption-kpi-trend-gate-report.json
+
 python scripts/release/publish_adoption_kpi_snapshot.py \
   --snapshot-report artifacts/adoption-kpi-snapshot-final.json \
   --channel release \

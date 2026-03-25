@@ -173,6 +173,7 @@ Adoption lane slices (next 10 working days after PR-1..PR-8):
 | macOS desktop parity smoke | `scripts/release/macos_desktop_parity_smoke.py` | staging-blocking |
 | adoption KPI schema gate | `scripts/release/adoption_kpi_schema_gate.py` | blocking |
 | adoption KPI snapshot build/publish | `scripts/release/build_adoption_kpi_snapshot.py` + `scripts/release/publish_adoption_kpi_snapshot.py` | blocking |
+| adoption KPI trend gate | `scripts/release/adoption_kpi_trend_gate.py` | blocking |
 
 Additional Phase 4 gates to add in this plan:
 - generation-loop conformance gate

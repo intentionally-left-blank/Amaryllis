@@ -133,6 +133,7 @@ jobs:
             tests.test_user_journey_benchmark \
             tests.test_adoption_kpi_schema_gate \
             tests.test_adoption_kpi_snapshot_builder \
+            tests.test_adoption_kpi_trend_gate \
             tests.test_publish_adoption_kpi_snapshot \
             tests.test_runtime_service_manifest_renderer \
             tests.test_runtime_service_lifecycle \
@@ -708,6 +709,27 @@ jobs:
             --release-id "${GITHUB_REF_NAME:-${GITHUB_SHA}}" \
             --release-channel "${RELEASE_CHANNEL}" \
             --commit-sha "${GITHUB_SHA}"
+
+      - name: Run adoption KPI trend gate (blocking)
+        run: |
+          python scripts/release/adoption_kpi_trend_gate.py \
+            --snapshot-report "artifacts/adoption-kpi-snapshot-final.json" \
+            --baseline "eval/baselines/quality/adoption_kpi_snapshot_baseline.json" \
+            --max-activation-success-regression-pct "${AMARYLLIS_ADOPTION_MAX_ACTIVATION_SUCCESS_REGRESSION_PCT:-1}" \
+            --max-activation-blocked-rate-increase-pct "${AMARYLLIS_ADOPTION_MAX_ACTIVATION_BLOCKED_RATE_INCREASE_PCT:-0}" \
+            --max-install-success-regression-pct "${AMARYLLIS_ADOPTION_MAX_INSTALL_SUCCESS_REGRESSION_PCT:-1}" \
+            --max-retention-proxy-regression-pct "${AMARYLLIS_ADOPTION_MAX_RETENTION_PROXY_REGRESSION_PCT:-1}" \
+            --max-feature-adoption-regression-pct "${AMARYLLIS_ADOPTION_MAX_FEATURE_ADOPTION_REGRESSION_PCT:-2}" \
+            --max-api-quickstart-pass-rate-regression-pct "${AMARYLLIS_ADOPTION_MAX_API_QUICKSTART_PASS_RATE_REGRESSION_PCT:-1}" \
+            --max-channel-coverage-regression-pct "${AMARYLLIS_ADOPTION_MAX_CHANNEL_COVERAGE_REGRESSION_PCT:-1}" \
+            --output "artifacts/adoption-kpi-trend-gate-report.json"
+
+      - name: Upload adoption KPI trend gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: adoption-kpi-trend-gate-report
+          path: artifacts/adoption-kpi-trend-gate-report.json
+          if-no-files-found: error
 
       - name: Publish adoption KPI snapshot for runtime export
         run: |

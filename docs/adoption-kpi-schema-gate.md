@@ -38,6 +38,7 @@ Report payload includes:
 Companion publication artifact:
 - `docs/adoption-kpi-snapshot.md`
 - `scripts/release/build_adoption_kpi_snapshot.py`
+- `scripts/release/adoption_kpi_trend_gate.py`
 - `scripts/release/publish_adoption_kpi_snapshot.py`
 
 ## CI Integration
