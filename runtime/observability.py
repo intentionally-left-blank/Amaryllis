@@ -305,6 +305,15 @@ class SREMonitor:
             "# HELP amaryllis_release_desktop_staging_checks_failed Desktop staging parity failed checks count.",
             "# TYPE amaryllis_release_desktop_staging_checks_failed gauge",
             f"amaryllis_release_desktop_staging_checks_failed {float(release_quality['desktop_staging_checks_failed']):.6f}",
+            "# HELP amaryllis_release_qos_signal_present QoS governor signal presence in release quality snapshot (0/1).",
+            "# TYPE amaryllis_release_qos_signal_present gauge",
+            f"amaryllis_release_qos_signal_present {float(release_quality['qos_signal_present']):.0f}",
+            "# HELP amaryllis_release_qos_status QoS governor gate status in release quality snapshot (1=pass, 0=fail).",
+            "# TYPE amaryllis_release_qos_status gauge",
+            f"amaryllis_release_qos_status {float(release_quality['qos_status']):.6f}",
+            "# HELP amaryllis_release_qos_checks_failed QoS governor gate failed checks in release quality snapshot.",
+            "# TYPE amaryllis_release_qos_checks_failed gauge",
+            f"amaryllis_release_qos_checks_failed {float(release_quality['qos_checks_failed']):.6f}",
             "# HELP amaryllis_nightly_mission_snapshot_loaded Nightly mission report snapshot availability (0/1).",
             "# TYPE amaryllis_nightly_mission_snapshot_loaded gauge",
             f"amaryllis_nightly_mission_snapshot_loaded {float(nightly_mission['snapshot_loaded']):.0f}",
@@ -359,6 +368,9 @@ class SREMonitor:
             "desktop_staging_status": 0.0,
             "desktop_staging_error_rate_pct": 0.0,
             "desktop_staging_checks_failed": 0.0,
+            "qos_signal_present": 0.0,
+            "qos_status": 0.0,
+            "qos_checks_failed": 0.0,
         }
         path_raw = str(self._release_quality_dashboard_path or "").strip()
         if not path_raw:
@@ -389,6 +401,15 @@ class SREMonitor:
             metrics["desktop_staging_error_rate_pct"] = max(0.0, float(desktop_error_rate))
         if desktop_checks_failed is not None:
             metrics["desktop_staging_checks_failed"] = max(0.0, float(desktop_checks_failed))
+
+        qos_status = self._signal_value(payload, "qos_governor.status")
+        qos_checks_failed = self._signal_value(payload, "qos_governor.checks_failed")
+        if qos_status is not None or qos_checks_failed is not None:
+            metrics["qos_signal_present"] = 1.0
+        if qos_status is not None:
+            metrics["qos_status"] = 1.0 if float(qos_status) >= 1.0 else 0.0
+        if qos_checks_failed is not None:
+            metrics["qos_checks_failed"] = max(0.0, float(qos_checks_failed))
         return metrics
 
     def _nightly_mission_snapshot_metrics(self) -> dict[str, float]:

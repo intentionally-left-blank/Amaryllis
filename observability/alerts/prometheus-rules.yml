@@ -55,6 +55,15 @@ groups:
           summary: "Amaryllis desktop staging parity failed"
           description: "macOS desktop parity staging signal is failing in latest release quality snapshot."
 
+      - alert: AmaryllisReleaseQoSGateFailed
+        expr: (amaryllis_release_qos_signal_present == 1) and (amaryllis_release_qos_status < 1)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Amaryllis release QoS gate failed"
+          description: "QoS governor gate signal is failing in latest release quality snapshot."
+
       - alert: AmaryllisNightlyMissionFailed
         expr: (amaryllis_nightly_mission_snapshot_loaded == 1) and (amaryllis_nightly_mission_status < 1)
         for: 10m

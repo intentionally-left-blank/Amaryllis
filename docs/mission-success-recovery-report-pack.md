@@ -41,7 +41,7 @@ The script accepts any subset and produces a normalized report with:
 - extracted KPI values
 - normalized pass/fail checks (`gte` / `lte`)
 - summary status (`pass` / `fail`)
-- class-level KPI/check breakdown (`mission_execution`, `recovery`, `quality`, `distribution`, `desktop_staging`, `user_flow`, `nightly_reliability`)
+- class-level KPI/check breakdown (`mission_execution`, `recovery`, `quality`, `runtime_qos`, `distribution`, `desktop_staging`, `user_flow`, `nightly_reliability`)
 
 Optional user-flow source flag:
 - `--user-journey-report <path>`

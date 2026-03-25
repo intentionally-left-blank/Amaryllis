@@ -97,6 +97,22 @@ def _safe_float(value: Any, *, default: float = 0.0) -> float:
         return float(default)
 
 
+def _signal_value(payload: dict[str, Any], metric_id: str) -> float | None:
+    signals = payload.get("signals")
+    if not isinstance(signals, list):
+        return None
+    for item in signals:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("metric_id") or "").strip() != str(metric_id).strip():
+            continue
+        try:
+            return float(item.get("value"))
+        except Exception:
+            return None
+    return None
+
+
 def _check(
     *,
     check_id: str,
@@ -133,6 +149,7 @@ def _source_class(source: str) -> str:
         "mission_queue": "mission_execution",
         "fault_injection": "recovery",
         "quality_dashboard": "quality",
+        "qos_governor": "runtime_qos",
         "distribution_resilience": "distribution",
         "macos_desktop_parity": "desktop_staging",
         "user_journey": "user_flow",
@@ -150,6 +167,8 @@ def _kpi_class(kpi_key: str) -> str:
         return "recovery"
     if normalized.startswith("release_quality_"):
         return "quality"
+    if normalized.startswith("qos_"):
+        return "runtime_qos"
     if normalized.startswith("distribution_"):
         return "distribution"
     if normalized.startswith("desktop_staging_") or normalized.startswith("macos_desktop_"):
@@ -166,6 +185,7 @@ def _class_order() -> list[str]:
         "mission_execution",
         "recovery",
         "quality",
+        "runtime_qos",
         "distribution",
         "desktop_staging",
         "user_flow",
@@ -368,6 +388,32 @@ def main() -> int:
             )
         )
         kpis["release_quality_score_pct"] = round(score, 4)
+        qos_status = _signal_value(quality, "qos_governor.status")
+        qos_checks_failed = _signal_value(quality, "qos_governor.checks_failed")
+        if qos_status is not None:
+            checks.append(
+                _check(
+                    check_id="qos_governor.status",
+                    source="qos_governor",
+                    value=float(qos_status),
+                    threshold=1.0,
+                    comparator="gte",
+                    unit="bool",
+                )
+            )
+            kpis["qos_gate_status"] = 1.0 if float(qos_status) >= 1.0 else 0.0
+        if qos_checks_failed is not None:
+            checks.append(
+                _check(
+                    check_id="qos_governor.checks_failed",
+                    source="qos_governor",
+                    value=float(qos_checks_failed),
+                    threshold=0.0,
+                    comparator="lte",
+                    unit="count",
+                )
+            )
+            kpis["qos_gate_checks_failed"] = int(max(0.0, float(qos_checks_failed)))
 
     distribution = reports.get("distribution_resilience")
     if isinstance(distribution, dict):

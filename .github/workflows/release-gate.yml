@@ -377,6 +377,7 @@ jobs:
             --mission-queue-report "artifacts/mission-queue-load-report.json" \
             --runtime-lifecycle-report "artifacts/runtime-lifecycle-smoke-report.json" \
             --user-journey-report "artifacts/user-journey-benchmark-report.json" \
+            --qos-governor-report "artifacts/qos-governor-gate-report.json" \
             ${API_QUICKSTART_ARG} \
             ${MACOS_DESKTOP_PARITY_ARG} \
             --baseline "eval/baselines/quality/release_quality_dashboard_baseline.json" \
@@ -560,6 +561,12 @@ jobs:
           name: api-quickstart-compat-report
           path: artifacts/api-quickstart
 
+      - name: Download QoS governor gate report
+        uses: actions/download-artifact@v4
+        with:
+          name: qos-governor-gate-report
+          path: artifacts/qos-governor
+
       - name: Download macOS desktop parity smoke report (staging, optional)
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -587,6 +594,7 @@ jobs:
             --mission-queue-report "artifacts/mission-queue/mission-queue-load-report.json" \
             --runtime-lifecycle-report "artifacts/runtime-lifecycle/runtime-lifecycle-smoke-report.json" \
             --user-journey-report "artifacts/user-journey/user-journey-benchmark-report.json" \
+            --qos-governor-report "artifacts/qos-governor/qos-governor-gate-report.json" \
             --distribution-resilience-report "artifacts/distribution/distribution-resilience-report.json" \
             --api-quickstart-report "artifacts/api-quickstart/api-quickstart-compat-report.json" \
             ${MACOS_DESKTOP_PARITY_ARG} \

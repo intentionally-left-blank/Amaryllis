@@ -14,7 +14,7 @@ def _parse_args() -> argparse.Namespace:
         description=(
             "Build consolidated release quality dashboard snapshot from gate reports "
             "(perf/fault/injection-containment/model-artifact-admission/environment-passport/mission-queue/runtime-lifecycle/user-journey "
-            "with optional distribution resilience, API quickstart compatibility, and macOS desktop parity staging)."
+            "with optional distribution resilience, API quickstart compatibility, QoS governor gate, and macOS desktop parity staging)."
         )
     )
     parser.add_argument(
@@ -66,6 +66,11 @@ def _parse_args() -> argparse.Namespace:
         "--api-quickstart-report",
         default="",
         help="Optional path to API quickstart compatibility gate report JSON.",
+    )
+    parser.add_argument(
+        "--qos-governor-report",
+        default="",
+        help="Optional path to QoS governor gate report JSON.",
     )
     parser.add_argument(
         "--macos-desktop-parity-report",
@@ -221,6 +226,12 @@ def _build_snapshot(
     api_quickstart_summary = (
         api_quickstart.get("summary")
         if isinstance(api_quickstart, dict) and isinstance(api_quickstart.get("summary"), dict)
+        else {}
+    )
+    qos_governor = reports.get("qos_governor")
+    qos_governor_summary = (
+        qos_governor.get("summary")
+        if isinstance(qos_governor, dict) and isinstance(qos_governor.get("summary"), dict)
         else {}
     )
     macos_parity = reports.get("macos_desktop_parity")
@@ -458,6 +469,30 @@ def _build_snapshot(
                 ),
             ]
         )
+    if qos_governor_summary:
+        qos_status = str(qos_governor_summary.get("status") or "").strip().lower()
+        signals.extend(
+            [
+                _metric_signal(
+                    metric_id="qos_governor.status",
+                    source="qos_governor",
+                    category="runtime_qos",
+                    value=1.0 if qos_status == "pass" else 0.0,
+                    threshold=1.0,
+                    comparator="gte",
+                    unit="bool",
+                ),
+                _metric_signal(
+                    metric_id="qos_governor.checks_failed",
+                    source="qos_governor",
+                    category="runtime_qos",
+                    value=_safe_float(qos_governor_summary.get("checks_failed")),
+                    threshold=0.0,
+                    comparator="lte",
+                    unit="count",
+                ),
+            ]
+        )
     if macos_parity_summary:
         macos_status = str(macos_parity_summary.get("status") or "").strip().lower()
         signals.extend(
@@ -685,6 +720,8 @@ def main() -> int:
     distribution_path = _resolve_path(project_root, distribution_raw) if distribution_raw else None
     api_quickstart_raw = str(args.api_quickstart_report or "").strip()
     api_quickstart_path = _resolve_path(project_root, api_quickstart_raw) if api_quickstart_raw else None
+    qos_governor_raw = str(args.qos_governor_report or "").strip()
+    qos_governor_path = _resolve_path(project_root, qos_governor_raw) if qos_governor_raw else None
     macos_parity_raw = str(args.macos_desktop_parity_report or "").strip()
     macos_parity_path = _resolve_path(project_root, macos_parity_raw) if macos_parity_raw else None
     injection_raw = str(args.injection_containment_report or "").strip()
@@ -730,6 +767,18 @@ def main() -> int:
         except Exception as exc:
             print(
                 f"[quality-dashboard] invalid report for api_quickstart_compat: {api_quickstart_path} error={exc}",
+                file=sys.stderr,
+            )
+            return 2
+    if qos_governor_path is not None:
+        if not qos_governor_path.exists():
+            print(f"[quality-dashboard] missing report for qos_governor: {qos_governor_path}", file=sys.stderr)
+            return 2
+        try:
+            reports["qos_governor"] = _load_json_object(qos_governor_path)
+        except Exception as exc:
+            print(
+                f"[quality-dashboard] invalid report for qos_governor: {qos_governor_path} error={exc}",
                 file=sys.stderr,
             )
             return 2

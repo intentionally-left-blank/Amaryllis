@@ -74,6 +74,10 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
                         "quality_score_pct": 100.0,
                         "status": "pass",
                     },
+                    "signals": [
+                        {"metric_id": "qos_governor.status", "value": 1.0},
+                        {"metric_id": "qos_governor.checks_failed", "value": 0.0},
+                    ],
                 },
             )
             self._write_json(
@@ -154,16 +158,19 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
             self.assertGreaterEqual(int(payload.get("summary", {}).get("checks_total", 0)), 1)
             self.assertIn("journey_success_rate_pct", payload.get("kpis", {}))
             self.assertIn("journey.plan_to_execute_conversion_rate_pct", [c.get("id") for c in payload.get("checks", [])])
+            self.assertIn("qos_governor.status", [c.get("id") for c in payload.get("checks", [])])
             class_breakdown = payload.get("class_breakdown", {})
             self.assertEqual(str(class_breakdown.get("mission_execution", {}).get("status")), "pass")
             self.assertEqual(str(class_breakdown.get("distribution", {}).get("status")), "pass")
             self.assertEqual(str(class_breakdown.get("desktop_staging", {}).get("status")), "pass")
+            self.assertEqual(str(class_breakdown.get("runtime_qos", {}).get("status")), "pass")
             self.assertIn("distribution_score_pct", class_breakdown.get("distribution", {}).get("kpis", {}))
             self.assertIn(
                 "desktop_staging_error_rate_pct",
                 class_breakdown.get("desktop_staging", {}).get("kpis", {}),
             )
             self.assertIn("journey_success_rate_pct", class_breakdown.get("user_flow", {}).get("kpis", {}))
+            self.assertIn("qos_gate_checks_failed", class_breakdown.get("runtime_qos", {}).get("kpis", {}))
 
     def test_nightly_report_pack_marks_failed_summary_when_burn_gate_failed(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-mission-report-pack-") as tmp:
@@ -303,6 +310,42 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
             self.assertIn("desktop_staging.status", [c.get("id") for c in payload.get("checks", [])])
             class_breakdown = payload.get("class_breakdown", {})
             self.assertEqual(str(class_breakdown.get("desktop_staging", {}).get("status")), "fail")
+
+    def test_release_report_pack_marks_failed_summary_when_qos_signal_failed(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="amaryllis-mission-report-pack-") as tmp:
+            base = Path(tmp)
+            quality = base / "quality.json"
+            output = base / "report.json"
+
+            self._write_json(
+                quality,
+                {
+                    "suite": "release_quality_dashboard_v1",
+                    "summary": {
+                        "quality_score_pct": 100.0,
+                        "status": "pass",
+                    },
+                    "signals": [
+                        {"metric_id": "qos_governor.status", "value": 0.0},
+                        {"metric_id": "qos_governor.checks_failed", "value": 1.0},
+                    ],
+                },
+            )
+
+            proc = self._run(
+                "--quality-dashboard-report",
+                str(quality),
+                "--scope",
+                "release",
+                "--output",
+                str(output),
+            )
+            self.assertEqual(proc.returncode, 0, msg=f"stdout={proc.stdout}\nstderr={proc.stderr}")
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(payload.get("summary", {}).get("status"), "fail")
+            self.assertIn("qos_governor.status", [c.get("id") for c in payload.get("checks", [])])
+            class_breakdown = payload.get("class_breakdown", {})
+            self.assertEqual(str(class_breakdown.get("runtime_qos", {}).get("status")), "fail")
 
 
 if __name__ == "__main__":

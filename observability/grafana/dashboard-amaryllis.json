@@ -1,7 +1,7 @@
 {
   "title": "Amaryllis Runtime SRE",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "panels": [
     {
       "type": "stat",
@@ -95,6 +95,24 @@
       "targets": [
         {
           "expr": "amaryllis_release_desktop_staging_error_rate_pct"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Release QoS Gate Status",
+      "targets": [
+        {
+          "expr": "amaryllis_release_qos_status"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Release QoS Gate Checks Failed",
+      "targets": [
+        {
+          "expr": "amaryllis_release_qos_checks_failed"
         }
       ]
     },
