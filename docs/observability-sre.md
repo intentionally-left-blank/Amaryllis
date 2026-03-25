@@ -63,6 +63,8 @@ Optional nightly mission metric export:
   - `amaryllis_nightly_p95_latency_ms`
   - `amaryllis_nightly_latency_jitter_ms`
   - `amaryllis_nightly_burn_rate_gate_passed` (`1=pass`, `0=fail`)
+  - `amaryllis_nightly_adoption_trend_gate_passed` (`1=pass`, `0=fail`)
+  - `amaryllis_nightly_adoption_trend_regressed_metrics`
 
 ## SLO / SLI
 

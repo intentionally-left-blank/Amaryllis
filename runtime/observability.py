@@ -384,6 +384,12 @@ class SREMonitor:
             "# HELP amaryllis_nightly_burn_rate_gate_passed Nightly burn-rate gate status (1=pass, 0=fail).",
             "# TYPE amaryllis_nightly_burn_rate_gate_passed gauge",
             f"amaryllis_nightly_burn_rate_gate_passed {float(nightly_mission['burn_rate_gate_passed']):.6f}",
+            "# HELP amaryllis_nightly_adoption_trend_gate_passed Nightly adoption trend gate status (1=pass, 0=fail).",
+            "# TYPE amaryllis_nightly_adoption_trend_gate_passed gauge",
+            f"amaryllis_nightly_adoption_trend_gate_passed {float(nightly_mission['adoption_trend_gate_passed']):.6f}",
+            "# HELP amaryllis_nightly_adoption_trend_regressed_metrics Nightly adoption trend regressed metrics count.",
+            "# TYPE amaryllis_nightly_adoption_trend_regressed_metrics gauge",
+            f"amaryllis_nightly_adoption_trend_regressed_metrics {float(nightly_mission['adoption_trend_regressed_metrics']):.6f}",
         ]
         return "\n".join(lines) + "\n"
 
@@ -580,6 +586,8 @@ class SREMonitor:
             "p95_latency_ms": 0.0,
             "latency_jitter_ms": 0.0,
             "burn_rate_gate_passed": 0.0,
+            "adoption_trend_gate_passed": 0.0,
+            "adoption_trend_regressed_metrics": 0.0,
         }
         path_raw = str(self._nightly_mission_report_path or "").strip()
         if not path_raw:
@@ -617,6 +625,17 @@ class SREMonitor:
             metrics["burn_rate_gate_passed"] = 1.0 if burn_gate else 0.0
         else:
             metrics["burn_rate_gate_passed"] = 1.0 if self._safe_float(burn_gate, default=0.0) >= 1.0 else 0.0
+        adoption_trend_gate = kpis.get("nightly_adoption_trend_gate_passed")
+        if isinstance(adoption_trend_gate, bool):
+            metrics["adoption_trend_gate_passed"] = 1.0 if adoption_trend_gate else 0.0
+        else:
+            metrics["adoption_trend_gate_passed"] = (
+                1.0 if self._safe_float(adoption_trend_gate, default=0.0) >= 1.0 else 0.0
+            )
+        metrics["adoption_trend_regressed_metrics"] = max(
+            0.0,
+            self._safe_float(kpis.get("nightly_adoption_trend_regressed_metrics"), default=0.0),
+        )
         return metrics
 
     def _prune_unlocked(self) -> None:

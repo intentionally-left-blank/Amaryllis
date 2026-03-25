@@ -90,3 +90,12 @@ groups:
         annotations:
           summary: "Amaryllis nightly burn-rate gate failed"
           description: "Nightly mission report indicates burn-rate gate failure."
+
+      - alert: AmaryllisNightlyAdoptionTrendGateFailed
+        expr: (amaryllis_nightly_mission_snapshot_loaded == 1) and (amaryllis_nightly_adoption_trend_gate_passed < 1)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Amaryllis nightly adoption trend gate failed"
+          description: "Nightly mission report indicates adoption KPI trend regression gate failure."

@@ -26,6 +26,7 @@ Release scope:
 - mission queue load gate report
 - fault-injection reliability report
 - release quality dashboard snapshot
+- adoption KPI trend gate report
 - distribution resilience report
 - macOS desktop parity smoke report (staging)
 - user journey benchmark report
@@ -33,6 +34,7 @@ Release scope:
 Nightly scope:
 - nightly reliability report
 - nightly burn-rate gate report
+- adoption KPI trend gate report
 - nightly user journey benchmark report
 - macOS desktop parity smoke report (staging, optional)
 
@@ -41,7 +43,7 @@ The script accepts any subset and produces a normalized report with:
 - extracted KPI values
 - normalized pass/fail checks (`gte` / `lte`)
 - summary status (`pass` / `fail`)
-- class-level KPI/check breakdown (`mission_execution`, `recovery`, `quality`, `runtime_qos`, `distribution`, `desktop_staging`, `user_flow`, `nightly_reliability`)
+- class-level KPI/check breakdown (`mission_execution`, `recovery`, `quality`, `runtime_qos`, `distribution`, `desktop_staging`, `user_flow`, `adoption_growth`, `nightly_reliability`)
 
 User-flow slice includes onboarding activation KPIs when present in journey source:
 - activation success rate
@@ -59,6 +61,9 @@ Optional distribution source flag:
 
 Optional macOS desktop staging source flag:
 - `--macos-desktop-parity-report <path>`
+
+Optional adoption trend source flag:
+- `--adoption-kpi-trend-report <path>`
 
 ## CI Integration
 

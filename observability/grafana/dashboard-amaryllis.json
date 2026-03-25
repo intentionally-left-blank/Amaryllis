@@ -232,6 +232,24 @@
           "expr": "amaryllis_nightly_burn_rate_gate_passed"
         }
       ]
+    },
+    {
+      "type": "stat",
+      "title": "Nightly Adoption Trend Gate",
+      "targets": [
+        {
+          "expr": "amaryllis_nightly_adoption_trend_gate_passed"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Nightly Adoption Regressed",
+      "targets": [
+        {
+          "expr": "amaryllis_nightly_adoption_trend_regressed_metrics"
+        }
+      ]
     }
   ]
 }

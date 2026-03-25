@@ -56,6 +56,11 @@ def _parse_args() -> argparse.Namespace:
         help="Optional nightly burn-rate gate report JSON path.",
     )
     parser.add_argument(
+        "--adoption-kpi-trend-report",
+        default="",
+        help="Optional adoption KPI trend gate report JSON path.",
+    )
+    parser.add_argument(
         "--scope",
         default="auto",
         choices=("auto", "release", "nightly"),
@@ -153,6 +158,7 @@ def _source_class(source: str) -> str:
         "distribution_resilience": "distribution",
         "macos_desktop_parity": "desktop_staging",
         "user_journey": "user_flow",
+        "adoption_kpi_trend": "adoption_growth",
         "nightly_reliability": "nightly_reliability",
         "nightly_burn_rate": "nightly_reliability",
     }
@@ -175,6 +181,8 @@ def _kpi_class(kpi_key: str) -> str:
         return "desktop_staging"
     if normalized.startswith("journey_"):
         return "user_flow"
+    if normalized.startswith("adoption_trend_") or normalized.startswith("nightly_adoption_trend_"):
+        return "adoption_growth"
     if normalized.startswith("nightly_"):
         return "nightly_reliability"
     return "other"
@@ -189,6 +197,7 @@ def _class_order() -> list[str]:
         "distribution",
         "desktop_staging",
         "user_flow",
+        "adoption_growth",
         "nightly_reliability",
         "other",
     ]
@@ -272,6 +281,7 @@ def main() -> int:
         "distribution_resilience": _resolve_optional_path(project_root, str(args.distribution_resilience_report)),
         "macos_desktop_parity": _resolve_optional_path(project_root, str(args.macos_desktop_parity_report)),
         "user_journey": _resolve_optional_path(project_root, str(args.user_journey_report)),
+        "adoption_kpi_trend": _resolve_optional_path(project_root, str(args.adoption_kpi_trend_report)),
         "nightly_reliability": _resolve_optional_path(project_root, str(args.nightly_reliability_report)),
         "nightly_burn_rate": _resolve_optional_path(project_root, str(args.nightly_burn_rate_report)),
     }
@@ -296,6 +306,10 @@ def main() -> int:
     checks: list[dict[str, Any]] = []
     kpis: dict[str, Any] = {}
     sources_meta: dict[str, dict[str, Any]] = {}
+    scope = _scope_from_sources(
+        requested=str(args.scope),
+        nightly_present=("nightly_reliability" in reports or "nightly_burn_rate" in reports),
+    )
 
     for key, payload in reports.items():
         suite = str(payload.get("suite") or "").strip()
@@ -638,6 +652,50 @@ def main() -> int:
         kpis["journey_retention_proxy_success_rate_pct"] = round(retention_proxy, 4)
         kpis["journey_feature_adoption_rate_pct"] = round(feature_adoption, 4)
 
+    adoption_trend = reports.get("adoption_kpi_trend")
+    if isinstance(adoption_trend, dict):
+        summary = adoption_trend.get("summary") if isinstance(adoption_trend.get("summary"), dict) else {}
+        status = str(summary.get("status") or "").strip().lower()
+        checks_failed = _safe_float(summary.get("checks_failed"))
+        compared_metrics = _safe_float(summary.get("compared_metrics"))
+        regressed_metrics = _safe_float(summary.get("regressed"))
+        trend_passed = status == "pass" and checks_failed <= 0.0
+        checks.extend(
+            [
+                _check(
+                    check_id="adoption_trend.status",
+                    source="adoption_kpi_trend",
+                    value=1.0 if trend_passed else 0.0,
+                    threshold=1.0,
+                    comparator="gte",
+                    unit="bool",
+                ),
+                _check(
+                    check_id="adoption_trend.checks_failed",
+                    source="adoption_kpi_trend",
+                    value=checks_failed,
+                    threshold=0.0,
+                    comparator="lte",
+                    unit="count",
+                ),
+                _check(
+                    check_id="adoption_trend.compared_metrics",
+                    source="adoption_kpi_trend",
+                    value=compared_metrics,
+                    threshold=1.0,
+                    comparator="gte",
+                    unit="count",
+                ),
+            ]
+        )
+        kpis["adoption_trend_gate_passed"] = bool(trend_passed)
+        kpis["adoption_trend_checks_failed"] = int(max(0.0, checks_failed))
+        kpis["adoption_trend_compared_metrics"] = int(max(0.0, compared_metrics))
+        kpis["adoption_trend_regressed_metrics"] = int(max(0.0, regressed_metrics))
+        if scope == "nightly":
+            kpis["nightly_adoption_trend_gate_passed"] = bool(trend_passed)
+            kpis["nightly_adoption_trend_regressed_metrics"] = int(max(0.0, regressed_metrics))
+
     nightly = reports.get("nightly_reliability")
     if isinstance(nightly, dict):
         summary = nightly.get("summary") if isinstance(nightly.get("summary"), dict) else {}
@@ -703,10 +761,6 @@ def main() -> int:
 
     passed_checks = sum(1 for item in checks if bool(item.get("passed")))
     failed_checks = len(checks) - passed_checks
-    scope = _scope_from_sources(
-        requested=str(args.scope),
-        nightly_present=("nightly_reliability" in reports or "nightly_burn_rate" in reports),
-    )
     class_breakdown = _build_class_breakdown(checks=checks, kpis=kpis)
 
     payload = {

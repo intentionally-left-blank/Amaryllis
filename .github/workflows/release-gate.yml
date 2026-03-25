@@ -778,6 +778,7 @@ jobs:
             --mission-queue-report "artifacts/mission-queue/mission-queue-load-report.json" \
             --fault-injection-report "artifacts/fault-injection/fault-injection-reliability-report.json" \
             --quality-dashboard-report "artifacts/release-quality-dashboard-final.json" \
+            --adoption-kpi-trend-report "artifacts/adoption-kpi-trend-gate-report.json" \
             --distribution-resilience-report "artifacts/distribution/distribution-resilience-report.json" \
             --user-journey-report "artifacts/user-journey/user-journey-benchmark-report.json" \
             ${MACOS_DESKTOP_PARITY_ARG} \

@@ -36,6 +36,7 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
             distribution = base / "distribution.json"
             macos_staging = base / "macos-staging.json"
             journey = base / "journey.json"
+            adoption_trend = base / "adoption-trend.json"
             output = base / "report.json"
 
             self._write_json(
@@ -141,6 +142,22 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
                     },
                 },
             )
+            self._write_json(
+                adoption_trend,
+                {
+                    "suite": "adoption_kpi_trend_gate_v1",
+                    "summary": {
+                        "status": "pass",
+                        "checks_total": 9,
+                        "checks_passed": 9,
+                        "checks_failed": 0,
+                        "compared_metrics": 7,
+                        "improved": 0,
+                        "regressed": 0,
+                        "unchanged": 7,
+                    },
+                },
+            )
 
             proc = self._run(
                 "--mission-queue-report",
@@ -155,6 +172,8 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
                 str(macos_staging),
                 "--user-journey-report",
                 str(journey),
+                "--adoption-kpi-trend-report",
+                str(adoption_trend),
                 "--scope",
                 "release",
                 "--output",
@@ -175,11 +194,13 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
             self.assertIn("journey.retention_proxy_success_rate_pct", [c.get("id") for c in payload.get("checks", [])])
             self.assertIn("journey.feature_adoption_rate_pct", [c.get("id") for c in payload.get("checks", [])])
             self.assertIn("qos_governor.status", [c.get("id") for c in payload.get("checks", [])])
+            self.assertIn("adoption_trend.status", [c.get("id") for c in payload.get("checks", [])])
             class_breakdown = payload.get("class_breakdown", {})
             self.assertEqual(str(class_breakdown.get("mission_execution", {}).get("status")), "pass")
             self.assertEqual(str(class_breakdown.get("distribution", {}).get("status")), "pass")
             self.assertEqual(str(class_breakdown.get("desktop_staging", {}).get("status")), "pass")
             self.assertEqual(str(class_breakdown.get("runtime_qos", {}).get("status")), "pass")
+            self.assertEqual(str(class_breakdown.get("adoption_growth", {}).get("status")), "pass")
             self.assertIn("distribution_score_pct", class_breakdown.get("distribution", {}).get("kpis", {}))
             self.assertIn(
                 "desktop_staging_error_rate_pct",
@@ -194,12 +215,14 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
             )
             self.assertIn("journey_feature_adoption_rate_pct", class_breakdown.get("user_flow", {}).get("kpis", {}))
             self.assertIn("qos_gate_checks_failed", class_breakdown.get("runtime_qos", {}).get("kpis", {}))
+            self.assertIn("adoption_trend_checks_failed", class_breakdown.get("adoption_growth", {}).get("kpis", {}))
 
     def test_nightly_report_pack_marks_failed_summary_when_burn_gate_failed(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-mission-report-pack-") as tmp:
             base = Path(tmp)
             nightly = base / "nightly.json"
             burn = base / "burn.json"
+            adoption_trend = base / "adoption-trend.json"
             output = base / "report.json"
 
             self._write_json(
@@ -229,12 +252,30 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
                     },
                 },
             )
+            self._write_json(
+                adoption_trend,
+                {
+                    "suite": "adoption_kpi_trend_gate_v1",
+                    "summary": {
+                        "status": "pass",
+                        "checks_total": 9,
+                        "checks_passed": 9,
+                        "checks_failed": 0,
+                        "compared_metrics": 7,
+                        "improved": 0,
+                        "regressed": 0,
+                        "unchanged": 7,
+                    },
+                },
+            )
 
             proc = self._run(
                 "--nightly-reliability-report",
                 str(nightly),
                 "--nightly-burn-rate-report",
                 str(burn),
+                "--adoption-kpi-trend-report",
+                str(adoption_trend),
                 "--scope",
                 "nightly",
                 "--output",
@@ -247,6 +288,7 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
             self.assertEqual(payload.get("summary", {}).get("status"), "fail")
             class_breakdown = payload.get("class_breakdown", {})
             self.assertEqual(str(class_breakdown.get("nightly_reliability", {}).get("status")), "fail")
+            self.assertIn("nightly_adoption_trend_gate_passed", payload.get("kpis", {}))
 
     def test_missing_source_report_returns_error(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-mission-report-pack-") as tmp:

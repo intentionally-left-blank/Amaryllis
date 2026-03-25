@@ -223,6 +223,7 @@ jobs:
             --nightly-reliability-report "artifacts/nightly-reliability-report.json" \
             --nightly-burn-rate-report "artifacts/nightly-burn-rate-gate-report.json" \
             --user-journey-report "artifacts/nightly-user-journey-benchmark-report.json" \
+            --adoption-kpi-trend-report "artifacts/nightly-adoption-kpi-trend-gate-report.json" \
             ${MACOS_DESKTOP_PARITY_ARG} \
             --scope "nightly" \
             --output "artifacts/nightly-mission-success-recovery-report.json"
