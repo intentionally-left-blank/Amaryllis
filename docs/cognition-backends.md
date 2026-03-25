@@ -13,7 +13,7 @@ Decouple chat/reasoning runtime behavior from a single concrete model manager im
   - Preserves current production behavior.
 - `DeterministicCognitionBackend`:
   - Fully local deterministic backend for integration tests and contract validation.
-  - Supports the same API surface (`chat`, `stream_chat`, routing, health, model endpoints, onboarding profile recommendation, package catalog/install/license preflight`).
+  - Supports the same API surface (`chat`, `stream_chat`, routing, health, model endpoints, onboarding profile + activation plan, package catalog/install/license preflight`).
 
 ## Runtime Selection
 Set backend mode via environment variable:

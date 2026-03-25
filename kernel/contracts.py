@@ -128,6 +128,16 @@ class CognitionBackendContract(Protocol):
     def recommend_onboarding_profile(self) -> dict[str, Any]:
         ...
 
+    def onboarding_activation_plan(
+        self,
+        *,
+        profile: str | None = None,
+        include_remote_providers: bool = True,
+        limit: int = 120,
+        require_metadata: bool | None = None,
+    ) -> dict[str, Any]:
+        ...
+
     def model_package_catalog(
         self,
         *,

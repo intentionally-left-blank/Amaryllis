@@ -167,6 +167,60 @@ class ModelOnboardingProfileTests(unittest.TestCase):
         self.assertEqual(str(selected.get("model")), "fallback-model")
         self.assertEqual(str(selected.get("reason")), "fallback_active_model")
 
+    def test_activation_plan_returns_install_contract_for_selected_profile(self) -> None:
+        with patch.object(
+            self.manager,
+            "_onboarding_hardware_snapshot",
+            return_value={
+                "platform": "darwin",
+                "machine": "arm64",
+                "cpu_count_logical": 8,
+                "memory_bytes": 16 * 1024 * 1024 * 1024,
+                "memory_gb": 16.0,
+                "provider_count": 2,
+                "local_provider_available": True,
+                "cloud_provider_available": True,
+            },
+        ):
+            payload = self.manager.onboarding_activation_plan(
+                profile="balanced",
+                include_remote_providers=True,
+                limit=20,
+                require_metadata=False,
+            )
+
+        self.assertEqual(str(payload.get("plan_version")), "onboarding_activation_plan_v1")
+        self.assertEqual(str(payload.get("selected_profile")), "balanced")
+        self.assertTrue(str(payload.get("selected_package_id", "")).strip())
+        install = payload.get("install", {})
+        self.assertEqual(str(install.get("endpoint")), "/models/packages/install")
+        self.assertIn("license_admission", payload)
+        self.assertIn("ready_to_install", payload)
+        self.assertIn("next_action", payload)
+
+    def test_activation_plan_exposes_blockers_when_license_is_denied(self) -> None:
+        def _deny(*, package_id: str, require_metadata: bool | None = None) -> dict[str, Any]:
+            _ = require_metadata
+            return {
+                "package_id": package_id,
+                "provider": "mlx",
+                "model": "blocked-model",
+                "status": "deny",
+                "admitted": False,
+                "errors": ["license.spdx_denied"],
+                "warnings": [],
+                "summary": {"license_policy_id": "amaryllis.license_admission.v1"},
+                "require_metadata": False,
+            }
+
+        with patch.object(self.manager, "model_package_license_admission", side_effect=_deny):
+            payload = self.manager.onboarding_activation_plan(profile="balanced", require_metadata=False)
+
+        self.assertFalse(bool(payload.get("ready_to_install")))
+        self.assertEqual(str(payload.get("next_action")), "resolve_blockers")
+        blockers = [str(item) for item in payload.get("blockers", [])]
+        self.assertIn("license.spdx_denied", blockers)
+
 
 if __name__ == "__main__":
     unittest.main()

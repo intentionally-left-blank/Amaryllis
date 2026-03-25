@@ -2,6 +2,8 @@
 
 ## Purpose
 `GET /models/onboarding/profile` provides first-run profile recommendation for model routing.
+`GET /models/onboarding/activation-plan` provides one-shot activation intent:
+recommended profile + package choice + license preflight + install contract.
 
 The goal is to get a new user to the first successful response without manual model tuning.
 
@@ -18,6 +20,16 @@ Response fields:
   - routing constraints
   - selected model target
   - fallback candidates
+
+Activation plan additional fields:
+- `plan_version`: currently `onboarding_activation_plan_v1`.
+- `selected_profile`: normalized profile used for package selection.
+- `selected_package_id` / `selected_package`: package chosen for first-run activation.
+- `license_admission`: standalone policy decision for selected package.
+- `install`: one-click install contract payload (`/models/packages/install`).
+- `ready_to_install`: `true` when preflight passes.
+- `blockers`: machine-readable reasons when activation is blocked.
+- `next_action`: `install_package` or `resolve_blockers`.
 
 ## Recommendation Logic (MVP)
 - `fast`: selected for low-memory/low-CPU machines.

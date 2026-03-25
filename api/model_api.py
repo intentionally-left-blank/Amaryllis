@@ -297,6 +297,30 @@ def onboarding_profile(request: Request) -> dict[str, Any]:
         raise ProviderError(str(exc)) from exc
 
 
+@router.get("/models/onboarding/activation-plan")
+def onboarding_activation_plan(
+    request: Request,
+    profile: str | None = None,
+    include_remote_providers: bool = True,
+    limit: int = 120,
+    require_metadata: bool | None = None,
+) -> dict[str, Any]:
+    services = request.app.state.services
+    try:
+        payload = services.model_manager.onboarding_activation_plan(
+            profile=profile,
+            include_remote_providers=include_remote_providers,
+            limit=max(1, min(limit, 500)),
+            require_metadata=require_metadata,
+        )
+        payload["request_id"] = _request_id(request)
+        return payload
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
+    except Exception as exc:
+        raise ProviderError(str(exc)) from exc
+
+
 @router.get("/models/packages")
 def model_package_catalog(
     request: Request,

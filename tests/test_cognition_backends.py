@@ -99,6 +99,39 @@ class _FakeModelManager:
             },
         }
 
+    def onboarding_activation_plan(
+        self,
+        *,
+        profile: str | None = None,
+        include_remote_providers: bool = True,
+        limit: int = 120,
+        require_metadata: bool | None = None,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "onboarding_activation_plan",
+                {
+                    "profile": profile,
+                    "include_remote_providers": include_remote_providers,
+                    "limit": limit,
+                    "require_metadata": require_metadata,
+                },
+            )
+        )
+        package_id = f"{self.active_provider}::{self.active_model}"
+        return {
+            "plan_version": "onboarding_activation_plan_v1",
+            "recommended_profile": "balanced",
+            "selected_profile": str(profile or "balanced"),
+            "selected_package_id": package_id,
+            "selected_package": {"package_id": package_id},
+            "license_admission": {"package_id": package_id, "admitted": True, "status": "allow"},
+            "ready_to_install": True,
+            "blockers": [],
+            "next_action": "install_package",
+            "install": {"endpoint": "/models/packages/install"},
+        }
+
     def model_package_catalog(
         self,
         *,
@@ -235,6 +268,11 @@ class CognitionBackendsTests(unittest.TestCase):
         onboarding = backend.recommend_onboarding_profile()
         self.assertIn("recommended_profile", onboarding)
         self.assertIn("profiles", onboarding)
+
+        activation = backend.onboarding_activation_plan(profile="balanced", include_remote_providers=True, limit=10)
+        self.assertEqual(str(activation.get("plan_version")), "onboarding_activation_plan_v1")
+        self.assertTrue(str(activation.get("selected_package_id", "")).strip())
+        self.assertIn("install", activation)
 
         catalog = backend.model_package_catalog(profile="balanced", include_remote_providers=True, limit=10)
         self.assertIn("packages", catalog)

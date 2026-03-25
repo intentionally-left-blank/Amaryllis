@@ -391,6 +391,127 @@ class ModelManager:
             "profiles": profiles,
         }
 
+    def onboarding_activation_plan(
+        self,
+        *,
+        profile: str | None = None,
+        include_remote_providers: bool = True,
+        limit: int = 120,
+        require_metadata: bool | None = None,
+    ) -> dict[str, Any]:
+        onboarding = self.recommend_onboarding_profile()
+        recommended_profile = self._normalize_onboarding_profile(
+            str(onboarding.get("recommended_profile", "balanced")),
+            fallback="balanced",
+        )
+        selected_profile = self._normalize_onboarding_profile(profile, fallback=recommended_profile)
+        catalog = self.model_package_catalog(
+            profile=selected_profile,
+            include_remote_providers=include_remote_providers,
+            limit=limit,
+        )
+
+        effective_require_metadata = (
+            self._license_metadata_required_for_onboarding()
+            if require_metadata is None
+            else bool(require_metadata)
+        )
+
+        package_rows_raw = catalog.get("packages")
+        package_rows = package_rows_raw if isinstance(package_rows_raw, list) else []
+        package_by_id: dict[str, dict[str, Any]] = {}
+        for row in package_rows:
+            if not isinstance(row, dict):
+                continue
+            package_id = str(row.get("package_id", "")).strip()
+            if not package_id:
+                continue
+            package_by_id[package_id] = row
+
+        top_package_ids: list[str] = []
+        profile_items = catalog.get("profiles")
+        if isinstance(profile_items, dict):
+            selected_profile_payload = profile_items.get(selected_profile)
+            if isinstance(selected_profile_payload, dict):
+                top_items = selected_profile_payload.get("top_package_ids")
+                if isinstance(top_items, list):
+                    top_package_ids = [str(item).strip() for item in top_items if str(item).strip()]
+
+        selected_package: dict[str, Any] = {}
+        selected_package_id = ""
+        for package_id in top_package_ids:
+            candidate = package_by_id.get(package_id)
+            if candidate is None:
+                continue
+            selected_package = candidate
+            selected_package_id = package_id
+            break
+        if not selected_package and package_rows:
+            fallback = package_rows[0]
+            if isinstance(fallback, dict):
+                selected_package = fallback
+                selected_package_id = str(fallback.get("package_id", "")).strip()
+
+        blockers: list[str] = []
+        ready_to_install = False
+        license_admission: dict[str, Any] = {
+            "package_id": selected_package_id,
+            "status": "deny",
+            "admitted": False,
+            "errors": [],
+            "warnings": [],
+            "summary": {},
+            "require_metadata": effective_require_metadata,
+        }
+        install_contract = dict(selected_package.get("install") or {}) if selected_package else {}
+
+        if selected_package_id:
+            try:
+                license_admission = self.model_package_license_admission(
+                    package_id=selected_package_id,
+                    require_metadata=effective_require_metadata,
+                )
+            except Exception as exc:
+                license_admission = {
+                    "package_id": selected_package_id,
+                    "provider": str(selected_package.get("provider", "")),
+                    "model": str(selected_package.get("model", "")),
+                    "status": "deny",
+                    "admitted": False,
+                    "errors": [f"license_admission_error:{exc}"],
+                    "warnings": [],
+                    "summary": {},
+                    "require_metadata": effective_require_metadata,
+                }
+            blockers = [str(item) for item in license_admission.get("errors", []) if str(item).strip()]
+            ready_to_install = bool(license_admission.get("admitted"))
+        else:
+            blockers = ["no_package_candidates_for_profile"]
+            license_admission["errors"] = list(blockers)
+
+        return {
+            "plan_version": "onboarding_activation_plan_v1",
+            "generated_at": self._utc_now_iso(),
+            "active": onboarding.get("active") or catalog.get("active") or {},
+            "hardware": onboarding.get("hardware") or catalog.get("hardware") or {},
+            "recommended_profile": recommended_profile,
+            "selected_profile": selected_profile,
+            "reason_codes": [str(item) for item in onboarding.get("reason_codes", []) if str(item).strip()],
+            "profiles": onboarding.get("profiles") if isinstance(onboarding.get("profiles"), dict) else {},
+            "catalog": {
+                "count": int(catalog.get("count", len(package_rows))),
+                "top_package_ids": top_package_ids,
+            },
+            "selected_package_id": selected_package_id,
+            "selected_package": selected_package,
+            "license_admission": license_admission,
+            "require_metadata": effective_require_metadata,
+            "ready_to_install": ready_to_install,
+            "blockers": blockers,
+            "next_action": "install_package" if ready_to_install else "resolve_blockers",
+            "install": install_contract,
+        }
+
     def model_package_catalog(
         self,
         *,

@@ -79,6 +79,21 @@ class ModelManagerCognitionBackend:
     def recommend_onboarding_profile(self) -> dict[str, Any]:
         return self._manager.recommend_onboarding_profile()
 
+    def onboarding_activation_plan(
+        self,
+        *,
+        profile: str | None = None,
+        include_remote_providers: bool = True,
+        limit: int = 120,
+        require_metadata: bool | None = None,
+    ) -> dict[str, Any]:
+        return self._manager.onboarding_activation_plan(
+            profile=profile,
+            include_remote_providers=include_remote_providers,
+            limit=limit,
+            require_metadata=require_metadata,
+        )
+
     def model_package_catalog(
         self,
         *,
@@ -395,6 +410,79 @@ class DeterministicCognitionBackend:
             "recommended_profile": "balanced",
             "reason_codes": ["deterministic_backend_default"],
             "profiles": profiles,
+        }
+
+    def onboarding_activation_plan(
+        self,
+        *,
+        profile: str | None = None,
+        include_remote_providers: bool = True,
+        limit: int = 120,
+        require_metadata: bool | None = None,
+    ) -> dict[str, Any]:
+        onboarding = self.recommend_onboarding_profile()
+        selected_profile = str(profile or onboarding.get("recommended_profile") or "balanced").strip().lower()
+        if selected_profile not in {"fast", "balanced", "quality"}:
+            selected_profile = "balanced"
+        catalog = self.model_package_catalog(
+            profile=selected_profile,
+            include_remote_providers=include_remote_providers,
+            limit=limit,
+        )
+        package = {}
+        package_id = ""
+        packages = catalog.get("packages")
+        if isinstance(packages, list) and packages:
+            first = packages[0]
+            if isinstance(first, dict):
+                package = first
+                package_id = str(first.get("package_id", "")).strip()
+        license_admission = (
+            self.model_package_license_admission(
+                package_id=package_id,
+                require_metadata=require_metadata,
+            )
+            if package_id
+            else {
+                "package_id": "",
+                "status": "deny",
+                "admitted": False,
+                "errors": ["no_package_candidates_for_profile"],
+                "warnings": [],
+                "summary": {"license_policy_id": "deterministic.default"},
+                "require_metadata": bool(require_metadata) if require_metadata is not None else False,
+            }
+        )
+        top_package_ids: list[str] = []
+        profiles_payload = catalog.get("profiles")
+        if isinstance(profiles_payload, dict):
+            selected_profile_payload = profiles_payload.get(selected_profile)
+            if isinstance(selected_profile_payload, dict):
+                top_items = selected_profile_payload.get("top_package_ids")
+                if isinstance(top_items, list):
+                    top_package_ids = [str(item).strip() for item in top_items if str(item).strip()]
+        blockers = [str(item) for item in license_admission.get("errors", []) if str(item).strip()]
+        return {
+            "plan_version": "onboarding_activation_plan_v1",
+            "generated_at": self._utc_now_iso(),
+            "active": onboarding.get("active", {}),
+            "hardware": onboarding.get("hardware", {}),
+            "recommended_profile": str(onboarding.get("recommended_profile", "balanced")),
+            "selected_profile": selected_profile,
+            "reason_codes": [str(item) for item in onboarding.get("reason_codes", []) if str(item).strip()],
+            "profiles": onboarding.get("profiles", {}),
+            "catalog": {
+                "count": int(catalog.get("count", 0)),
+                "top_package_ids": top_package_ids,
+            },
+            "selected_package_id": package_id,
+            "selected_package": package,
+            "license_admission": license_admission,
+            "require_metadata": bool(require_metadata) if require_metadata is not None else False,
+            "ready_to_install": bool(license_admission.get("admitted")),
+            "blockers": blockers,
+            "next_action": "install_package" if bool(license_admission.get("admitted")) else "resolve_blockers",
+            "install": dict(package.get("install") or {}) if isinstance(package, dict) else {},
         }
 
     def model_package_catalog(

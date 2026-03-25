@@ -136,6 +136,67 @@ class ModelOnboardingProfileAPITests(unittest.TestCase):
         fast_selected = profiles.get("fast", {}).get("selected", {})
         self.assertEqual(str(fast_selected.get("provider")), "mlx")
 
+    def test_onboarding_activation_plan_endpoint_returns_install_ready_payload(self) -> None:
+        backend = self.server_module.app.state.services.model_manager
+        manager = getattr(backend, "manager", backend)
+        with patch.object(
+            manager,
+            "_onboarding_hardware_snapshot",
+            return_value={
+                "platform": "darwin",
+                "machine": "arm64",
+                "cpu_count_logical": 8,
+                "memory_bytes": 16 * 1024 * 1024 * 1024,
+                "memory_gb": 16.0,
+                "provider_count": 2,
+                "local_provider_available": True,
+                "cloud_provider_available": True,
+            },
+        ):
+            response = self.client.get(
+                "/models/onboarding/activation-plan?profile=balanced&include_remote_providers=true&limit=20&require_metadata=false",
+                headers=self._auth(),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(str(payload.get("plan_version")), "onboarding_activation_plan_v1")
+        self.assertEqual(str(payload.get("selected_profile")), "balanced")
+        self.assertTrue(str(payload.get("selected_package_id", "")).strip())
+        self.assertIn("license_admission", payload)
+        self.assertIn("request_id", payload)
+
+    def test_onboarding_activation_plan_endpoint_returns_blockers_when_denied(self) -> None:
+        backend = self.server_module.app.state.services.model_manager
+        manager = getattr(backend, "manager", backend)
+
+        def _deny(*, package_id: str, require_metadata: bool | None = None) -> dict[str, Any]:
+            _ = require_metadata
+            return {
+                "package_id": package_id,
+                "provider": "mlx",
+                "model": "blocked-model",
+                "status": "deny",
+                "admitted": False,
+                "errors": ["license.spdx_denied"],
+                "warnings": [],
+                "summary": {"license_policy_id": "amaryllis.license_admission.v1"},
+                "require_metadata": False,
+            }
+
+        with patch.object(manager, "model_package_license_admission", side_effect=_deny):
+            response = self.client.get(
+                "/models/onboarding/activation-plan?profile=balanced&require_metadata=false",
+                headers=self._auth(),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(bool(payload.get("ready_to_install")))
+        self.assertEqual(str(payload.get("next_action")), "resolve_blockers")
+        blockers = [str(item) for item in payload.get("blockers", [])]
+        self.assertIn("license.spdx_denied", blockers)
+
 
 if __name__ == "__main__":
     unittest.main()

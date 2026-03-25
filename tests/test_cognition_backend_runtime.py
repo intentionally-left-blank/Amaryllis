@@ -115,6 +115,19 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         self.assertIn("balanced", profiles)
         self.assertIn("request_id", payload)
 
+    def test_onboarding_activation_plan_endpoint_uses_backend_contract(self) -> None:
+        response = self.client.get(
+            "/models/onboarding/activation-plan?profile=balanced&include_remote_providers=true&limit=20",
+            headers=self._auth("user-token"),
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(str(payload.get("plan_version")), "onboarding_activation_plan_v1")
+        self.assertEqual(str(payload.get("selected_profile")), "balanced")
+        self.assertTrue(str(payload.get("selected_package_id", "")).strip())
+        self.assertIn("install", payload)
+        self.assertIn("request_id", payload)
+
     def test_model_package_catalog_and_install_endpoints_use_backend_contract(self) -> None:
         catalog_response = self.client.get(
             "/models/packages?profile=balanced&include_remote_providers=true&limit=20",
