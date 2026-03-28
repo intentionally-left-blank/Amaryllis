@@ -136,6 +136,16 @@ def main() -> int:
             "recovery_guidance" in text,
             "recovery guidance contract documented",
         )
+        add_check(
+            "doc_automation_breaker_behavior",
+            "automation" in text.lower() and "run_blocked_autonomy_circuit_breaker" in text,
+            "automation breaker pause behavior documented",
+        )
+        add_check(
+            "doc_supervisor_breaker_behavior",
+            "supervisor" in text.lower() and "node_run_blocked_autonomy_circuit_breaker" in text,
+            "supervisor breaker pause behavior documented",
+        )
     else:
         add_check("doc_exists", False, f"missing: {doc_path}")
 
@@ -144,6 +154,9 @@ def main() -> int:
     app = None
     restart_app = None
     restart_agent_id = ""
+    supervisor_graph_id = ""
+    supervisor_user_scope_graph_id = ""
+    supervisor_agent_scope_graph_id = ""
 
     os.environ["AMARYLLIS_AUTH_ENABLED"] = "true"
     os.environ["AMARYLLIS_AUTH_TOKENS"] = json.dumps(
@@ -325,6 +338,162 @@ def main() -> int:
                 f"status={dispatch_plan.status_code}",
             )
 
+            automation_create = client.post(
+                "/automations/create",
+                headers=_auth(user_token),
+                json={
+                    "agent_id": agent_id,
+                    "user_id": "gate-user",
+                    "message": "gate breaker automation run",
+                    "session_id": "gate-breaker-automation",
+                    "interval_sec": 60,
+                    "start_immediately": False,
+                    "timezone": "UTC",
+                },
+            )
+            add_check(
+                "runtime_automation_create_ok",
+                automation_create.status_code == 200,
+                f"status={automation_create.status_code}",
+            )
+            automation_payload = (
+                automation_create.json() if _is_json_response(dict(automation_create.headers)) else {}
+            )
+            automation_id = str((automation_payload.get("automation") or {}).get("id") or "").strip()
+            add_check("runtime_automation_id", bool(automation_id), f"automation_id={automation_id}")
+
+            if automation_id:
+                automation_run_blocked = client.post(
+                    f"/automations/{automation_id}/run",
+                    headers=_auth(user_token),
+                )
+                add_check(
+                    "runtime_automation_run_blocked_gracefully",
+                    automation_run_blocked.status_code == 200,
+                    f"status={automation_run_blocked.status_code}",
+                )
+                automation_run_payload = (
+                    automation_run_blocked.json()
+                    if _is_json_response(dict(automation_run_blocked.headers))
+                    else {}
+                )
+                automation_row = (
+                    automation_run_payload.get("automation")
+                    if isinstance(automation_run_payload.get("automation"), dict)
+                    else {}
+                )
+                add_check(
+                    "runtime_automation_block_does_not_count_failure",
+                    int((automation_row or {}).get("consecutive_failures", 0)) == 0
+                    and str((automation_row or {}).get("escalation_level") or "none") == "none"
+                    and bool((automation_row or {}).get("is_enabled", False))
+                    and (automation_row or {}).get("last_error") in {None, ""},
+                    "blocked automation run does not increment failure/escalation",
+                )
+                automation_events = client.get(
+                    f"/automations/{automation_id}/events",
+                    headers=_auth(user_token),
+                    params={"limit": 100},
+                )
+                automation_events_payload = (
+                    automation_events.json() if _is_json_response(dict(automation_events.headers)) else {}
+                )
+                automation_event_items = (
+                    automation_events_payload.get("items")
+                    if isinstance(automation_events_payload.get("items"), list)
+                    else []
+                )
+                blocked_event = next(
+                    (
+                        item
+                        for item in automation_event_items
+                        if str(item.get("event_type") or "").strip() == "run_blocked_autonomy_circuit_breaker"
+                    ),
+                    None,
+                )
+                add_check(
+                    "runtime_automation_block_event_emitted",
+                    automation_events.status_code == 200 and isinstance(blocked_event, dict),
+                    "automation emits run_blocked_autonomy_circuit_breaker while breaker is armed",
+                )
+
+            supervisor_graph_create = client.post(
+                "/supervisor/graphs/create",
+                headers=_auth(user_token),
+                json={
+                    "user_id": "gate-user",
+                    "objective": "gate supervisor global breaker check",
+                    "nodes": [
+                        {
+                            "node_id": "sup-global-node",
+                            "agent_id": agent_id,
+                            "message": "supervisor dispatch while breaker armed",
+                        }
+                    ],
+                },
+            )
+            add_check(
+                "runtime_supervisor_graph_create_ok",
+                supervisor_graph_create.status_code == 200,
+                f"status={supervisor_graph_create.status_code}",
+            )
+            supervisor_graph_payload = (
+                supervisor_graph_create.json()
+                if _is_json_response(dict(supervisor_graph_create.headers))
+                else {}
+            )
+            supervisor_graph_id = str((supervisor_graph_payload.get("supervisor_graph") or {}).get("id") or "").strip()
+            add_check("runtime_supervisor_graph_id", bool(supervisor_graph_id), f"graph_id={supervisor_graph_id}")
+            if supervisor_graph_id:
+                supervisor_launch_blocked = client.post(
+                    f"/supervisor/graphs/{supervisor_graph_id}/launch",
+                    headers=_auth(user_token),
+                    json={"session_id": "gate-breaker-supervisor-global"},
+                )
+                supervisor_launch_payload = (
+                    supervisor_launch_blocked.json()
+                    if _is_json_response(dict(supervisor_launch_blocked.headers))
+                    else {}
+                )
+                supervisor_graph = (
+                    supervisor_launch_payload.get("supervisor_graph")
+                    if isinstance(supervisor_launch_payload.get("supervisor_graph"), dict)
+                    else {}
+                )
+                supervisor_nodes = (
+                    supervisor_graph.get("nodes") if isinstance(supervisor_graph.get("nodes"), list) else []
+                )
+                supervisor_node = next(
+                    (
+                        item
+                        for item in supervisor_nodes
+                        if isinstance(item, dict) and str(item.get("node_id") or "") == "sup-global-node"
+                    ),
+                    {},
+                )
+                add_check(
+                    "runtime_supervisor_launch_blocked_gracefully",
+                    supervisor_launch_blocked.status_code == 200
+                    and str(supervisor_node.get("status") or "") == "planned"
+                    and not bool(str(supervisor_node.get("run_id") or "").strip())
+                    and str(supervisor_graph.get("status") or "") in {"running", "planned"},
+                    f"status={supervisor_launch_blocked.status_code}",
+                )
+                supervisor_timeline = (
+                    supervisor_graph.get("timeline")
+                    if isinstance(supervisor_graph.get("timeline"), list)
+                    else []
+                )
+                add_check(
+                    "runtime_supervisor_block_event_emitted",
+                    any(
+                        isinstance(item, dict)
+                        and str(item.get("event") or "").strip() == "node_run_blocked_autonomy_circuit_breaker"
+                        for item in supervisor_timeline
+                    ),
+                    "supervisor emits node_run_blocked_autonomy_circuit_breaker while breaker is armed",
+                )
+
             disarm = client.post(
                 "/service/runs/autonomy-circuit-breaker",
                 headers=_auth(service_token),
@@ -398,6 +567,89 @@ def main() -> int:
                 f"status={create_run_after.status_code}",
             )
 
+            if automation_id:
+                automation_run_after_disarm = client.post(
+                    f"/automations/{automation_id}/run",
+                    headers=_auth(user_token),
+                )
+                automation_run_after_disarm_payload = (
+                    automation_run_after_disarm.json()
+                    if _is_json_response(dict(automation_run_after_disarm.headers))
+                    else {}
+                )
+                automation_after_row = (
+                    automation_run_after_disarm_payload.get("automation")
+                    if isinstance(automation_run_after_disarm_payload.get("automation"), dict)
+                    else {}
+                )
+                add_check(
+                    "runtime_automation_run_restored_after_disarm",
+                    automation_run_after_disarm.status_code == 200
+                    and int((automation_after_row or {}).get("consecutive_failures", 0)) == 0,
+                    f"status={automation_run_after_disarm.status_code}",
+                )
+                events_after_disarm = client.get(
+                    f"/automations/{automation_id}/events",
+                    headers=_auth(user_token),
+                    params={"limit": 200},
+                )
+                events_after_disarm_payload = (
+                    events_after_disarm.json()
+                    if _is_json_response(dict(events_after_disarm.headers))
+                    else {}
+                )
+                events_after_items = (
+                    events_after_disarm_payload.get("items")
+                    if isinstance(events_after_disarm_payload.get("items"), list)
+                    else []
+                )
+                add_check(
+                    "runtime_automation_run_queued_after_disarm",
+                    events_after_disarm.status_code == 200
+                    and any(
+                        str(item.get("event_type") or "").strip() == "run_queued"
+                        for item in events_after_items
+                        if isinstance(item, dict)
+                    ),
+                    "automation run queues successfully after breaker disarm",
+                )
+            if supervisor_graph_id:
+                supervisor_tick_after_disarm = client.post(
+                    f"/supervisor/graphs/{supervisor_graph_id}/tick",
+                    headers=_auth(user_token),
+                    json={"noop": True},
+                )
+                supervisor_tick_payload = (
+                    supervisor_tick_after_disarm.json()
+                    if _is_json_response(dict(supervisor_tick_after_disarm.headers))
+                    else {}
+                )
+                supervisor_tick_graph = (
+                    supervisor_tick_payload.get("supervisor_graph")
+                    if isinstance(supervisor_tick_payload.get("supervisor_graph"), dict)
+                    else {}
+                )
+                supervisor_tick_nodes = (
+                    supervisor_tick_graph.get("nodes")
+                    if isinstance(supervisor_tick_graph.get("nodes"), list)
+                    else []
+                )
+                supervisor_tick_node = next(
+                    (
+                        item
+                        for item in supervisor_tick_nodes
+                        if isinstance(item, dict) and str(item.get("node_id") or "") == "sup-global-node"
+                    ),
+                    {},
+                )
+                add_check(
+                    "runtime_supervisor_dispatch_restored_after_disarm",
+                    supervisor_tick_after_disarm.status_code == 200
+                    and bool(str(supervisor_tick_node.get("run_id") or "").strip())
+                    and str(supervisor_tick_node.get("status") or "") in {"queued", "running", "succeeded"},
+                    f"status={supervisor_tick_after_disarm.status_code}",
+                )
+
             arm_user_scope = client.post(
                 "/service/runs/autonomy-circuit-breaker",
                 headers=_auth(service_token),
@@ -443,6 +695,140 @@ def main() -> int:
                 f"status={create_run_allowed_user2.status_code}",
             )
 
+            supervisor_user_scope_graph_create = client.post(
+                "/supervisor/graphs/create",
+                headers=_auth(user_token),
+                json={
+                    "user_id": "gate-user",
+                    "objective": "gate supervisor user scope blocked",
+                    "nodes": [
+                        {
+                            "node_id": "sup-user-node",
+                            "agent_id": agent_id,
+                            "message": "supervisor user-scoped dispatch",
+                        }
+                    ],
+                },
+            )
+            add_check(
+                "runtime_supervisor_user_scope_graph_create_ok",
+                supervisor_user_scope_graph_create.status_code == 200,
+                f"status={supervisor_user_scope_graph_create.status_code}",
+            )
+            supervisor_user_scope_payload = (
+                supervisor_user_scope_graph_create.json()
+                if _is_json_response(dict(supervisor_user_scope_graph_create.headers))
+                else {}
+            )
+            supervisor_user_scope_graph_id = str(
+                (supervisor_user_scope_payload.get("supervisor_graph") or {}).get("id") or ""
+            ).strip()
+            add_check(
+                "runtime_supervisor_user_scope_graph_id",
+                bool(supervisor_user_scope_graph_id),
+                f"graph_id={supervisor_user_scope_graph_id}",
+            )
+            if supervisor_user_scope_graph_id:
+                supervisor_user_scope_launch = client.post(
+                    f"/supervisor/graphs/{supervisor_user_scope_graph_id}/launch",
+                    headers=_auth(user_token),
+                    json={"session_id": "gate-breaker-supervisor-user-scope"},
+                )
+                supervisor_user_scope_launch_payload = (
+                    supervisor_user_scope_launch.json()
+                    if _is_json_response(dict(supervisor_user_scope_launch.headers))
+                    else {}
+                )
+                supervisor_user_scope_graph = (
+                    supervisor_user_scope_launch_payload.get("supervisor_graph")
+                    if isinstance(supervisor_user_scope_launch_payload.get("supervisor_graph"), dict)
+                    else {}
+                )
+                supervisor_user_scope_nodes = (
+                    supervisor_user_scope_graph.get("nodes")
+                    if isinstance(supervisor_user_scope_graph.get("nodes"), list)
+                    else []
+                )
+                supervisor_user_scope_node = next(
+                    (
+                        item
+                        for item in supervisor_user_scope_nodes
+                        if isinstance(item, dict) and str(item.get("node_id") or "") == "sup-user-node"
+                    ),
+                    {},
+                )
+                add_check(
+                    "runtime_supervisor_user_scope_blocks_target_user",
+                    supervisor_user_scope_launch.status_code == 200
+                    and str(supervisor_user_scope_node.get("status") or "") == "planned"
+                    and not bool(str(supervisor_user_scope_node.get("run_id") or "").strip()),
+                    f"status={supervisor_user_scope_launch.status_code}",
+                )
+
+            supervisor_user_scope_allowed_graph_create = client.post(
+                "/supervisor/graphs/create",
+                headers=_auth("gate-user2-token"),
+                json={
+                    "user_id": "gate-user-2",
+                    "objective": "gate supervisor user scope allowed",
+                    "nodes": [
+                        {
+                            "node_id": "sup-user2-node",
+                            "agent_id": agent2_id,
+                            "message": "supervisor user2 should stay allowed",
+                        }
+                    ],
+                },
+            )
+            add_check(
+                "runtime_supervisor_user_scope_allowed_graph_create_ok",
+                supervisor_user_scope_allowed_graph_create.status_code == 200,
+                f"status={supervisor_user_scope_allowed_graph_create.status_code}",
+            )
+            supervisor_user_scope_allowed_payload = (
+                supervisor_user_scope_allowed_graph_create.json()
+                if _is_json_response(dict(supervisor_user_scope_allowed_graph_create.headers))
+                else {}
+            )
+            supervisor_user_scope_allowed_graph_id = str(
+                (supervisor_user_scope_allowed_payload.get("supervisor_graph") or {}).get("id") or ""
+            ).strip()
+            if supervisor_user_scope_allowed_graph_id:
+                supervisor_user_scope_allowed_launch = client.post(
+                    f"/supervisor/graphs/{supervisor_user_scope_allowed_graph_id}/launch",
+                    headers=_auth("gate-user2-token"),
+                    json={"session_id": "gate-breaker-supervisor-user-scope-allowed"},
+                )
+                supervisor_user_scope_allowed_launch_payload = (
+                    supervisor_user_scope_allowed_launch.json()
+                    if _is_json_response(dict(supervisor_user_scope_allowed_launch.headers))
+                    else {}
+                )
+                supervisor_user_scope_allowed_graph = (
+                    supervisor_user_scope_allowed_launch_payload.get("supervisor_graph")
+                    if isinstance(supervisor_user_scope_allowed_launch_payload.get("supervisor_graph"), dict)
+                    else {}
+                )
+                supervisor_user_scope_allowed_nodes = (
+                    supervisor_user_scope_allowed_graph.get("nodes")
+                    if isinstance(supervisor_user_scope_allowed_graph.get("nodes"), list)
+                    else []
+                )
+                supervisor_user_scope_allowed_node = next(
+                    (
+                        item
+                        for item in supervisor_user_scope_allowed_nodes
+                        if isinstance(item, dict) and str(item.get("node_id") or "") == "sup-user2-node"
+                    ),
+                    {},
+                )
+                add_check(
+                    "runtime_supervisor_user_scope_allows_other_user",
+                    supervisor_user_scope_allowed_launch.status_code == 200
+                    and bool(str(supervisor_user_scope_allowed_node.get("run_id") or "").strip()),
+                    f"status={supervisor_user_scope_allowed_launch.status_code}",
+                )
+
             disarm_user_scope = client.post(
                 "/service/runs/autonomy-circuit-breaker",
                 headers=_auth(service_token),
@@ -458,6 +844,207 @@ def main() -> int:
                 disarm_user_scope.status_code == 200,
                 f"status={disarm_user_scope.status_code}",
             )
+            if supervisor_user_scope_graph_id:
+                supervisor_user_scope_tick = client.post(
+                    f"/supervisor/graphs/{supervisor_user_scope_graph_id}/tick",
+                    headers=_auth(user_token),
+                    json={"noop": True},
+                )
+                supervisor_user_scope_tick_payload = (
+                    supervisor_user_scope_tick.json()
+                    if _is_json_response(dict(supervisor_user_scope_tick.headers))
+                    else {}
+                )
+                supervisor_user_scope_tick_graph = (
+                    supervisor_user_scope_tick_payload.get("supervisor_graph")
+                    if isinstance(supervisor_user_scope_tick_payload.get("supervisor_graph"), dict)
+                    else {}
+                )
+                supervisor_user_scope_tick_nodes = (
+                    supervisor_user_scope_tick_graph.get("nodes")
+                    if isinstance(supervisor_user_scope_tick_graph.get("nodes"), list)
+                    else []
+                )
+                supervisor_user_scope_tick_node = next(
+                    (
+                        item
+                        for item in supervisor_user_scope_tick_nodes
+                        if isinstance(item, dict) and str(item.get("node_id") or "") == "sup-user-node"
+                    ),
+                    {},
+                )
+                add_check(
+                    "runtime_supervisor_user_scope_restored_after_disarm",
+                    supervisor_user_scope_tick.status_code == 200
+                    and bool(str(supervisor_user_scope_tick_node.get("run_id") or "").strip()),
+                    f"status={supervisor_user_scope_tick.status_code}",
+                )
+
+            arm_agent_scope = client.post(
+                "/service/runs/autonomy-circuit-breaker",
+                headers=_auth(service_token),
+                json={
+                    "action": "arm",
+                    "scope_type": "agent",
+                    "scope_agent_id": agent_id,
+                    "reason": "gate-agent-scope-check",
+                    "apply_kill_switch": False,
+                },
+            )
+            add_check(
+                "runtime_arm_agent_scope_ok",
+                arm_agent_scope.status_code == 200,
+                f"status={arm_agent_scope.status_code}",
+            )
+
+            create_run_blocked_agent_scope = client.post(
+                f"/agents/{agent_id}/runs",
+                headers=_auth(user_token),
+                json={
+                    "user_id": "gate-user",
+                    "message": "execute while agent scope armed",
+                },
+            )
+            add_check(
+                "runtime_agent_scope_blocks_target_agent",
+                create_run_blocked_agent_scope.status_code == 400,
+                f"status={create_run_blocked_agent_scope.status_code}",
+            )
+
+            create_run_allowed_other_agent = client.post(
+                f"/agents/{agent2_id}/runs",
+                headers=_auth("gate-user2-token"),
+                json={
+                    "user_id": "gate-user-2",
+                    "message": "execute must stay allowed for non-target agent",
+                },
+            )
+            add_check(
+                "runtime_agent_scope_allows_other_agent",
+                create_run_allowed_other_agent.status_code == 200,
+                f"status={create_run_allowed_other_agent.status_code}",
+            )
+
+            supervisor_agent_scope_graph_create = client.post(
+                "/supervisor/graphs/create",
+                headers=_auth(user_token),
+                json={
+                    "user_id": "gate-user",
+                    "objective": "gate supervisor agent scope blocked",
+                    "nodes": [
+                        {
+                            "node_id": "sup-agent-node",
+                            "agent_id": agent_id,
+                            "message": "supervisor agent-scoped dispatch",
+                        }
+                    ],
+                },
+            )
+            add_check(
+                "runtime_supervisor_agent_scope_graph_create_ok",
+                supervisor_agent_scope_graph_create.status_code == 200,
+                f"status={supervisor_agent_scope_graph_create.status_code}",
+            )
+            supervisor_agent_scope_payload = (
+                supervisor_agent_scope_graph_create.json()
+                if _is_json_response(dict(supervisor_agent_scope_graph_create.headers))
+                else {}
+            )
+            supervisor_agent_scope_graph_id = str(
+                (supervisor_agent_scope_payload.get("supervisor_graph") or {}).get("id") or ""
+            ).strip()
+            add_check(
+                "runtime_supervisor_agent_scope_graph_id",
+                bool(supervisor_agent_scope_graph_id),
+                f"graph_id={supervisor_agent_scope_graph_id}",
+            )
+            if supervisor_agent_scope_graph_id:
+                supervisor_agent_scope_launch = client.post(
+                    f"/supervisor/graphs/{supervisor_agent_scope_graph_id}/launch",
+                    headers=_auth(user_token),
+                    json={"session_id": "gate-breaker-supervisor-agent-scope"},
+                )
+                supervisor_agent_scope_launch_payload = (
+                    supervisor_agent_scope_launch.json()
+                    if _is_json_response(dict(supervisor_agent_scope_launch.headers))
+                    else {}
+                )
+                supervisor_agent_scope_graph = (
+                    supervisor_agent_scope_launch_payload.get("supervisor_graph")
+                    if isinstance(supervisor_agent_scope_launch_payload.get("supervisor_graph"), dict)
+                    else {}
+                )
+                supervisor_agent_scope_nodes = (
+                    supervisor_agent_scope_graph.get("nodes")
+                    if isinstance(supervisor_agent_scope_graph.get("nodes"), list)
+                    else []
+                )
+                supervisor_agent_scope_node = next(
+                    (
+                        item
+                        for item in supervisor_agent_scope_nodes
+                        if isinstance(item, dict) and str(item.get("node_id") or "") == "sup-agent-node"
+                    ),
+                    {},
+                )
+                add_check(
+                    "runtime_supervisor_agent_scope_blocks_target_agent",
+                    supervisor_agent_scope_launch.status_code == 200
+                    and str(supervisor_agent_scope_node.get("status") or "") == "planned"
+                    and not bool(str(supervisor_agent_scope_node.get("run_id") or "").strip()),
+                    f"status={supervisor_agent_scope_launch.status_code}",
+                )
+
+            disarm_agent_scope = client.post(
+                "/service/runs/autonomy-circuit-breaker",
+                headers=_auth(service_token),
+                json={
+                    "action": "disarm",
+                    "scope_type": "agent",
+                    "scope_agent_id": agent_id,
+                    "reason": "gate-agent-scope-finished",
+                },
+            )
+            add_check(
+                "runtime_disarm_agent_scope_ok",
+                disarm_agent_scope.status_code == 200,
+                f"status={disarm_agent_scope.status_code}",
+            )
+            if supervisor_agent_scope_graph_id:
+                supervisor_agent_scope_tick = client.post(
+                    f"/supervisor/graphs/{supervisor_agent_scope_graph_id}/tick",
+                    headers=_auth(user_token),
+                    json={"noop": True},
+                )
+                supervisor_agent_scope_tick_payload = (
+                    supervisor_agent_scope_tick.json()
+                    if _is_json_response(dict(supervisor_agent_scope_tick.headers))
+                    else {}
+                )
+                supervisor_agent_scope_tick_graph = (
+                    supervisor_agent_scope_tick_payload.get("supervisor_graph")
+                    if isinstance(supervisor_agent_scope_tick_payload.get("supervisor_graph"), dict)
+                    else {}
+                )
+                supervisor_agent_scope_tick_nodes = (
+                    supervisor_agent_scope_tick_graph.get("nodes")
+                    if isinstance(supervisor_agent_scope_tick_graph.get("nodes"), list)
+                    else []
+                )
+                supervisor_agent_scope_tick_node = next(
+                    (
+                        item
+                        for item in supervisor_agent_scope_tick_nodes
+                        if isinstance(item, dict) and str(item.get("node_id") or "") == "sup-agent-node"
+                    ),
+                    {},
+                )
+                add_check(
+                    "runtime_supervisor_agent_scope_restored_after_disarm",
+                    supervisor_agent_scope_tick.status_code == 200
+                    and bool(str(supervisor_agent_scope_tick_node.get("run_id") or "").strip()),
+                    f"status={supervisor_agent_scope_tick.status_code}",
+                )
 
             arm_for_restart = client.post(
                 "/service/runs/autonomy-circuit-breaker",

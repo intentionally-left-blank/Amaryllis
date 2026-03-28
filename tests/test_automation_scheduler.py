@@ -30,6 +30,43 @@ class _FakeTaskExecutor:
         }
 
 
+class _AlwaysBlockedCircuitBreaker:
+    def snapshot(self) -> dict:
+        return {
+            "status": "armed",
+            "armed": True,
+            "reason": "incident-response",
+            "active_scope_count": 1,
+            "active_scopes": [
+                {
+                    "scope_type": "global",
+                    "reason": "incident-response",
+                }
+            ],
+        }
+
+    def evaluate_run_creation(
+        self,
+        *,
+        user_id: str | None,
+        agent_id: str | None,
+    ) -> dict:
+        return {
+            "blocked": True,
+            "matched_scope_count": 1,
+            "matched_scopes": [
+                {
+                    "scope_type": "global",
+                    "scope_user_id": None,
+                    "scope_agent_id": None,
+                    "reason": "incident-response",
+                }
+            ],
+            "active_scope_count": 1,
+            "revision": 1,
+        }
+
+
 class AutomationSchedulerTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="amaryllis-tests-automation-")
@@ -443,6 +480,37 @@ class AutomationSchedulerTests(unittest.TestCase):
         self.assertGreaterEqual(int(health["recent_events"]["count"]), 2)
         self.assertGreaterEqual(int(health["slo"]["sample_size"]), 1)
         self.assertIsInstance(health.get("top_failures"), list)
+
+    def test_breaker_blocked_run_now_does_not_increment_failures(self) -> None:
+        self.run_manager.autonomy_circuit_breaker = _AlwaysBlockedCircuitBreaker()
+        automation = self.scheduler.create_automation(
+            agent_id=self.agent.id,
+            user_id="user-1",
+            session_id="session-breaker",
+            message="blocked by breaker",
+            interval_sec=60,
+            start_immediately=False,
+        )
+
+        updated = self.scheduler.run_now(automation["id"])
+        self.assertEqual(str(updated["id"]), str(automation["id"]))
+        self.assertEqual(int(updated.get("consecutive_failures", 0)), 0)
+        self.assertEqual(str(updated.get("escalation_level") or "none"), "none")
+        self.assertTrue(bool(updated.get("is_enabled", False)))
+        self.assertIsNone(updated.get("last_error"))
+
+        runs = self.database.list_agent_runs(user_id="user-1", limit=10)
+        self.assertEqual(len(runs), 0)
+
+        events = self.scheduler.list_events(automation["id"], limit=50)
+        event_types = [str(item.get("event_type") or "") for item in events]
+        self.assertIn("run_blocked_autonomy_circuit_breaker", event_types)
+
+        health = self.scheduler.health_snapshot(user_id="user-1", limit=50)
+        self.assertEqual(
+            int(health.get("slo", {}).get("run_blocked_by_autonomy_circuit_breaker", 0)),
+            1,
+        )
 
 
 if __name__ == "__main__":

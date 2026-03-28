@@ -54,4 +54,4 @@ strict global autonomy controls, stronger service-operability contracts, and blo
 
 - Phase 5 breaker objectives completed (`P5-A01..A03`, `P5-B01..B04`).
 - Breaker incident path promoted to stability soak (nightly trend verification + failure drill cadence gate).
-- Start Phase 6 cross-domain autonomy hardening scope.
+- Phase 6 started (`P6-A01` completed): automation dispatch is breaker-aware without false failure escalation.

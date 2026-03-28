@@ -65,7 +65,7 @@ Build a local-first, voice-native, autonomous assistant for developer workflows 
   - secure model supply-chain and quantization passport (artifact signatures, hashes, reproducible quant recipe metadata).
   - runtime environment passport and license admission gate for model/adapter/index artifacts.
 
-### Phase 5 - Autonomous Reliability Shell (current)
+### Phase 5 - Autonomous Reliability Shell (completed)
 - Goal: make autonomy operations incident-resilient and operator-safe under real production failure modes.
 - Outcomes:
   - global autonomy circuit breaker with service-level arm/disarm API and signed action audit trail.
@@ -76,6 +76,16 @@ Build a local-first, voice-native, autonomous assistant for developer workflows 
 
 Execution-ready breakdown:
 - `/Users/bogdan/Amaryllis/docs/jarvis-phase5-backlog.md`
+
+### Phase 6 - Cross-Domain Autonomy Hardening (current)
+- Goal: make emergency autonomy controls consistent across run-dispatch domains and remove false escalation noise during incident containment.
+- Outcomes:
+- breaker-aware automation dispatch semantics (`run_blocked_autonomy_circuit_breaker`) without scheduler failure escalation drift.
+- cross-domain admission parity for `runs`, `automations`, and `supervisor` breaker scopes.
+- release/nightly contract expansion for cross-domain autonomy hardening.
+
+Execution-ready breakdown:
+- `/Users/bogdan/Amaryllis/docs/jarvis-phase6-backlog.md`
 
 ### Parallel Track - Post-LLM Cognitive R&D
 - Goal: keep backend swappable for next-gen local cognition.

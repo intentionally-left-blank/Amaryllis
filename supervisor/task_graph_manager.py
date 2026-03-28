@@ -6,6 +6,8 @@ from threading import RLock
 from typing import Any, Callable
 from uuid import uuid4
 
+from agents.agent_run_manager import AutonomyCircuitBreakerBlockedError
+
 SUPERVISOR_GRAPH_STATUSES: set[str] = {
     "planned",
     "running",
@@ -493,6 +495,10 @@ class SupervisorTaskGraphManager:
                     run_status = "queued"
 
                 now = _utcnow_iso()
+                node_metadata = node.get("metadata")
+                if isinstance(node_metadata, dict):
+                    node_metadata.pop("autonomy_circuit_breaker_last_blocked_revision", None)
+                    node_metadata.pop("autonomy_circuit_breaker_blocked", None)
                 node["run_id"] = run_id
                 node["run_status"] = run_status
                 node["attempts"] = int(node.get("attempts", 0)) + 1
@@ -527,6 +533,57 @@ class SupervisorTaskGraphManager:
                         "request_id": _optional_str(request_id),
                     },
                 )
+            except AutonomyCircuitBreakerBlockedError as exc:
+                node_metadata = node.get("metadata")
+                if not isinstance(node_metadata, dict):
+                    node_metadata = {}
+                    node["metadata"] = node_metadata
+                revision: int | None = None
+                for candidate in (
+                    (exc.decision if isinstance(exc.decision, dict) else {}).get("revision"),
+                    (exc.snapshot if isinstance(exc.snapshot, dict) else {}).get("revision"),
+                ):
+                    try:
+                        parsed = int(candidate)
+                    except Exception:
+                        continue
+                    if parsed >= 0:
+                        revision = parsed
+                        break
+                emit_blocked_event = True
+                if revision is not None:
+                    previous_revision = node_metadata.get("autonomy_circuit_breaker_last_blocked_revision")
+                    try:
+                        previous_revision_int = int(previous_revision)
+                    except Exception:
+                        previous_revision_int = None
+                    emit_blocked_event = previous_revision_int != revision
+                    node_metadata["autonomy_circuit_breaker_last_blocked_revision"] = revision
+                else:
+                    already_blocked = bool(node_metadata.get("autonomy_circuit_breaker_blocked"))
+                    emit_blocked_event = not already_blocked
+                    node_metadata["autonomy_circuit_breaker_blocked"] = True
+
+                node["run_status"] = None
+                node["status"] = "planned"
+                node["started_at"] = None
+                node["completed_at"] = None
+                node["last_error"] = str(exc)
+                if emit_blocked_event:
+                    self._append_timeline(
+                        graph,
+                        event="node_run_blocked_autonomy_circuit_breaker",
+                        payload={
+                            "graph_id": str(graph.get("id") or ""),
+                            "node_id": str(node.get("node_id") or ""),
+                            "agent_id": str(node.get("agent_id") or ""),
+                            "matched_scopes": list(exc.matched_scopes),
+                            "autonomy_circuit_breaker": dict(exc.snapshot),
+                            "error": str(exc),
+                            "actor": _optional_str(actor),
+                            "request_id": _optional_str(request_id),
+                        },
+                    )
             except Exception as exc:
                 now = _utcnow_iso()
                 node["run_status"] = "failed"

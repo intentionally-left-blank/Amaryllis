@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+from agents.agent_run_manager import AutonomyCircuitBreakerBlockedError
 from storage.database import Database
 from supervisor.task_graph_manager import SupervisorTaskGraphManager
 
@@ -63,6 +64,73 @@ class _FakeAgentManager:
             result = {}
             run["result"] = result
         result["response"] = str(response)
+
+
+class _BreakerAwareFakeAgentManager(_FakeAgentManager):
+    def __init__(
+        self,
+        *,
+        block_global: bool = False,
+        blocked_user_id: str | None = None,
+        blocked_agent_id: str | None = None,
+    ) -> None:
+        super().__init__()
+        self.block_global = bool(block_global)
+        self.blocked_user_id = str(blocked_user_id or "").strip() or None
+        self.blocked_agent_id = str(blocked_agent_id or "").strip() or None
+        self.revision = 1
+
+    def create_run(
+        self,
+        *,
+        agent_id: str,
+        user_message: str,
+        user_id: str,
+        session_id: str | None,
+        max_attempts: int | None = None,
+        budget: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        matched_scopes: list[dict[str, Any]] = []
+        if self.block_global:
+            matched_scopes.append({"scope_type": "global", "reason": "test-global"})
+        if self.blocked_user_id is not None and self.blocked_user_id == str(user_id):
+            matched_scopes.append(
+                {
+                    "scope_type": "user",
+                    "scope_user_id": self.blocked_user_id,
+                    "reason": "test-user-scope",
+                }
+            )
+        if self.blocked_agent_id is not None and self.blocked_agent_id == str(agent_id):
+            matched_scopes.append(
+                {
+                    "scope_type": "agent",
+                    "scope_agent_id": self.blocked_agent_id,
+                    "reason": "test-agent-scope",
+                }
+            )
+        if matched_scopes:
+            revision = int(self.revision)
+            self.revision += 1
+            raise AutonomyCircuitBreakerBlockedError(
+                "blocked by breaker",
+                decision={"blocked": True, "revision": revision},
+                matched_scopes=matched_scopes,
+                snapshot={
+                    "armed": True,
+                    "revision": revision,
+                    "active_scope_count": len(matched_scopes),
+                    "active_scopes": matched_scopes,
+                },
+            )
+        return super().create_run(
+            agent_id=agent_id,
+            user_message=user_message,
+            user_id=user_id,
+            session_id=session_id,
+            max_attempts=max_attempts,
+            budget=budget,
+        )
 
 
 def _node_by_id(graph: dict[str, Any], node_id: str) -> dict[str, Any]:
@@ -337,6 +405,41 @@ class SupervisorTaskGraphManagerTests(unittest.TestCase):
         self.assertEqual(str(failed.get("status")), "failed")
         verification = failed.get("objective_verification", {})
         self.assertEqual(str(verification.get("status")), "failed")
+
+    def test_breaker_blocked_dispatch_keeps_node_planned_until_disarm(self) -> None:
+        fake_agent_manager = _BreakerAwareFakeAgentManager(block_global=True)
+        manager = SupervisorTaskGraphManager(agent_manager=fake_agent_manager)
+        created = manager.create_graph(
+            user_id="user-1",
+            objective="breaker dispatch parity",
+            nodes=[
+                {
+                    "node_id": "node-1",
+                    "agent_id": "agent-1",
+                    "message": "step",
+                }
+            ],
+        )
+        graph_id = str(created.get("id") or "")
+
+        launched = manager.launch_graph(graph_id=graph_id, user_id="user-1")
+        node = _node_by_id(launched, "node-1")
+        self.assertEqual(str(node.get("status") or ""), "planned")
+        self.assertFalse(bool(str(node.get("run_id") or "").strip()))
+        self.assertEqual(str(launched.get("status") or ""), "running")
+        timeline = launched.get("timeline", [])
+        self.assertTrue(
+            any(
+                str(item.get("event") or "") == "node_run_blocked_autonomy_circuit_breaker"
+                for item in timeline
+            )
+        )
+
+        fake_agent_manager.block_global = False
+        resumed = manager.tick_graph(graph_id=graph_id, user_id="user-1")
+        resumed_node = _node_by_id(resumed, "node-1")
+        self.assertIn(str(resumed_node.get("status") or ""), {"queued", "running", "succeeded"})
+        self.assertTrue(bool(str(resumed_node.get("run_id") or "").strip()))
 
 
 if __name__ == "__main__":

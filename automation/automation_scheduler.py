@@ -8,7 +8,7 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from agents.agent import Agent
-from agents.agent_run_manager import AgentRunManager
+from agents.agent_run_manager import AgentRunManager, AutonomyCircuitBreakerBlockedError
 from automation.mission_policy import resolve_mission_policy_overlay
 from automation.schedule import compute_next_run_at, normalize_schedule, validate_timezone
 from storage.database import Database
@@ -424,6 +424,7 @@ class AutomationScheduler:
 
         queued_count = int(event_breakdown.get("run_queued", 0))
         error_count = int(event_breakdown.get("run_error", 0))
+        blocked_count = int(event_breakdown.get("run_blocked_autonomy_circuit_breaker", 0))
         dedup_count = int(event_breakdown.get("run_deduplicated", 0))
         attempts = queued_count + error_count
         success_rate = float(queued_count / attempts) if attempts > 0 else 1.0
@@ -464,6 +465,7 @@ class AutomationScheduler:
                 "sample_size": attempts,
                 "run_queue_success_rate": success_rate,
                 "run_queue_error_rate": error_rate,
+                "run_blocked_by_autonomy_circuit_breaker": blocked_count,
                 "deduplicated_dispatches": dedup_count,
             },
             "top_failures": top_failures,
@@ -634,13 +636,72 @@ class AutomationScheduler:
                 )
                 return
 
-            run = self.run_manager.create_run(
-                agent=Agent.from_record(agent_record),
-                user_id=user_id,
-                session_id=automation.get("session_id"),
-                user_message=run_message,
-            )
-            run_id = str(run["id"])
+            try:
+                run = self.run_manager.create_run(
+                    agent=Agent.from_record(agent_record),
+                    user_id=user_id,
+                    session_id=automation.get("session_id"),
+                    user_message=run_message,
+                )
+                run_id = str(run["id"])
+            except AutonomyCircuitBreakerBlockedError as exc:
+                blocked_reason = ""
+                if exc.matched_scopes:
+                    blocked_reason = str(exc.matched_scopes[0].get("reason") or "").strip()
+                blocked_scope_tokens: list[str] = []
+                for scope in exc.matched_scopes:
+                    scope_type = str(scope.get("scope_type") or "").strip().lower()
+                    if scope_type == "global":
+                        blocked_scope_tokens.append("global")
+                    elif scope_type == "user":
+                        scope_user_id = str(scope.get("scope_user_id") or "").strip()
+                        blocked_scope_tokens.append(f"user:{scope_user_id or 'unknown'}")
+                    elif scope_type == "agent":
+                        scope_agent_id = str(scope.get("scope_agent_id") or "").strip()
+                        blocked_scope_tokens.append(f"agent:{scope_agent_id or 'unknown'}")
+                    elif scope_type:
+                        blocked_scope_tokens.append(scope_type)
+                blocked_scope_summary = ", ".join(blocked_scope_tokens) if blocked_scope_tokens else "unknown"
+
+                with self.database.write_transaction():
+                    if dispatch_registered and run_id is None:
+                        self.database.delete_automation_dispatch(
+                            automation_id=automation_id,
+                            dispatch_key=dispatch_key,
+                        )
+                    self.database.update_automation_fields(
+                        automation_id,
+                        last_run_at=now_iso,
+                        next_run_at=next_run_at,
+                        last_error=None,
+                        interval_sec=interval_sec,
+                        schedule_type=schedule_type,
+                        schedule_json=schedule,
+                        timezone=timezone_name,
+                        last_dispatch_key=dispatch_key,
+                    )
+                    self.database.add_automation_event(
+                        automation_id=automation_id,
+                        event_type="run_blocked_autonomy_circuit_breaker",
+                        message=(
+                            "Automation run dispatch paused by autonomy circuit breaker "
+                            f"({source_name}; scope={blocked_scope_summary}"
+                            f"{'; reason=' + blocked_reason if blocked_reason else ''})."
+                        ),
+                    )
+                self._emit(
+                    "automation_run_blocked_autonomy_circuit_breaker",
+                    {
+                        "automation_id": automation_id,
+                        "source": source_name,
+                        "dispatch_key": dispatch_key,
+                        "scope": blocked_scope_summary,
+                        "reason": blocked_reason,
+                        "mission_policy_profile": mission_policy_profile,
+                    },
+                )
+                return
+
             recovered = previous_failures > 0 or previous_level != "none"
             with self.database.write_transaction():
                 self.database.update_automation_dispatch_run_id(

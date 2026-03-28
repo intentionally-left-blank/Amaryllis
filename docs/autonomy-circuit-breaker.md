@@ -40,11 +40,20 @@ When breaker is armed:
 - `POST /agents/{agent_id}/runs` is rejected with `validation_error`.
 - `POST /agents/{agent_id}/runs/dispatch` with `interaction_mode=execute` is rejected.
 - `interaction_mode=plan` remains available (dry-run planning only).
+- automation manual/scheduled dispatch (`POST /automations/{automation_id}/run` or scheduler tick) is paused with
+  `run_blocked_autonomy_circuit_breaker` event instead of failure escalation (`consecutive_failures` is not incremented).
+- supervisor node dispatch (`POST /supervisor/graphs/{graph_id}/launch|tick`) is paused per node when blocked by scope;
+  node stays `planned` with timeline event `node_run_blocked_autonomy_circuit_breaker` until breaker is disarmed.
 
 Scope behavior:
 - `global`: blocks execute-mode run creation for all users/agents.
 - `user`: blocks execute-mode run creation only for a specific `user_id`.
 - `agent`: blocks execute-mode run creation only for a specific `agent_id`.
+
+Scope parity applies to all execute dispatch domains:
+- direct runs (`/agents/*/runs`, execute dispatch),
+- automation dispatch (`/automations/*/run`, scheduler),
+- supervisor child-run dispatch (`/supervisor/graphs/*/launch|tick`).
 
 State persistence:
 - Breaker state is persisted to `AMARYLLIS_AUTONOMY_CIRCUIT_BREAKER_STATE_PATH`
@@ -96,4 +105,5 @@ python3 scripts/release/autonomy_circuit_breaker_soak_gate.py \
 Gate validates:
 - deterministic `arm -> block -> timeline trace -> disarm -> execute restored` loop,
 - scope behavior parity across `global`, `user`, and `agent`,
+- cross-domain pause/resume parity for direct runs, automations, and supervisor child-run dispatch,
 - p95 cycle latency and failed-cycle budget.

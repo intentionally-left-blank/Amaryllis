@@ -1,0 +1,207 @@
+{
+  "generated_at": "2026-03-28T23:25:56.669713+00:00",
+  "suite": "supervisor_mission_gate_v1",
+  "summary": {
+    "status": "pass",
+    "checks_total": 39,
+    "checks_failed": 0,
+    "supervisor_doc": "/Users/bogdan/Amaryllis/docs/supervisor-task-graph-contract.md"
+  },
+  "checks": [
+    {
+      "name": "supervisor_doc_exists",
+      "ok": true,
+      "detail": "/Users/bogdan/Amaryllis/docs/supervisor-task-graph-contract.md"
+    },
+    {
+      "name": "supervisor_doc_endpoints",
+      "ok": true,
+      "detail": "all supervisor endpoints documented"
+    },
+    {
+      "name": "supervisor_doc_checkpoint_resume",
+      "ok": true,
+      "detail": "checkpoint/resume contract documented"
+    },
+    {
+      "name": "supervisor_doc_objective_verification",
+      "ok": true,
+      "detail": "objective verification policy documented"
+    },
+    {
+      "name": "manager_create_graph_id",
+      "ok": true,
+      "detail": "graph_id=sup-9834ea07a50449f9b1e2d0d4556a45d6"
+    },
+    {
+      "name": "manager_launch_triage_run",
+      "ok": true,
+      "detail": "triage_run_id=run-1"
+    },
+    {
+      "name": "manager_tick_fix_scheduled",
+      "ok": true,
+      "detail": "fix_run_id=run-2"
+    },
+    {
+      "name": "manager_checkpoint_resume_preserves_run",
+      "ok": true,
+      "detail": "recovered_fix_run_id=run-2"
+    },
+    {
+      "name": "manager_checkpoint_resume_continues_to_success",
+      "ok": true,
+      "detail": "status=succeeded"
+    },
+    {
+      "name": "manager_manual_mode_review_required",
+      "ok": true,
+      "detail": "status=review_required"
+    },
+    {
+      "name": "manager_manual_mode_verify_override",
+      "ok": true,
+      "detail": "status=succeeded, verification=passed"
+    },
+    {
+      "name": "manager_objective_keyword_failure",
+      "ok": true,
+      "detail": "status=failed, verification=failed"
+    },
+    {
+      "name": "manager_checkpoint_store_persisted",
+      "ok": true,
+      "detail": "checkpoint_count=10"
+    },
+    {
+      "name": "runtime_supervisor_contract_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_contract_statuses",
+      "ok": true,
+      "detail": "graph_statuses=['canceled', 'failed', 'planned', 'review_required', 'running', 'succeeded']"
+    },
+    {
+      "name": "runtime_supervisor_contract_verify_endpoint",
+      "ok": true,
+      "detail": "verify_endpoint=/supervisor/graphs/{graph_id}/verify"
+    },
+    {
+      "name": "runtime_supervisor_contract_checkpoint_resume",
+      "ok": true,
+      "detail": "checkpoint_resume={'enabled': True, 'store': 'sqlite.supervisor_graphs', 'mode': 'runtime_auto_hydrate'}"
+    },
+    {
+      "name": "runtime_supervisor_create_triage_agent_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_triage_agent_id",
+      "ok": true,
+      "detail": "agent_id=c6aaead4-a1d9-4689-b42d-2550ee3210d8"
+    },
+    {
+      "name": "runtime_supervisor_create_fix_agent_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_fix_agent_id",
+      "ok": true,
+      "detail": "agent_id=cf30c08a-763b-4673-b4e3-35498e834146"
+    },
+    {
+      "name": "runtime_supervisor_create_graph_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_create_graph_id",
+      "ok": true,
+      "detail": "graph_id=sup-4179c4c7cd794fdb9885f7264e8e782f"
+    },
+    {
+      "name": "runtime_supervisor_launch_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_launch_status",
+      "ok": true,
+      "detail": "status=running"
+    },
+    {
+      "name": "runtime_supervisor_tick_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_tick_status",
+      "ok": true,
+      "detail": "status=running"
+    },
+    {
+      "name": "runtime_supervisor_list_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_list_contains_graph",
+      "ok": true,
+      "detail": "count=1"
+    },
+    {
+      "name": "runtime_supervisor_verify_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_verify_status_passed",
+      "ok": true,
+      "detail": "verification_status=passed"
+    },
+    {
+      "name": "runtime_supervisor_owner_guard",
+      "ok": true,
+      "detail": "status=403"
+    },
+    {
+      "name": "runtime_supervisor_owner_guard_error_type",
+      "ok": true,
+      "detail": "error_type=permission_denied"
+    },
+    {
+      "name": "runtime_supervisor_restart_graph_create_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_restart_graph_id",
+      "ok": true,
+      "detail": "graph_id=sup-9afab75731534c39bf9d5e9ed9cd9795"
+    },
+    {
+      "name": "runtime_supervisor_restart_graph_launch_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_restart_recovery_get_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_restart_recovery_graph_id",
+      "ok": true,
+      "detail": "recovered_graph_id=sup-9afab75731534c39bf9d5e9ed9cd9795"
+    },
+    {
+      "name": "runtime_supervisor_restart_recovery_nodes",
+      "ok": true,
+      "detail": "node_count=1"
+    }
+  ]
+}

@@ -56,6 +56,21 @@ class RunLeaseLostError(TaskGuardrailError):
     pass
 
 
+class AutonomyCircuitBreakerBlockedError(ValueError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        decision: dict[str, Any] | None = None,
+        matched_scopes: list[dict[str, Any]] | None = None,
+        snapshot: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.decision = dict(decision or {})
+        self.matched_scopes = [item for item in (matched_scopes or []) if isinstance(item, dict)]
+        self.snapshot = dict(snapshot or {})
+
+
 CORE_ISSUE_DEFINITIONS: tuple[tuple[str, str, int, list[str]], ...] = (
     (STEP_PREPARE_CONTEXT, "Prepare context", 10, []),
     (STEP_REASONING, "Reasoning", 20, [STEP_PREPARE_CONTEXT]),
@@ -283,9 +298,14 @@ class AgentRunManager:
                         "matched_scopes": matched_scopes,
                     },
                 )
-                raise ValueError(
-                    "Autonomy circuit breaker is armed for this run scope. "
-                    f"New runs are temporarily blocked{detail_suffix}."
+                raise AutonomyCircuitBreakerBlockedError(
+                    (
+                        "Autonomy circuit breaker is armed for this run scope. "
+                        f"New runs are temporarily blocked{detail_suffix}."
+                    ),
+                    decision=decision,
+                    matched_scopes=matched_scopes,
+                    snapshot=snapshot,
                 )
 
 

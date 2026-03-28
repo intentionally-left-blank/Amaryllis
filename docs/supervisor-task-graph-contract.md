@@ -48,6 +48,11 @@ All endpoints are auth-scoped. Graph ownership is enforced (`user|admin` scopes)
   - marks downstream nodes `blocked` if dependency failed/canceled
   - starts newly-ready nodes
   - updates graph terminal status when complete
+- autonomy circuit breaker parity:
+  - if child run creation is blocked by breaker scope (`global|user|agent`), node is not failed;
+  - node remains `planned` and graph continues in `running` state;
+  - timeline gets `node_run_blocked_autonomy_circuit_breaker`;
+  - after disarm, next `tick`/`launch` can create the child run normally.
 
 ## Checkpoint + Resume (P4-C02 Slice)
 - Graph state is persisted into SQLite table `supervisor_graphs` on each create/launch/tick checkpoint.

@@ -29,7 +29,7 @@ Mandatory gates before publish:
 23. Localization/governance gate (RU/EN docs + starter templates + contributor/legal governance package contract)
 24. Flow/interaction gate (unified `/flow/sessions/*` + `/runs/dispatch` plan-vs-execute trust-boundary contract)
 25. Action explainability gate (timeline stream + plain-language `reason/result/next_step` payload contract)
-26. Autonomy circuit breaker gate (service emergency brake contract + execute-mode blocking assertions)
+26. Autonomy circuit breaker gate (service emergency brake contract + execute-mode blocking + automation pause-without-escalation + supervisor dispatch-pause parity assertions)
 27. Autonomy circuit breaker stability soak gate (multi-cycle emergency drill cadence + scope parity + p95 cycle SLO assertions)
 28. Desktop action rollback gate (Linux desktop action + rollback hint + terminal receipt contract)
 29. Supervisor mission gate (bounded task-graph + checkpoint/resume + objective verification contract)

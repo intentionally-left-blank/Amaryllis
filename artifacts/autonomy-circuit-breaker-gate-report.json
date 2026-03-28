@@ -1,6 +1,6 @@
 {
   "suite": "autonomy_circuit_breaker_gate_v1",
-  "generated_at": "2026-03-28T22:56:15.251770+00:00",
+  "generated_at": "2026-03-28T23:25:46.191672+00:00",
   "checks": [
     {
       "name": "doc_exists",
@@ -43,6 +43,21 @@
       "detail": "restart/restore policy documented"
     },
     {
+      "name": "doc_recovery_guidance",
+      "ok": true,
+      "detail": "recovery guidance contract documented"
+    },
+    {
+      "name": "doc_automation_breaker_behavior",
+      "ok": true,
+      "detail": "automation breaker pause behavior documented"
+    },
+    {
+      "name": "doc_supervisor_breaker_behavior",
+      "ok": true,
+      "detail": "supervisor breaker pause behavior documented"
+    },
+    {
       "name": "runtime_status_endpoint_ok",
       "ok": true,
       "detail": "status=200"
@@ -53,6 +68,11 @@
       "detail": "armed=False"
     },
     {
+      "name": "runtime_status_recovery_guidance",
+      "ok": true,
+      "detail": "status endpoint returns recovery guidance"
+    },
+    {
       "name": "runtime_create_agent_ok",
       "ok": true,
       "detail": "status=200"
@@ -60,7 +80,7 @@
     {
       "name": "runtime_create_agent_id",
       "ok": true,
-      "detail": "agent_id=7b7356e7-d435-4428-b24d-94e85908e255"
+      "detail": "agent_id=bdd05c94-0f17-4b1c-9e5c-72a50407aa97"
     },
     {
       "name": "runtime_create_agent_user2_ok",
@@ -70,7 +90,7 @@
     {
       "name": "runtime_create_agent_user2_id",
       "ok": true,
-      "detail": "agent_id=0be34082-f0b8-4c8f-a917-c5e3abe1610b"
+      "detail": "agent_id=4fe5b481-2268-4a71-9774-9d1ffebd8fa8"
     },
     {
       "name": "runtime_arm_ok",
@@ -88,6 +108,11 @@
       "detail": "signed action receipt present"
     },
     {
+      "name": "runtime_armed_recovery_guidance",
+      "ok": true,
+      "detail": "armed status includes actionable recovery guidance"
+    },
+    {
       "name": "runtime_execute_create_blocked",
       "ok": true,
       "detail": "status=400"
@@ -101,6 +126,51 @@
       "name": "runtime_plan_dispatch_allowed",
       "ok": true,
       "detail": "status=200"
+    },
+    {
+      "name": "runtime_automation_create_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_automation_id",
+      "ok": true,
+      "detail": "automation_id=5d7ddbbd-2640-4f08-9f74-8b6fe97b1443"
+    },
+    {
+      "name": "runtime_automation_run_blocked_gracefully",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_automation_block_does_not_count_failure",
+      "ok": true,
+      "detail": "blocked automation run does not increment failure/escalation"
+    },
+    {
+      "name": "runtime_automation_block_event_emitted",
+      "ok": true,
+      "detail": "automation emits run_blocked_autonomy_circuit_breaker while breaker is armed"
+    },
+    {
+      "name": "runtime_supervisor_graph_create_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_graph_id",
+      "ok": true,
+      "detail": "graph_id=sup-a02c4fdc72dd4abaa64b407afee44e8b"
+    },
+    {
+      "name": "runtime_supervisor_launch_blocked_gracefully",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_block_event_emitted",
+      "ok": true,
+      "detail": "supervisor emits node_run_blocked_autonomy_circuit_breaker while breaker is armed"
     },
     {
       "name": "runtime_disarm_ok",
@@ -123,7 +193,27 @@
       "detail": "timeline includes actor/request_id/reason"
     },
     {
+      "name": "runtime_timeline_recovery_guidance",
+      "ok": true,
+      "detail": "timeline response includes recovery guidance"
+    },
+    {
       "name": "runtime_execute_restored_after_disarm",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_automation_run_restored_after_disarm",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_automation_run_queued_after_disarm",
+      "ok": true,
+      "detail": "automation run queues successfully after breaker disarm"
+    },
+    {
+      "name": "runtime_supervisor_dispatch_restored_after_disarm",
       "ok": true,
       "detail": "status=200"
     },
@@ -143,7 +233,77 @@
       "detail": "status=200"
     },
     {
+      "name": "runtime_supervisor_user_scope_graph_create_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_user_scope_graph_id",
+      "ok": true,
+      "detail": "graph_id=sup-526aaad4ade54a83971d7ea4e7749523"
+    },
+    {
+      "name": "runtime_supervisor_user_scope_blocks_target_user",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_user_scope_allowed_graph_create_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_user_scope_allows_other_user",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
       "name": "runtime_disarm_user_scope_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_user_scope_restored_after_disarm",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_arm_agent_scope_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_agent_scope_blocks_target_agent",
+      "ok": true,
+      "detail": "status=400"
+    },
+    {
+      "name": "runtime_agent_scope_allows_other_agent",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_agent_scope_graph_create_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_agent_scope_graph_id",
+      "ok": true,
+      "detail": "graph_id=sup-e4f4954474b44cccb4d5bbbc12c0f781"
+    },
+    {
+      "name": "runtime_supervisor_agent_scope_blocks_target_agent",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_disarm_agent_scope_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_supervisor_agent_scope_restored_after_disarm",
       "ok": true,
       "detail": "status=200"
     },
@@ -170,8 +330,8 @@
   ],
   "summary": {
     "status": "pass",
-    "total": 33,
-    "passed": 33,
+    "total": 65,
+    "passed": 65,
     "failed": 0
   }
 }

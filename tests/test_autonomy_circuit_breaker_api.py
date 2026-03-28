@@ -72,6 +72,46 @@ class AutonomyCircuitBreakerAPITests(unittest.TestCase):
         self.assertEqual(created.status_code, 200)
         return str(created.json().get("id") or "")
 
+    def _create_supervisor_graph(
+        self,
+        *,
+        token: str,
+        user_id: str,
+        objective: str,
+        node_id: str,
+        agent_id: str,
+        message: str,
+    ) -> str:
+        created = self.client.post(
+            "/supervisor/graphs/create",
+            headers=self._auth(token),
+            json={
+                "user_id": user_id,
+                "objective": objective,
+                "nodes": [
+                    {
+                        "node_id": node_id,
+                        "agent_id": agent_id,
+                        "message": message,
+                    }
+                ],
+            },
+        )
+        self.assertEqual(created.status_code, 200)
+        graph_id = str(created.json().get("supervisor_graph", {}).get("id") or "")
+        self.assertTrue(graph_id.startswith("sup-"))
+        return graph_id
+
+    @staticmethod
+    def _graph_node(graph: dict[str, object], node_id: str) -> dict[str, object]:
+        nodes = graph.get("nodes")
+        if not isinstance(nodes, list):
+            return {}
+        for item in nodes:
+            if isinstance(item, dict) and str(item.get("node_id") or "") == node_id:
+                return item
+        return {}
+
     def _disarm_global_for_cleanup(self) -> None:
         self.client.post(
             "/service/runs/autonomy-circuit-breaker",
@@ -179,9 +219,116 @@ class AutonomyCircuitBreakerAPITests(unittest.TestCase):
         run_id = str(create_after_disarm.json().get("run", {}).get("id") or "")
         self.assertTrue(bool(run_id))
 
+    def test_arm_pauses_automation_dispatch_without_failure_escalation(self) -> None:
+        agent_id = self._create_agent(
+            token="user-token",
+            user_id="user-1",
+            name="Autonomy Circuit Breaker Automation Agent",
+        )
+        create_automation = self.client.post(
+            "/automations/create",
+            headers=self._auth("user-token"),
+            json={
+                "agent_id": agent_id,
+                "user_id": "user-1",
+                "message": "automation while breaker armed",
+                "session_id": "breaker-automation-session",
+                "interval_sec": 60,
+                "start_immediately": False,
+                "timezone": "UTC",
+            },
+        )
+        self.assertEqual(create_automation.status_code, 200)
+        automation_id = str(create_automation.json().get("automation", {}).get("id") or "")
+        self.assertTrue(bool(automation_id))
+
+        arm = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={
+                "action": "arm",
+                "reason": "automation-breaker-check",
+                "scope_type": "global",
+                "apply_kill_switch": False,
+            },
+        )
+        self.assertEqual(arm.status_code, 200)
+
+        blocked_run = self.client.post(
+            f"/automations/{automation_id}/run",
+            headers=self._auth("user-token"),
+        )
+        self.assertEqual(blocked_run.status_code, 200)
+        blocked_automation = blocked_run.json().get("automation", {})
+        self.assertEqual(int(blocked_automation.get("consecutive_failures", 0)), 0)
+        self.assertEqual(str(blocked_automation.get("escalation_level") or "none"), "none")
+        self.assertTrue(bool(blocked_automation.get("is_enabled", False)))
+        self.assertIn(blocked_automation.get("last_error"), {None, ""})
+
+        events_while_armed = self.client.get(
+            f"/automations/{automation_id}/events",
+            headers=self._auth("user-token"),
+            params={"limit": 100},
+        )
+        self.assertEqual(events_while_armed.status_code, 200)
+        event_items_while_armed = events_while_armed.json().get("items", [])
+        self.assertTrue(
+            any(
+                str(item.get("event_type") or "") == "run_blocked_autonomy_circuit_breaker"
+                for item in event_items_while_armed
+            )
+        )
+
+        disarm = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={
+                "action": "disarm",
+                "scope_type": "global",
+                "reason": "automation-breaker-check-done",
+            },
+        )
+        self.assertEqual(disarm.status_code, 200)
+
+        restored_run = self.client.post(
+            f"/automations/{automation_id}/run",
+            headers=self._auth("user-token"),
+        )
+        self.assertEqual(restored_run.status_code, 200)
+
+        events_after_disarm = self.client.get(
+            f"/automations/{automation_id}/events",
+            headers=self._auth("user-token"),
+            params={"limit": 200},
+        )
+        self.assertEqual(events_after_disarm.status_code, 200)
+        event_items_after_disarm = events_after_disarm.json().get("items", [])
+        self.assertTrue(
+            any(
+                str(item.get("event_type") or "") == "run_queued"
+                for item in event_items_after_disarm
+            )
+        )
+
     def test_scoped_user_breaker_blocks_only_target_user(self) -> None:
         user1_agent = self._create_agent(token="user-token", user_id="user-1", name="Scoped User Agent 1")
         user2_agent = self._create_agent(token="user2-token", user_id="user-2", name="Scoped User Agent 2")
+        user1_graph = self._create_supervisor_graph(
+            token="user-token",
+            user_id="user-1",
+            objective="Scoped user breaker graph user-1",
+            node_id="node-user1",
+            agent_id=user1_agent,
+            message="run user-1 node",
+        )
+        user2_graph = self._create_supervisor_graph(
+            token="user2-token",
+            user_id="user-2",
+            objective="Scoped user breaker graph user-2",
+            node_id="node-user2",
+            agent_id=user2_agent,
+            message="run user-2 node",
+        )
 
         arm = self.client.post(
             "/service/runs/autonomy-circuit-breaker",
@@ -210,6 +357,34 @@ class AutonomyCircuitBreakerAPITests(unittest.TestCase):
         )
         self.assertEqual(allowed_user2.status_code, 200)
 
+        launch_user1 = self.client.post(
+            f"/supervisor/graphs/{user1_graph}/launch",
+            headers=self._auth("user-token"),
+            json={"session_id": "sup-user-scope-1"},
+        )
+        self.assertEqual(launch_user1.status_code, 200)
+        launch_user1_graph = launch_user1.json().get("supervisor_graph", {})
+        launch_user1_node = self._graph_node(launch_user1_graph, "node-user1")
+        self.assertEqual(str(launch_user1_node.get("status") or ""), "planned")
+        self.assertIn(launch_user1_node.get("run_id"), {None, ""})
+        self.assertTrue(
+            any(
+                str(item.get("event") or "") == "node_run_blocked_autonomy_circuit_breaker"
+                for item in launch_user1_graph.get("timeline", [])
+            )
+        )
+
+        launch_user2 = self.client.post(
+            f"/supervisor/graphs/{user2_graph}/launch",
+            headers=self._auth("user2-token"),
+            json={"session_id": "sup-user-scope-2"},
+        )
+        self.assertEqual(launch_user2.status_code, 200)
+        launch_user2_graph = launch_user2.json().get("supervisor_graph", {})
+        launch_user2_node = self._graph_node(launch_user2_graph, "node-user2")
+        self.assertIn(str(launch_user2_node.get("status") or ""), {"queued", "running", "succeeded"})
+        self.assertTrue(bool(str(launch_user2_node.get("run_id") or "").strip()))
+
         disarm = self.client.post(
             "/service/runs/autonomy-circuit-breaker",
             headers=self._auth("service-token"),
@@ -222,11 +397,40 @@ class AutonomyCircuitBreakerAPITests(unittest.TestCase):
         )
         self.assertEqual(disarm.status_code, 200)
 
+        resumed_user1 = self.client.post(
+            f"/supervisor/graphs/{user1_graph}/tick",
+            headers=self._auth("user-token"),
+            json={"noop": True},
+        )
+        self.assertEqual(resumed_user1.status_code, 200)
+        resumed_node = self._graph_node(
+            resumed_user1.json().get("supervisor_graph", {}),
+            "node-user1",
+        )
+        self.assertIn(str(resumed_node.get("status") or ""), {"queued", "running", "succeeded"})
+        self.assertTrue(bool(str(resumed_node.get("run_id") or "").strip()))
+
         self._disarm_global_for_cleanup()
 
     def test_scoped_agent_breaker_blocks_only_target_agent(self) -> None:
         agent1 = self._create_agent(token="user-token", user_id="user-1", name="Scoped Agent 1")
         agent2 = self._create_agent(token="user-token", user_id="user-1", name="Scoped Agent 2")
+        graph_agent1 = self._create_supervisor_graph(
+            token="user-token",
+            user_id="user-1",
+            objective="Scoped agent breaker graph target",
+            node_id="node-agent1",
+            agent_id=agent1,
+            message="run targeted agent",
+        )
+        graph_agent2 = self._create_supervisor_graph(
+            token="user-token",
+            user_id="user-1",
+            objective="Scoped agent breaker graph non-target",
+            node_id="node-agent2",
+            agent_id=agent2,
+            message="run non-target agent",
+        )
 
         arm = self.client.post(
             "/service/runs/autonomy-circuit-breaker",
@@ -255,6 +459,34 @@ class AutonomyCircuitBreakerAPITests(unittest.TestCase):
         )
         self.assertEqual(allowed_agent2.status_code, 200)
 
+        launch_agent1 = self.client.post(
+            f"/supervisor/graphs/{graph_agent1}/launch",
+            headers=self._auth("user-token"),
+            json={"session_id": "sup-agent-scope-1"},
+        )
+        self.assertEqual(launch_agent1.status_code, 200)
+        launch_agent1_graph = launch_agent1.json().get("supervisor_graph", {})
+        launch_agent1_node = self._graph_node(launch_agent1_graph, "node-agent1")
+        self.assertEqual(str(launch_agent1_node.get("status") or ""), "planned")
+        self.assertIn(launch_agent1_node.get("run_id"), {None, ""})
+        self.assertTrue(
+            any(
+                str(item.get("event") or "") == "node_run_blocked_autonomy_circuit_breaker"
+                for item in launch_agent1_graph.get("timeline", [])
+            )
+        )
+
+        launch_agent2 = self.client.post(
+            f"/supervisor/graphs/{graph_agent2}/launch",
+            headers=self._auth("user-token"),
+            json={"session_id": "sup-agent-scope-2"},
+        )
+        self.assertEqual(launch_agent2.status_code, 200)
+        launch_agent2_graph = launch_agent2.json().get("supervisor_graph", {})
+        launch_agent2_node = self._graph_node(launch_agent2_graph, "node-agent2")
+        self.assertIn(str(launch_agent2_node.get("status") or ""), {"queued", "running", "succeeded"})
+        self.assertTrue(bool(str(launch_agent2_node.get("run_id") or "").strip()))
+
         disarm = self.client.post(
             "/service/runs/autonomy-circuit-breaker",
             headers=self._auth("service-token"),
@@ -266,6 +498,19 @@ class AutonomyCircuitBreakerAPITests(unittest.TestCase):
             },
         )
         self.assertEqual(disarm.status_code, 200)
+
+        resumed_agent1 = self.client.post(
+            f"/supervisor/graphs/{graph_agent1}/tick",
+            headers=self._auth("user-token"),
+            json={"noop": True},
+        )
+        self.assertEqual(resumed_agent1.status_code, 200)
+        resumed_node = self._graph_node(
+            resumed_agent1.json().get("supervisor_graph", {}),
+            "node-agent1",
+        )
+        self.assertIn(str(resumed_node.get("status") or ""), {"queued", "running", "succeeded"})
+        self.assertTrue(bool(str(resumed_node.get("run_id") or "").strip()))
 
         self._disarm_global_for_cleanup()
 
