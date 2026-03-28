@@ -1,0 +1,291 @@
+{
+  "suite": "autonomy_circuit_breaker_soak_gate_v1",
+  "generated_at": "2026-03-28T23:09:38.809710+00:00",
+  "config": {
+    "cycles": 3,
+    "min_success_rate_pct": 100.0,
+    "max_failed_cycles": 0,
+    "max_p95_cycle_latency_ms": 60000.0
+  },
+  "summary": {
+    "status": "pass",
+    "checks_total": 13,
+    "checks_passed": 13,
+    "checks_failed": 0,
+    "cycles_total": 3,
+    "cycles_passed": 3,
+    "cycles_failed": 0,
+    "success_rate_pct": 100.0,
+    "p95_cycle_latency_ms": 26.3791,
+    "max_cycle_latency_ms": 26.7693,
+    "scopes_covered": [
+      "agent",
+      "global",
+      "user"
+    ]
+  },
+  "checks": [
+    {
+      "name": "runtime_status_endpoint_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_initially_disarmed",
+      "ok": true,
+      "detail": "armed=False"
+    },
+    {
+      "name": "create_agent_a_primary_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "create_agent_a_secondary_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "create_agent_b_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "create_agent_a_primary_id",
+      "ok": true,
+      "detail": "id=f4e3aa1f-2e93-47a2-85ed-22d39d8b2e3c"
+    },
+    {
+      "name": "create_agent_a_secondary_id",
+      "ok": true,
+      "detail": "id=b2ce1a27-187d-4e8f-ab28-2fbaa6c943be"
+    },
+    {
+      "name": "create_agent_b_id",
+      "ok": true,
+      "detail": "id=b5d01641-ff2d-455f-95ac-78c0a2a17692"
+    },
+    {
+      "name": "cycles_executed",
+      "ok": true,
+      "detail": "expected=3 actual=3"
+    },
+    {
+      "name": "success_rate_threshold",
+      "ok": true,
+      "detail": "success_rate_pct=100.0 threshold=100.0"
+    },
+    {
+      "name": "max_failed_cycles",
+      "ok": true,
+      "detail": "failed_cycles=0 threshold=0"
+    },
+    {
+      "name": "p95_cycle_latency_threshold",
+      "ok": true,
+      "detail": "p95_cycle_latency_ms=26.3791 threshold=60000.0"
+    },
+    {
+      "name": "required_scopes_covered",
+      "ok": true,
+      "detail": "required=['agent', 'global', 'user'] covered=['agent', 'global', 'user']"
+    }
+  ],
+  "cycles": [
+    {
+      "cycle": 1,
+      "scope_type": "global",
+      "status": "pass",
+      "duration_ms": 13.6736,
+      "arm_request_id": "16897ef9-4ac1-4cd9-9a6a-7b694a1f6c66",
+      "error": "",
+      "checks": [
+        {
+          "name": "arm_ok",
+          "ok": true,
+          "detail": "status=200"
+        },
+        {
+          "name": "arm_state_armed",
+          "ok": true,
+          "detail": "armed=True"
+        },
+        {
+          "name": "arm_request_id_present",
+          "ok": true,
+          "detail": "request_id=16897ef9-4ac1-4cd9-9a6a-7b694a1f6c66"
+        },
+        {
+          "name": "target_execute_blocked",
+          "ok": true,
+          "detail": "status=400"
+        },
+        {
+          "name": "non_target_blocked_global",
+          "ok": true,
+          "detail": "status=400"
+        },
+        {
+          "name": "timeline_endpoint_ok",
+          "ok": true,
+          "detail": "status=200"
+        },
+        {
+          "name": "timeline_traceability",
+          "ok": true,
+          "detail": "timeline includes actor/request_id for arm transition"
+        },
+        {
+          "name": "timeline_recovery_guidance_present",
+          "ok": true,
+          "detail": "timeline includes recovery guidance recommendations"
+        },
+        {
+          "name": "disarm_ok",
+          "ok": true,
+          "detail": "status=200"
+        },
+        {
+          "name": "disarm_state_disarmed",
+          "ok": true,
+          "detail": "armed=False"
+        },
+        {
+          "name": "execute_restored_after_disarm",
+          "ok": true,
+          "detail": "status=200"
+        }
+      ]
+    },
+    {
+      "cycle": 2,
+      "scope_type": "user",
+      "status": "pass",
+      "duration_ms": 26.7693,
+      "arm_request_id": "c37efb23-8bb9-470a-ae8c-7c4751fb50ee",
+      "error": "",
+      "checks": [
+        {
+          "name": "arm_ok",
+          "ok": true,
+          "detail": "status=200"
+        },
+        {
+          "name": "arm_state_armed",
+          "ok": true,
+          "detail": "armed=True"
+        },
+        {
+          "name": "arm_request_id_present",
+          "ok": true,
+          "detail": "request_id=c37efb23-8bb9-470a-ae8c-7c4751fb50ee"
+        },
+        {
+          "name": "target_execute_blocked",
+          "ok": true,
+          "detail": "status=400"
+        },
+        {
+          "name": "non_target_user_allowed",
+          "ok": true,
+          "detail": "status=200"
+        },
+        {
+          "name": "timeline_endpoint_ok",
+          "ok": true,
+          "detail": "status=200"
+        },
+        {
+          "name": "timeline_traceability",
+          "ok": true,
+          "detail": "timeline includes actor/request_id for arm transition"
+        },
+        {
+          "name": "timeline_recovery_guidance_present",
+          "ok": true,
+          "detail": "timeline includes recovery guidance recommendations"
+        },
+        {
+          "name": "disarm_ok",
+          "ok": true,
+          "detail": "status=200"
+        },
+        {
+          "name": "disarm_state_disarmed",
+          "ok": true,
+          "detail": "armed=False"
+        },
+        {
+          "name": "execute_restored_after_disarm",
+          "ok": true,
+          "detail": "status=200"
+        }
+      ]
+    },
+    {
+      "cycle": 3,
+      "scope_type": "agent",
+      "status": "pass",
+      "duration_ms": 22.8674,
+      "arm_request_id": "879646fc-e998-4a57-a7f4-5fc96234d297",
+      "error": "",
+      "checks": [
+        {
+          "name": "arm_ok",
+          "ok": true,
+          "detail": "status=200"
+        },
+        {
+          "name": "arm_state_armed",
+          "ok": true,
+          "detail": "armed=True"
+        },
+        {
+          "name": "arm_request_id_present",
+          "ok": true,
+          "detail": "request_id=879646fc-e998-4a57-a7f4-5fc96234d297"
+        },
+        {
+          "name": "target_execute_blocked",
+          "ok": true,
+          "detail": "status=400"
+        },
+        {
+          "name": "non_target_agent_allowed",
+          "ok": true,
+          "detail": "status=200"
+        },
+        {
+          "name": "timeline_endpoint_ok",
+          "ok": true,
+          "detail": "status=200"
+        },
+        {
+          "name": "timeline_traceability",
+          "ok": true,
+          "detail": "timeline includes actor/request_id for arm transition"
+        },
+        {
+          "name": "timeline_recovery_guidance_present",
+          "ok": true,
+          "detail": "timeline includes recovery guidance recommendations"
+        },
+        {
+          "name": "disarm_ok",
+          "ok": true,
+          "detail": "status=200"
+        },
+        {
+          "name": "disarm_state_disarmed",
+          "ok": true,
+          "detail": "armed=False"
+        },
+        {
+          "name": "execute_restored_after_disarm",
+          "ok": true,
+          "detail": "status=200"
+        }
+      ]
+    }
+  ]
+}

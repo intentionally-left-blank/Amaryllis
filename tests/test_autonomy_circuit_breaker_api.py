@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from uuid import uuid4
 
 try:
     from fastapi.testclient import TestClient
@@ -267,6 +268,100 @@ class AutonomyCircuitBreakerAPITests(unittest.TestCase):
         self.assertEqual(disarm.status_code, 200)
 
         self._disarm_global_for_cleanup()
+
+    def test_timeline_endpoint_returns_transition_entries(self) -> None:
+        marker = uuid4().hex
+        arm_reason = f"timeline-arm-{marker}"
+        disarm_reason = f"timeline-disarm-{marker}"
+
+        arm = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={
+                "action": "arm",
+                "scope_type": "global",
+                "reason": arm_reason,
+                "apply_kill_switch": False,
+            },
+        )
+        self.assertEqual(arm.status_code, 200)
+        armed_status = self.client.get(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+        )
+        self.assertEqual(armed_status.status_code, 200)
+        armed_guidance = armed_status.json().get("recovery_guidance", {})
+        self.assertTrue(isinstance(armed_guidance.get("recommendations"), list))
+        self.assertIn(str(armed_guidance.get("status")), {"action_required", "monitoring"})
+
+        disarm = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={
+                "action": "disarm",
+                "scope_type": "global",
+                "reason": disarm_reason,
+            },
+        )
+        self.assertEqual(disarm.status_code, 200)
+
+        timeline = self.client.get(
+            "/service/runs/autonomy-circuit-breaker/timeline",
+            headers=self._auth("service-token"),
+            params={"limit": 200},
+        )
+        self.assertEqual(timeline.status_code, 200)
+        payload = timeline.json()
+        items = payload.get("items", [])
+        self.assertGreaterEqual(len(items), 2)
+        timeline_guidance = payload.get("recovery_guidance", {})
+        self.assertTrue(isinstance(timeline_guidance.get("recommendations"), list))
+
+        arm_item = next(
+            (
+                item
+                for item in items
+                if str((item.get("transition") or {}).get("reason")) == arm_reason
+                and str((item.get("transition") or {}).get("action")) == "arm"
+            ),
+            None,
+        )
+        self.assertIsNotNone(arm_item)
+        assert isinstance(arm_item, dict)
+        self.assertEqual(str(arm_item.get("actor")), "svc-runtime")
+        self.assertTrue(bool(str(arm_item.get("request_id") or "").strip()))
+        self.assertEqual(str((arm_item.get("transition") or {}).get("scope_type")), "global")
+
+        disarm_item = next(
+            (
+                item
+                for item in items
+                if str((item.get("transition") or {}).get("reason")) == disarm_reason
+                and str((item.get("transition") or {}).get("action")) == "disarm"
+            ),
+            None,
+        )
+        self.assertIsNotNone(disarm_item)
+
+        filtered = self.client.get(
+            "/service/runs/autonomy-circuit-breaker/timeline",
+            headers=self._auth("service-token"),
+            params={
+                "limit": 200,
+                "transition": "arm",
+                "request_id": str(arm_item.get("request_id") or ""),
+            },
+        )
+        self.assertEqual(filtered.status_code, 200)
+        filtered_items = filtered.json().get("items", [])
+        self.assertGreaterEqual(len(filtered_items), 1)
+        self.assertTrue(
+            all(
+                str((item.get("transition") or {}).get("action")) == "arm"
+                and str(item.get("request_id") or "") == str(arm_item.get("request_id") or "")
+                for item in filtered_items
+            )
+        )
 
     def test_validation_for_invalid_action_and_scope_contract(self) -> None:
         invalid_action = self.client.post(

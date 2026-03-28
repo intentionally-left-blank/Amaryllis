@@ -56,6 +56,11 @@ def _parse_args() -> argparse.Namespace:
         help="Optional nightly burn-rate gate report JSON path.",
     )
     parser.add_argument(
+        "--breaker-soak-report",
+        default="",
+        help="Optional autonomy circuit-breaker stability soak gate report JSON path.",
+    )
+    parser.add_argument(
         "--adoption-kpi-trend-report",
         default="",
         help="Optional adoption KPI trend gate report JSON path.",
@@ -161,6 +166,7 @@ def _source_class(source: str) -> str:
         "adoption_kpi_trend": "adoption_growth",
         "nightly_reliability": "nightly_reliability",
         "nightly_burn_rate": "nightly_reliability",
+        "breaker_soak": "nightly_reliability",
     }
     return mapping.get(normalized, "other")
 
@@ -284,6 +290,7 @@ def main() -> int:
         "adoption_kpi_trend": _resolve_optional_path(project_root, str(args.adoption_kpi_trend_report)),
         "nightly_reliability": _resolve_optional_path(project_root, str(args.nightly_reliability_report)),
         "nightly_burn_rate": _resolve_optional_path(project_root, str(args.nightly_burn_rate_report)),
+        "breaker_soak": _resolve_optional_path(project_root, str(args.breaker_soak_report)),
     }
 
     reports: dict[str, dict[str, Any]] = {}
@@ -758,6 +765,56 @@ def main() -> int:
         kpis["nightly_run_max_consecutive_breach_samples"] = int(
             _safe_float(runs.get("max_consecutive_breach_samples"))
         )
+
+    breaker_soak = reports.get("breaker_soak")
+    if isinstance(breaker_soak, dict):
+        summary = breaker_soak.get("summary") if isinstance(breaker_soak.get("summary"), dict) else {}
+        config = breaker_soak.get("config") if isinstance(breaker_soak.get("config"), dict) else {}
+        status = str(summary.get("status") or "").strip().lower()
+        success_rate = _safe_float(summary.get("success_rate_pct"))
+        cycles_failed = _safe_float(summary.get("cycles_failed"))
+        p95_cycle_latency = _safe_float(summary.get("p95_cycle_latency_ms"))
+        checks.extend(
+            [
+                _check(
+                    check_id="nightly.breaker_soak_gate_passed",
+                    source="breaker_soak",
+                    value=1.0 if status == "pass" else 0.0,
+                    threshold=1.0,
+                    comparator="gte",
+                    unit="bool",
+                ),
+                _check(
+                    check_id="nightly.breaker_soak_success_rate_pct",
+                    source="breaker_soak",
+                    value=success_rate,
+                    threshold=_safe_float(config.get("min_success_rate_pct"), default=success_rate),
+                    comparator="gte",
+                    unit="pct",
+                ),
+                _check(
+                    check_id="nightly.breaker_soak_failed_cycles",
+                    source="breaker_soak",
+                    value=cycles_failed,
+                    threshold=_safe_float(config.get("max_failed_cycles"), default=cycles_failed),
+                    comparator="lte",
+                    unit="count",
+                ),
+                _check(
+                    check_id="nightly.breaker_soak_p95_cycle_latency_ms",
+                    source="breaker_soak",
+                    value=p95_cycle_latency,
+                    threshold=_safe_float(config.get("max_p95_cycle_latency_ms"), default=p95_cycle_latency),
+                    comparator="lte",
+                    unit="ms",
+                ),
+            ]
+        )
+        soak_passed = status == "pass"
+        kpis["nightly_breaker_soak_gate_passed"] = soak_passed
+        kpis["nightly_breaker_soak_success_rate_pct"] = round(success_rate, 4)
+        kpis["nightly_breaker_soak_cycles_failed"] = int(max(0.0, cycles_failed))
+        kpis["nightly_breaker_soak_p95_cycle_latency_ms"] = round(p95_cycle_latency, 4)
 
     passed_checks = sum(1 for item in checks if bool(item.get("passed")))
     failed_checks = len(checks) - passed_checks

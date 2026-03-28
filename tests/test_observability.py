@@ -174,6 +174,9 @@ class ObservabilityTests(unittest.TestCase):
                     "nightly_burn_rate_gate_passed": True,
                     "nightly_adoption_trend_gate_passed": True,
                     "nightly_adoption_trend_regressed_metrics": 0,
+                    "nightly_breaker_soak_gate_passed": True,
+                    "nightly_breaker_soak_cycles_failed": 0,
+                    "nightly_breaker_soak_p95_cycle_latency_ms": 512.0,
                 },
             }
             snapshot_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -194,6 +197,9 @@ class ObservabilityTests(unittest.TestCase):
             self.assertIn("amaryllis_nightly_burn_rate_gate_passed 1.000000", metrics)
             self.assertIn("amaryllis_nightly_adoption_trend_gate_passed 1.000000", metrics)
             self.assertIn("amaryllis_nightly_adoption_trend_regressed_metrics 0.000000", metrics)
+            self.assertIn("amaryllis_nightly_breaker_soak_gate_passed 1.000000", metrics)
+            self.assertIn("amaryllis_nightly_breaker_soak_cycles_failed 0.000000", metrics)
+            self.assertIn("amaryllis_nightly_breaker_soak_p95_cycle_latency_ms 512.000000", metrics)
 
     def test_incident_is_detected_when_slo_is_breached(self) -> None:
         manager = self._build_manager()

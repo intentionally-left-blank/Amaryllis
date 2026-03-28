@@ -87,6 +87,7 @@ def _required_kpis(scope: str) -> set[str]:
         return {
             "nightly_success_rate_pct",
             "nightly_burn_rate_gate_passed",
+            "nightly_breaker_soak_gate_passed",
             "nightly_adoption_trend_gate_passed",
             "journey_success_rate_pct",
             "journey_plan_to_execute_conversion_rate_pct",

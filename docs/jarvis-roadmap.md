@@ -71,6 +71,7 @@ Build a local-first, voice-native, autonomous assistant for developer workflows 
   - global autonomy circuit breaker with service-level arm/disarm API and signed action audit trail.
   - deterministic emergency sequence: arm breaker -> optional kill switch -> recover -> disarm.
   - blocking release/nightly contract gate for emergency brake behavior.
+  - blocking release/nightly breaker stability soak gate (multi-cycle drill cadence + scope parity + cycle-latency SLOs).
   - phase backlog and sprint structure for scoped breakers and persistence/restart semantics.
 
 Execution-ready breakdown:

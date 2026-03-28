@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from uuid import uuid4
 
 try:
     from fastapi.testclient import TestClient
@@ -180,6 +181,16 @@ class SecurityHTTPAuthzTests(unittest.TestCase):
         denied_payload = denied.json()
         self.assertEqual(denied_payload["error"]["type"], "permission_denied")
 
+    def test_service_autonomy_circuit_breaker_timeline_requires_service_scope(self) -> None:
+        denied = self.client.get(
+            "/service/runs/autonomy-circuit-breaker/timeline",
+            headers=self._auth("user-token"),
+            params={"limit": 10},
+        )
+        self.assertEqual(denied.status_code, 403)
+        denied_payload = denied.json()
+        self.assertEqual(denied_payload["error"]["type"], "permission_denied")
+
     def test_service_autonomy_circuit_breaker_success_and_validation(self) -> None:
         invalid_action = self.client.post(
             "/service/runs/autonomy-circuit-breaker",
@@ -247,6 +258,7 @@ class SecurityHTTPAuthzTests(unittest.TestCase):
         target_scope = arm_payload.get("circuit_breaker", {}).get("target_scope", {}).get("scope", {})
         self.assertEqual(str(target_scope.get("scope_type")), "global")
         self.assertTrue(bool(arm_payload.get("action_receipt", {}).get("signature")))
+        self.assertTrue(isinstance((arm_payload.get("recovery_guidance") or {}).get("recommendations"), list))
 
         disarm = self.client.post(
             "/service/runs/autonomy-circuit-breaker",
@@ -260,6 +272,81 @@ class SecurityHTTPAuthzTests(unittest.TestCase):
         self.assertEqual(disarm.status_code, 200)
         disarm_payload = disarm.json()
         self.assertFalse(bool(disarm_payload.get("circuit_breaker", {}).get("armed")))
+
+    def test_service_autonomy_circuit_breaker_timeline_includes_reason_actor_and_request_id(self) -> None:
+        marker = uuid4().hex
+        arm_reason = f"authz-timeline-arm-{marker}"
+        disarm_reason = f"authz-timeline-disarm-{marker}"
+
+        arm = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={
+                "action": "arm",
+                "scope_type": "global",
+                "reason": arm_reason,
+                "apply_kill_switch": False,
+            },
+        )
+        self.assertEqual(arm.status_code, 200)
+
+        disarm = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={
+                "action": "disarm",
+                "scope_type": "global",
+                "reason": disarm_reason,
+            },
+        )
+        self.assertEqual(disarm.status_code, 200)
+
+        timeline = self.client.get(
+            "/service/runs/autonomy-circuit-breaker/timeline",
+            headers=self._auth("service-token"),
+            params={"limit": 200, "actor": "svc-runtime"},
+        )
+        self.assertEqual(timeline.status_code, 200)
+        timeline_payload = timeline.json()
+        self.assertEqual(str(timeline_payload.get("actor")), "svc-runtime")
+        self.assertIn("service", timeline_payload.get("scopes", []))
+        self.assertTrue(isinstance((timeline_payload.get("recovery_guidance") or {}).get("recommendations"), list))
+        items = timeline_payload.get("items", [])
+        self.assertGreaterEqual(len(items), 2)
+
+        arm_item = next(
+            (
+                item
+                for item in items
+                if str((item.get("transition") or {}).get("reason")) == arm_reason
+                and str((item.get("transition") or {}).get("action")) == "arm"
+            ),
+            None,
+        )
+        self.assertIsNotNone(arm_item)
+        assert isinstance(arm_item, dict)
+        self.assertEqual(str(arm_item.get("actor")), "svc-runtime")
+        self.assertTrue(bool(str(arm_item.get("request_id") or "").strip()))
+
+        filtered = self.client.get(
+            "/service/runs/autonomy-circuit-breaker/timeline",
+            headers=self._auth("service-token"),
+            params={
+                "limit": 200,
+                "request_id": str(arm_item.get("request_id") or ""),
+                "transition": "arm",
+            },
+        )
+        self.assertEqual(filtered.status_code, 200)
+        filtered_items = filtered.json().get("items", [])
+        self.assertGreaterEqual(len(filtered_items), 1)
+        self.assertTrue(
+            all(
+                str(item.get("request_id") or "") == str(arm_item.get("request_id") or "")
+                and str((item.get("transition") or {}).get("action")) == "arm"
+                for item in filtered_items
+            )
+        )
 
     def test_admin_can_rotate_identity(self) -> None:
         first = self.client.get("/security/identity", headers=self._auth("admin-token"))

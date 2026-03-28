@@ -31,10 +31,11 @@ Task 09 introduces production-grade backup + restore controls for these assets.
 - `POST /service/backup/verify`
 - `POST /service/backup/restore-drill`
 - `GET /service/runs/autonomy-circuit-breaker` (inspect emergency brake state)
+- `GET /service/runs/autonomy-circuit-breaker/timeline` (incident trace for breaker arm/disarm transitions)
 - `POST /service/runs/autonomy-circuit-breaker` (arm/disarm emergency brake for `global/user/agent` scope; optional auto kill-switch)
 - `POST /service/runs/kill-switch` (interrupt queued/running agent runs)
 
-All endpoints require `service` or `admin` scope and include signed action receipts.
+All endpoints require `service` or `admin` scope, include signed action receipts, and return recovery guidance hints for safe rollback/unfreeze decisions.
 
 ## CLI Operations
 

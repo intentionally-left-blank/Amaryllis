@@ -204,18 +204,26 @@ def get_security_identity(request: Request) -> IdentityResponse:
 def list_security_audit(
     request: Request,
     limit: int = Query(default=200, ge=1, le=1000),
+    event_type: str | None = Query(default=None),
     action: str | None = Query(default=None),
     status: str | None = Query(default=None),
     actor: str | None = Query(default=None),
+    scope_request_id: str | None = Query(default=None, alias="request_id"),
+    target_type: str | None = Query(default=None),
+    target_id: str | None = Query(default=None),
 ) -> SecurityAuditResponse:
     services = request.app.state.services
     request_id = _request_id(request)
     try:
         items = services.security_manager.list_audit_events(
             limit=limit,
+            event_type=event_type,
             action=action,
             status=status,
             actor=actor,
+            request_id=scope_request_id,
+            target_type=target_type,
+            target_id=target_id,
         )
         typed = [SecurityAuditItem(**item) for item in items]
     except Exception as exc:

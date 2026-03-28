@@ -390,6 +390,15 @@ class SREMonitor:
             "# HELP amaryllis_nightly_adoption_trend_regressed_metrics Nightly adoption trend regressed metrics count.",
             "# TYPE amaryllis_nightly_adoption_trend_regressed_metrics gauge",
             f"amaryllis_nightly_adoption_trend_regressed_metrics {float(nightly_mission['adoption_trend_regressed_metrics']):.6f}",
+            "# HELP amaryllis_nightly_breaker_soak_gate_passed Nightly autonomy breaker soak gate status (1=pass, 0=fail).",
+            "# TYPE amaryllis_nightly_breaker_soak_gate_passed gauge",
+            f"amaryllis_nightly_breaker_soak_gate_passed {float(nightly_mission['breaker_soak_gate_passed']):.6f}",
+            "# HELP amaryllis_nightly_breaker_soak_cycles_failed Nightly autonomy breaker soak failed cycle count.",
+            "# TYPE amaryllis_nightly_breaker_soak_cycles_failed gauge",
+            f"amaryllis_nightly_breaker_soak_cycles_failed {float(nightly_mission['breaker_soak_cycles_failed']):.6f}",
+            "# HELP amaryllis_nightly_breaker_soak_p95_cycle_latency_ms Nightly autonomy breaker soak p95 cycle latency in milliseconds.",
+            "# TYPE amaryllis_nightly_breaker_soak_p95_cycle_latency_ms gauge",
+            f"amaryllis_nightly_breaker_soak_p95_cycle_latency_ms {float(nightly_mission['breaker_soak_p95_cycle_latency_ms']):.6f}",
         ]
         return "\n".join(lines) + "\n"
 
@@ -588,6 +597,9 @@ class SREMonitor:
             "burn_rate_gate_passed": 0.0,
             "adoption_trend_gate_passed": 0.0,
             "adoption_trend_regressed_metrics": 0.0,
+            "breaker_soak_gate_passed": 0.0,
+            "breaker_soak_cycles_failed": 0.0,
+            "breaker_soak_p95_cycle_latency_ms": 0.0,
         }
         path_raw = str(self._nightly_mission_report_path or "").strip()
         if not path_raw:
@@ -635,6 +647,21 @@ class SREMonitor:
         metrics["adoption_trend_regressed_metrics"] = max(
             0.0,
             self._safe_float(kpis.get("nightly_adoption_trend_regressed_metrics"), default=0.0),
+        )
+        breaker_soak_gate = kpis.get("nightly_breaker_soak_gate_passed")
+        if isinstance(breaker_soak_gate, bool):
+            metrics["breaker_soak_gate_passed"] = 1.0 if breaker_soak_gate else 0.0
+        else:
+            metrics["breaker_soak_gate_passed"] = (
+                1.0 if self._safe_float(breaker_soak_gate, default=0.0) >= 1.0 else 0.0
+            )
+        metrics["breaker_soak_cycles_failed"] = max(
+            0.0,
+            self._safe_float(kpis.get("nightly_breaker_soak_cycles_failed"), default=0.0),
+        )
+        metrics["breaker_soak_p95_cycle_latency_ms"] = max(
+            0.0,
+            self._safe_float(kpis.get("nightly_breaker_soak_p95_cycle_latency_ms"), default=0.0),
         )
         return metrics
 

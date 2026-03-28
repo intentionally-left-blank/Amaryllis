@@ -95,6 +95,17 @@ python3 scripts/release/autonomy_circuit_breaker_gate.py \
   --output artifacts/nightly-autonomy-circuit-breaker-gate-report.json
 ```
 
+Nightly autonomy circuit breaker stability soak gate:
+
+```bash
+python3 scripts/release/autonomy_circuit_breaker_soak_gate.py \
+  --cycles 9 \
+  --min-success-rate-pct 100 \
+  --max-failed-cycles 0 \
+  --max-p95-cycle-latency-ms 4500 \
+  --output artifacts/nightly-autonomy-circuit-breaker-soak-gate-report.json
+```
+
 Nightly desktop action rollback gate:
 
 ```bash
@@ -279,6 +290,12 @@ Nightly autonomy circuit breaker gate artifact:
 
 ```text
 artifacts/nightly-autonomy-circuit-breaker-gate-report.json
+```
+
+Nightly autonomy circuit breaker stability soak gate artifact:
+
+```text
+artifacts/nightly-autonomy-circuit-breaker-soak-gate-report.json
 ```
 
 Nightly desktop action rollback gate artifact:

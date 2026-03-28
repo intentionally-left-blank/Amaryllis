@@ -1,6 +1,6 @@
 {
   "suite": "autonomy_circuit_breaker_gate_v1",
-  "generated_at": "2026-03-28T22:40:04.432728+00:00",
+  "generated_at": "2026-03-28T22:56:15.251770+00:00",
   "checks": [
     {
       "name": "doc_exists",
@@ -33,6 +33,11 @@
       "detail": "scope_type contract documented"
     },
     {
+      "name": "doc_timeline_endpoint",
+      "ok": true,
+      "detail": "timeline endpoint documented"
+    },
+    {
       "name": "doc_restart_restore_policy",
       "ok": true,
       "detail": "restart/restore policy documented"
@@ -55,7 +60,7 @@
     {
       "name": "runtime_create_agent_id",
       "ok": true,
-      "detail": "agent_id=54ea0e43-2785-4174-8a4a-0344e7c57d7b"
+      "detail": "agent_id=7b7356e7-d435-4428-b24d-94e85908e255"
     },
     {
       "name": "runtime_create_agent_user2_ok",
@@ -65,7 +70,7 @@
     {
       "name": "runtime_create_agent_user2_id",
       "ok": true,
-      "detail": "agent_id=ec3e1a65-57b8-4c0c-a494-1e2b05171fa2"
+      "detail": "agent_id=0be34082-f0b8-4c8f-a917-c5e3abe1610b"
     },
     {
       "name": "runtime_arm_ok",
@@ -106,6 +111,16 @@
       "name": "runtime_disarm_state",
       "ok": true,
       "detail": "armed=False"
+    },
+    {
+      "name": "runtime_timeline_endpoint_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_timeline_traceability",
+      "ok": true,
+      "detail": "timeline includes actor/request_id/reason"
     },
     {
       "name": "runtime_execute_restored_after_disarm",
@@ -155,8 +170,8 @@
   ],
   "summary": {
     "status": "pass",
-    "total": 30,
-    "passed": 30,
+    "total": 33,
+    "passed": 33,
     "failed": 0
   }
 }

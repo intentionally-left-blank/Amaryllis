@@ -15,6 +15,7 @@ Requires `service` or `admin` scope.
 
 - `GET /service/runs/autonomy-circuit-breaker`
   - returns current breaker state (`armed`, revision, actor, reason, timestamps).
+  - includes `recovery_guidance` with deterministic next steps (`status`, `priority`, `recommendations`) based on SLO and recent breaker transitions.
 - `POST /service/runs/autonomy-circuit-breaker`
   - `action: arm|disarm`
   - `scope_type: global|user|agent` (default: `global`)
@@ -23,6 +24,11 @@ Requires `service` or `admin` scope.
   - optional `reason`
   - optional `apply_kill_switch` (default `true`) to interrupt existing queued/running runs at arm time.
   - optional kill-switch scope controls: `include_running`, `include_queued`, `limit`.
+- `GET /service/runs/autonomy-circuit-breaker/timeline`
+  - incident timeline of breaker transitions (signed audit stream).
+  - filters: `limit`, `status`, `actor`, `transition=arm|disarm`, `scope_type=global|user|agent`, `request_id`.
+  - each item includes `actor`, `request_id`, `transition.reason`, `transition.scope_*`, and signature metadata.
+  - includes `recovery_guidance` aligned with current breaker state and observability SLO context.
 
 Existing endpoint:
 - `POST /service/runs/kill-switch`
@@ -63,3 +69,31 @@ Restart policy:
 1. If runtime restarts while breaker is armed, it stays armed after restart.
 2. Service operator verifies state via `GET /service/runs/autonomy-circuit-breaker`.
 3. After incident closure, disarm explicitly.
+
+## Incident Timeline
+
+Recommended incident trace flow:
+1. Trigger `arm` or `disarm` via service endpoint.
+2. Query timeline endpoint filtered by `request_id` or `transition`.
+3. Verify event has expected `actor`, `reason`, `scope_type`, and signed action metadata.
+4. Read `recovery_guidance.recommendations` to execute safe unfreeze/recovery sequence.
+
+This gives deterministic incident traceability for every breaker transition.
+
+## Stability Soak Gate
+
+Release/nightly reliability chains run multi-cycle breaker drills:
+
+```bash
+python3 scripts/release/autonomy_circuit_breaker_soak_gate.py \
+  --cycles 6 \
+  --min-success-rate-pct 100 \
+  --max-failed-cycles 0 \
+  --max-p95-cycle-latency-ms 4500 \
+  --output artifacts/autonomy-circuit-breaker-soak-gate-report.json
+```
+
+Gate validates:
+- deterministic `arm -> block -> timeline trace -> disarm -> execute restored` loop,
+- scope behavior parity across `global`, `user`, and `agent`,
+- p95 cycle latency and failed-cycle budget.

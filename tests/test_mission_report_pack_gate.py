@@ -130,6 +130,68 @@ class MissionReportPackGateTests(unittest.TestCase):
             payload = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(str(payload.get("summary", {}).get("status")), "fail")
 
+    def test_gate_passes_for_valid_nightly_report(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="amaryllis-mission-report-pack-gate-test-") as tmp:
+            base = Path(tmp)
+            report = base / "nightly-report.json"
+            output = base / "nightly-mission-report-pack-gate-report.json"
+            self._write_json(
+                report,
+                {
+                    "suite": "mission_success_recovery_report_pack_v2",
+                    "schema_version": 2,
+                    "scope": "nightly",
+                    "kpis": {
+                        "nightly_success_rate_pct": 100.0,
+                        "nightly_burn_rate_gate_passed": True,
+                        "nightly_breaker_soak_gate_passed": True,
+                        "nightly_adoption_trend_gate_passed": True,
+                        "journey_success_rate_pct": 100.0,
+                        "journey_plan_to_execute_conversion_rate_pct": 100.0,
+                    },
+                    "class_order": ["nightly_reliability", "user_flow", "adoption_growth"],
+                    "class_breakdown": {
+                        "nightly_reliability": {
+                            "checks_total": 4,
+                            "checks_failed": 0,
+                            "status": "pass",
+                            "kpis": {"nightly_success_rate_pct": 100.0},
+                        },
+                        "user_flow": {
+                            "checks_total": 2,
+                            "checks_failed": 0,
+                            "status": "pass",
+                            "kpis": {"journey_success_rate_pct": 100.0},
+                        },
+                        "adoption_growth": {
+                            "checks_total": 2,
+                            "checks_failed": 0,
+                            "status": "pass",
+                            "kpis": {"nightly_adoption_trend_gate_passed": True},
+                        },
+                    },
+                    "summary": {
+                        "checks_total": 8,
+                        "checks_passed": 8,
+                        "checks_failed": 0,
+                        "status": "pass",
+                    },
+                },
+            )
+
+            proc = self._run(
+                "--report",
+                str(report),
+                "--expected-scope",
+                "nightly",
+                "--output",
+                str(output),
+            )
+            self.assertEqual(proc.returncode, 0, msg=f"stdout={proc.stdout}\nstderr={proc.stderr}")
+            self.assertIn("[mission-report-pack-gate] OK", proc.stdout)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(str(payload.get("summary", {}).get("status")), "pass")
+
 
 if __name__ == "__main__":
     unittest.main()

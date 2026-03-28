@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.responses import PlainTextResponse
@@ -53,6 +53,7 @@ from runtime.auth import AuthContext, AuthManager, auth_context_from_request
 from runtime.autonomy_circuit_breaker import (
     AutonomyCircuitBreaker,
     normalize_circuit_breaker_scope,
+    SUPPORTED_CIRCUIT_BREAKER_SCOPE_TYPES,
 )
 from runtime.config import AppConfig
 from runtime.errors import AmaryllisError, InternalError, PermissionDeniedError, ProviderError, ValidationError
@@ -149,6 +150,9 @@ class QoSThermalUpdateRequest(BaseModel):
     thermal_state: str = Field(default="unknown")
 
 
+AUTONOMY_CIRCUIT_BREAKER_AUDIT_EVENT_TYPE = "autonomy_circuit_breaker_transition"
+
+
 def _validate_thermal_state(value: str | None) -> str:
     normalized = str(value or "").strip().lower()
     if normalized not in SUPPORTED_THERMAL_STATES:
@@ -161,6 +165,197 @@ def _normalize_circuit_breaker_action(value: str | None) -> str:
     if normalized not in {"arm", "disarm"}:
         raise ValidationError("action must be one of: arm, disarm")
     return normalized
+
+
+def _normalize_circuit_breaker_timeline_transition(value: str | None) -> str | None:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return None
+    if normalized not in {"arm", "disarm"}:
+        raise ValidationError("transition must be one of: arm, disarm")
+    return normalized
+
+
+def _normalize_circuit_breaker_timeline_scope_type(value: str | None) -> str | None:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return None
+    if normalized not in SUPPORTED_CIRCUIT_BREAKER_SCOPE_TYPES:
+        raise ValidationError(
+            "scope_type must be one of: " + ", ".join(SUPPORTED_CIRCUIT_BREAKER_SCOPE_TYPES)
+        )
+    return normalized
+
+
+def _extract_circuit_breaker_timeline_transition(item: dict[str, Any]) -> dict[str, Any]:
+    details = item.get("details") if isinstance(item, dict) else {}
+    details = details if isinstance(details, dict) else {}
+    transition = details.get("transition")
+    if isinstance(transition, dict):
+        limit_value = transition.get("limit")
+        try:
+            normalized_limit = int(limit_value) if str(limit_value or "").strip() else None
+        except Exception:
+            normalized_limit = None
+        return {
+            "action": str(transition.get("action") or "").strip().lower() or None,
+            "reason": str(transition.get("reason") or "").strip() or None,
+            "scope_type": str(transition.get("scope_type") or "").strip().lower() or None,
+            "scope_user_id": str(transition.get("scope_user_id") or "").strip() or None,
+            "scope_agent_id": str(transition.get("scope_agent_id") or "").strip() or None,
+            "apply_kill_switch": bool(transition.get("apply_kill_switch")),
+            "include_running": bool(transition.get("include_running")),
+            "include_queued": bool(transition.get("include_queued")),
+            "limit": normalized_limit,
+        }
+
+    circuit_breaker = details.get("circuit_breaker")
+    circuit_breaker = circuit_breaker if isinstance(circuit_breaker, dict) else {}
+    target_scope = circuit_breaker.get("target_scope")
+    target_scope = target_scope if isinstance(target_scope, dict) else {}
+    scope = target_scope.get("scope")
+    scope = scope if isinstance(scope, dict) else {}
+    action = str(details.get("action") or target_scope.get("action") or "").strip().lower() or None
+    return {
+        "action": action,
+        "reason": str(circuit_breaker.get("reason") or "").strip() or None,
+        "scope_type": str(scope.get("scope_type") or "").strip().lower() or None,
+        "scope_user_id": str(scope.get("scope_user_id") or "").strip() or None,
+        "scope_agent_id": str(scope.get("scope_agent_id") or "").strip() or None,
+        "apply_kill_switch": False,
+        "include_running": False,
+        "include_queued": False,
+        "limit": None,
+    }
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return int(default)
+
+
+def _build_circuit_breaker_recovery_guidance(
+    *,
+    circuit_breaker: dict[str, Any],
+    observability_snapshot: dict[str, Any],
+    recent_timeline: list[dict[str, Any]],
+) -> dict[str, Any]:
+    armed = bool(circuit_breaker.get("armed"))
+    persistence = circuit_breaker.get("persistence") if isinstance(circuit_breaker.get("persistence"), dict) else {}
+    restore_status = str((persistence or {}).get("restore_status") or "").strip().lower() or "unknown"
+    restore_error = str((persistence or {}).get("restore_error") or "").strip() or None
+
+    slo = observability_snapshot.get("slo") if isinstance(observability_snapshot.get("slo"), dict) else {}
+    sli = observability_snapshot.get("sli") if isinstance(observability_snapshot.get("sli"), dict) else {}
+    incidents = (
+        observability_snapshot.get("incidents") if isinstance(observability_snapshot.get("incidents"), dict) else {}
+    )
+    request_sli = sli.get("requests") if isinstance(sli.get("requests"), dict) else {}
+    run_sli = sli.get("runs") if isinstance(sli.get("runs"), dict) else {}
+
+    availability = _safe_float(request_sli.get("availability"), default=1.0)
+    availability_target = _safe_float(slo.get("request_availability_target"), default=1.0)
+    latency_p95_ms = _safe_float(request_sli.get("latency_p95_ms"), default=0.0)
+    latency_target_ms = _safe_float(slo.get("request_latency_p95_ms_target"), default=0.0)
+    run_success_rate = _safe_float(run_sli.get("success_rate"), default=1.0)
+    run_success_target = _safe_float(slo.get("run_success_target"), default=1.0)
+    open_incidents = _safe_int(incidents.get("open_count"), default=0)
+
+    latest_transition = recent_timeline[-1] if recent_timeline else {}
+    latest_transition_payload = (
+        latest_transition.get("transition") if isinstance(latest_transition.get("transition"), dict) else {}
+    )
+    latest_action = str((latest_transition_payload or {}).get("action") or "").strip().lower() or None
+    latest_scope_type = str((latest_transition_payload or {}).get("scope_type") or "").strip().lower() or None
+    latest_reason = str((latest_transition_payload or {}).get("reason") or "").strip() or None
+
+    recommendations: list[str] = []
+    status = "ready"
+    priority = "low"
+    summary = "Breaker is disarmed and no immediate recovery actions are required."
+
+    if restore_status == "fail_safe_armed":
+        status = "action_required"
+        priority = "critical"
+        summary = "Breaker entered fail-safe mode after state recovery failure; operator action is required."
+        recommendations.append(
+            "Validate breaker state file integrity and confirm incident context before disarming fail-safe global scope."
+        )
+        recommendations.append(
+            "Use timeline filters by request_id to verify latest transition ownership and reason chain."
+        )
+        if restore_error:
+            recommendations.append("Investigate persistence restore error and fix root cause before resuming execute mode.")
+    elif armed:
+        status = "action_required"
+        priority = "high"
+        summary = "Breaker is armed; complete incident containment and controlled recovery workflow."
+        recommendations.append(
+            "Confirm containment scope and incident reason in timeline before changing breaker state."
+        )
+        if latest_scope_type == "global" and latest_action == "arm":
+            recommendations.append(
+                "For global arms, verify queued/running runs were intentionally handled (kill-switch or manual cancellation)."
+            )
+        recommendations.append(
+            "When mitigation is complete, disarm explicitly and verify execute-mode run creation with a smoke request."
+        )
+    elif open_incidents > 0:
+        status = "monitoring"
+        priority = "medium"
+        summary = "Breaker is disarmed but observability still reports open incidents."
+        recommendations.append(
+            "Keep breaker disarmed only if incident impact is contained and open incidents are acknowledged."
+        )
+        recommendations.append(
+            "Track incident cooldown and verify SLO metrics return within target thresholds."
+        )
+
+    if availability < availability_target:
+        status = "monitoring" if status == "ready" else status
+        priority = "medium" if priority == "low" else priority
+        recommendations.append("Request availability is below target; avoid aggressive unfreeze until stability recovers.")
+    if latency_target_ms > 0 and latency_p95_ms > latency_target_ms:
+        status = "monitoring" if status == "ready" else status
+        recommendations.append("Request latency p95 exceeds target; prefer staged recovery with canary validation.")
+    if run_success_rate < run_success_target:
+        status = "monitoring" if status == "ready" else status
+        recommendations.append("Run success rate is below target; verify failure-class trends before scaling execute load.")
+
+    if not recommendations:
+        recommendations.append("No immediate actions. Continue periodic breaker and SLO health checks.")
+
+    return {
+        "status": status,
+        "priority": priority,
+        "summary": summary,
+        "latest_transition": {
+            "action": latest_action,
+            "scope_type": latest_scope_type,
+            "reason": latest_reason,
+            "request_id": latest_transition.get("request_id"),
+            "created_at": latest_transition.get("created_at"),
+        },
+        "slo_context": {
+            "request_availability": round(availability, 6),
+            "request_availability_target": round(availability_target, 6),
+            "request_latency_p95_ms": round(latency_p95_ms, 3),
+            "request_latency_p95_ms_target": round(latency_target_ms, 3),
+            "run_success_rate": round(run_success_rate, 6),
+            "run_success_target": round(run_success_target, 6),
+            "open_incidents": open_incidents,
+        },
+        "recommendations": recommendations,
+    }
 
 
 logging.basicConfig(
@@ -530,6 +725,27 @@ def create_app() -> FastAPI:
         generated = str(uuid4())
         request.state.request_id = generated
         return generated
+
+    def _recent_circuit_breaker_timeline_items(*, limit: int = 50) -> list[dict[str, Any]]:
+        raw_items = services.security_manager.list_audit_events(
+            limit=max(1, min(int(limit), 500)),
+            event_type=AUTONOMY_CIRCUIT_BREAKER_AUDIT_EVENT_TYPE,
+            action="agent_runs_autonomy_circuit_breaker",
+        )
+        items: list[dict[str, Any]] = []
+        for raw in raw_items:
+            transition = _extract_circuit_breaker_timeline_transition(raw)
+            items.append(
+                {
+                    "id": raw.get("id"),
+                    "created_at": raw.get("created_at"),
+                    "status": raw.get("status"),
+                    "actor": raw.get("actor"),
+                    "request_id": raw.get("request_id"),
+                    "transition": transition,
+                }
+            )
+        return items
 
     def error_response(
         request: Request,
@@ -939,11 +1155,94 @@ def create_app() -> FastAPI:
     @app.get("/service/runs/autonomy-circuit-breaker")
     def service_runs_autonomy_circuit_breaker_status(request: Request) -> dict[str, Any]:
         auth = auth_context_from_request(request)
+        circuit_breaker = services.autonomy_circuit_breaker.snapshot()
+        recovery_guidance = _build_circuit_breaker_recovery_guidance(
+            circuit_breaker=circuit_breaker,
+            observability_snapshot=services.observability.sre.snapshot(),
+            recent_timeline=_recent_circuit_breaker_timeline_items(limit=50),
+        )
         return {
             "request_id": request_id_from_request(request),
             "actor": auth.user_id,
             "scopes": sorted(auth.scopes),
-            "circuit_breaker": services.autonomy_circuit_breaker.snapshot(),
+            "circuit_breaker": circuit_breaker,
+            "recovery_guidance": recovery_guidance,
+        }
+
+    @app.get("/service/runs/autonomy-circuit-breaker/timeline")
+    def service_runs_autonomy_circuit_breaker_timeline(
+        request: Request,
+        limit: int = Query(default=200, ge=1, le=2000),
+        status: str | None = Query(default=None),
+        actor: str | None = Query(default=None),
+        transition: str | None = Query(default=None),
+        scope_type: str | None = Query(default=None),
+        scope_request_id: str | None = Query(default=None, alias="request_id"),
+    ) -> dict[str, Any]:
+        auth = auth_context_from_request(request)
+        normalized_transition = _normalize_circuit_breaker_timeline_transition(transition)
+        normalized_scope_type = _normalize_circuit_breaker_timeline_scope_type(scope_type)
+        normalized_request_id = str(scope_request_id or "").strip() or None
+        raw_items = services.security_manager.list_audit_events(
+            limit=max(1, min(int(limit), 2000)),
+            event_type=AUTONOMY_CIRCUIT_BREAKER_AUDIT_EVENT_TYPE,
+            action="agent_runs_autonomy_circuit_breaker",
+            status=status,
+            actor=actor,
+            request_id=normalized_request_id,
+        )
+        items: list[dict[str, Any]] = []
+        for raw in raw_items:
+            transition_payload = _extract_circuit_breaker_timeline_transition(raw)
+            transition_action = str(transition_payload.get("action") or "").strip().lower() or None
+            transition_scope_type = str(transition_payload.get("scope_type") or "").strip().lower() or None
+            if normalized_transition is not None and transition_action != normalized_transition:
+                continue
+            if normalized_scope_type is not None and transition_scope_type != normalized_scope_type:
+                continue
+
+            details = raw.get("details") if isinstance(raw.get("details"), dict) else {}
+            details = details if isinstance(details, dict) else {}
+            circuit_breaker_raw = (
+                details.get("circuit_breaker") if isinstance(details.get("circuit_breaker"), dict) else {}
+            )
+            kill_switch_raw = details.get("kill_switch") if isinstance(details.get("kill_switch"), dict) else None
+            item = {
+                "id": raw.get("id"),
+                "created_at": raw.get("created_at"),
+                "status": raw.get("status"),
+                "event_type": raw.get("event_type"),
+                "action": raw.get("action"),
+                "actor": raw.get("actor"),
+                "request_id": raw.get("request_id"),
+                "transition": transition_payload,
+                "circuit_breaker": {
+                    "revision": circuit_breaker_raw.get("revision"),
+                    "status": circuit_breaker_raw.get("status"),
+                    "reason": circuit_breaker_raw.get("reason"),
+                    "target_scope": circuit_breaker_raw.get("target_scope"),
+                },
+                "signature": raw.get("signature") if isinstance(raw.get("signature"), dict) else {},
+            }
+            if kill_switch_raw is not None:
+                item["kill_switch"] = kill_switch_raw
+            error_message = str(details.get("error") or "").strip()
+            if error_message:
+                item["error"] = error_message
+            items.append(item)
+
+        recovery_guidance = _build_circuit_breaker_recovery_guidance(
+            circuit_breaker=services.autonomy_circuit_breaker.snapshot(),
+            observability_snapshot=services.observability.sre.snapshot(),
+            recent_timeline=_recent_circuit_breaker_timeline_items(limit=50),
+        )
+        return {
+            "request_id": request_id_from_request(request),
+            "actor": auth.user_id,
+            "scopes": sorted(auth.scopes),
+            "count": len(items),
+            "items": items,
+            "recovery_guidance": recovery_guidance,
         }
 
     @app.post("/service/runs/autonomy-circuit-breaker")
@@ -974,6 +1273,17 @@ def create_app() -> FastAPI:
         sign_payload = {
             "action": action,
             "reason": payload.reason,
+            "scope_type": scope_type,
+            "scope_user_id": scope_user_id,
+            "scope_agent_id": scope_agent_id,
+            "apply_kill_switch": bool(payload.apply_kill_switch),
+            "include_running": bool(payload.include_running),
+            "include_queued": bool(payload.include_queued),
+            "limit": int(payload.limit),
+        }
+        transition_details = {
+            "action": action,
+            "reason": str(payload.reason or "").strip() or None,
             "scope_type": scope_type,
             "scope_user_id": scope_user_id,
             "scope_agent_id": scope_agent_id,
@@ -1020,6 +1330,7 @@ def create_app() -> FastAPI:
 
             receipt_details: dict[str, Any] = {
                 "action": action,
+                "transition": transition_details,
                 "circuit_breaker": state,
             }
             if kill_switch_summary is not None:
@@ -1032,6 +1343,7 @@ def create_app() -> FastAPI:
                     actor=auth.user_id,
                     target_type="agent_run",
                     target_id="*",
+                    event_type=AUTONOMY_CIRCUIT_BREAKER_AUDIT_EVENT_TYPE,
                     details=receipt_details,
                 )
             except Exception:
@@ -1042,6 +1354,11 @@ def create_app() -> FastAPI:
                 "scopes": sorted(auth.scopes),
                 "circuit_breaker": state,
                 "action_receipt": receipt,
+                "recovery_guidance": _build_circuit_breaker_recovery_guidance(
+                    circuit_breaker=services.autonomy_circuit_breaker.snapshot(),
+                    observability_snapshot=services.observability.sre.snapshot(),
+                    recent_timeline=_recent_circuit_breaker_timeline_items(limit=50),
+                ),
             }
             if kill_switch_summary is not None:
                 payload_out["kill_switch"] = kill_switch_summary
@@ -1055,8 +1372,9 @@ def create_app() -> FastAPI:
                     actor=auth.user_id,
                     target_type="agent_run",
                     target_id="*",
+                    event_type=AUTONOMY_CIRCUIT_BREAKER_AUDIT_EVENT_TYPE,
                     status="failed",
-                    details={"action": action, "error": str(exc)},
+                    details={"action": action, "transition": transition_details, "error": str(exc)},
                 )
             except Exception:
                 pass
@@ -1072,8 +1390,9 @@ def create_app() -> FastAPI:
                     actor=auth.user_id,
                     target_type="agent_run",
                     target_id="*",
+                    event_type=AUTONOMY_CIRCUIT_BREAKER_AUDIT_EVENT_TYPE,
                     status="failed",
-                    details={"action": action, "error": str(exc)},
+                    details={"action": action, "transition": transition_details, "error": str(exc)},
                 )
             except Exception:
                 pass
@@ -1115,6 +1434,11 @@ def create_app() -> FastAPI:
                 "scopes": sorted(auth.scopes),
                 "kill_switch": summary,
                 "circuit_breaker": services.autonomy_circuit_breaker.snapshot(),
+                "recovery_guidance": _build_circuit_breaker_recovery_guidance(
+                    circuit_breaker=services.autonomy_circuit_breaker.snapshot(),
+                    observability_snapshot=services.observability.sre.snapshot(),
+                    recent_timeline=_recent_circuit_breaker_timeline_items(limit=50),
+                ),
                 "action_receipt": receipt,
             }
         except ValueError as exc:

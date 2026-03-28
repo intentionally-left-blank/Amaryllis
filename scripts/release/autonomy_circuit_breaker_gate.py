@@ -122,9 +122,19 @@ def main() -> int:
             "scope_type contract documented",
         )
         add_check(
+            "doc_timeline_endpoint",
+            "/service/runs/autonomy-circuit-breaker/timeline" in text,
+            "timeline endpoint documented",
+        )
+        add_check(
             "doc_restart_restore_policy",
             "restart" in text.lower() and "state" in text.lower(),
             "restart/restore policy documented",
+        )
+        add_check(
+            "doc_recovery_guidance",
+            "recovery_guidance" in text,
+            "recovery guidance contract documented",
         )
     else:
         add_check("doc_exists", False, f"missing: {doc_path}")
@@ -176,6 +186,11 @@ def main() -> int:
                 "runtime_initially_disarmed",
                 not armed_before,
                 f"armed={armed_before}",
+            )
+            add_check(
+                "runtime_status_recovery_guidance",
+                isinstance((status_payload.get("recovery_guidance") or {}).get("recommendations"), list),
+                "status endpoint returns recovery guidance",
             )
 
             create_agent = client.post(
@@ -243,6 +258,22 @@ def main() -> int:
                 "runtime_arm_receipt",
                 bool((arm_payload.get("action_receipt") or {}).get("signature")),
                 "signed action receipt present",
+            )
+            armed_status = client.get(
+                "/service/runs/autonomy-circuit-breaker",
+                headers=_auth(service_token),
+            )
+            armed_status_payload = armed_status.json() if _is_json_response(dict(armed_status.headers)) else {}
+            armed_guidance = (
+                armed_status_payload.get("recovery_guidance")
+                if isinstance(armed_status_payload.get("recovery_guidance"), dict)
+                else {}
+            )
+            add_check(
+                "runtime_armed_recovery_guidance",
+                armed_status.status_code == 200
+                and str((armed_guidance or {}).get("status") or "") in {"action_required", "monitoring"},
+                "armed status includes actionable recovery guidance",
             )
 
             run_blocked = client.post(
@@ -313,6 +344,40 @@ def main() -> int:
                 "runtime_disarm_state",
                 not bool((disarm_state or {}).get("armed")),
                 f"armed={bool((disarm_state or {}).get('armed'))}",
+            )
+
+            timeline = client.get(
+                "/service/runs/autonomy-circuit-breaker/timeline",
+                headers=_auth(service_token),
+                params={"limit": 200, "transition": "arm"},
+            )
+            timeline_payload = timeline.json() if _is_json_response(dict(timeline.headers)) else {}
+            timeline_items = timeline_payload.get("items") if isinstance(timeline_payload, dict) else []
+            timeline_items = timeline_items if isinstance(timeline_items, list) else []
+            timeline_match = next(
+                (
+                    item
+                    for item in timeline_items
+                    if str(((item.get("transition") or {}).get("reason") or "")).strip() == "gate-check"
+                ),
+                None,
+            )
+            add_check(
+                "runtime_timeline_endpoint_ok",
+                timeline.status_code == 200,
+                f"status={timeline.status_code}",
+            )
+            add_check(
+                "runtime_timeline_traceability",
+                isinstance(timeline_match, dict)
+                and bool(str(timeline_match.get("actor") or "").strip())
+                and bool(str(timeline_match.get("request_id") or "").strip()),
+                "timeline includes actor/request_id/reason",
+            )
+            add_check(
+                "runtime_timeline_recovery_guidance",
+                isinstance((timeline_payload.get("recovery_guidance") or {}).get("recommendations"), list),
+                "timeline response includes recovery guidance",
             )
 
             create_run_after = client.post(

@@ -374,15 +374,23 @@ class SecurityManager:
         self,
         *,
         limit: int = 200,
+        event_type: str | None = None,
         action: str | None = None,
         status: str | None = None,
         actor: str | None = None,
+        request_id: str | None = None,
+        target_type: str | None = None,
+        target_id: str | None = None,
     ) -> list[dict[str, Any]]:
         return self.database.list_security_audit_events(
             limit=limit,
+            event_type=event_type,
             action=action,
             status=status,
             actor=actor,
+            request_id=request_id,
+            target_type=target_type,
+            target_id=target_id,
         )
 
     def record_authenticated_request(

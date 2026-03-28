@@ -30,19 +30,20 @@ Mandatory gates before publish:
 24. Flow/interaction gate (unified `/flow/sessions/*` + `/runs/dispatch` plan-vs-execute trust-boundary contract)
 25. Action explainability gate (timeline stream + plain-language `reason/result/next_step` payload contract)
 26. Autonomy circuit breaker gate (service emergency brake contract + execute-mode blocking assertions)
-27. Desktop action rollback gate (Linux desktop action + rollback hint + terminal receipt contract)
-28. Supervisor mission gate (bounded task-graph + checkpoint/resume + objective verification contract)
-29. Generation-loop conformance gate (backend portability matrix + contract identity assertions)
-30. Provenance coverage gate (grounded-response source-trace coverage + stream/telemetry provenance contract assertions)
-31. KV pressure policy gate (generation-loop KV telemetry contract + pressure-driven QoS transition assertions)
-32. Adoption KPI schema gate (install/activation/retention/feature-adoption contract assertions)
-33. Adoption KPI snapshot build gate (publishable adoption artifact + summary score)
-34. Adoption KPI trend regression gate (baseline-relative regression budget enforcement)
-35. Release quality dashboard snapshot gate (final post-Linux benchmark/reliability artifact + trend deltas)
-36. Mission success/recovery report pack gate (v2 schema + class/KPI completeness contract)
-37. Mission success/recovery report pack export (public KPI artifact)
-38. Disaster recovery gate (backup + verify + restore drill)
-39. Compliance operations gate (access review + incidents + evidence export)
+27. Autonomy circuit breaker stability soak gate (multi-cycle emergency drill cadence + scope parity + p95 cycle SLO assertions)
+28. Desktop action rollback gate (Linux desktop action + rollback hint + terminal receipt contract)
+29. Supervisor mission gate (bounded task-graph + checkpoint/resume + objective verification contract)
+30. Generation-loop conformance gate (backend portability matrix + contract identity assertions)
+31. Provenance coverage gate (grounded-response source-trace coverage + stream/telemetry provenance contract assertions)
+32. KV pressure policy gate (generation-loop KV telemetry contract + pressure-driven QoS transition assertions)
+33. Adoption KPI schema gate (install/activation/retention/feature-adoption contract assertions)
+34. Adoption KPI snapshot build gate (publishable adoption artifact + summary score)
+35. Adoption KPI trend regression gate (baseline-relative regression budget enforcement)
+36. Release quality dashboard snapshot gate (final post-Linux benchmark/reliability artifact + trend deltas)
+37. Mission success/recovery report pack gate (v2 schema + class/KPI completeness contract)
+38. Mission success/recovery report pack export (public KPI artifact)
+39. Disaster recovery gate (backup + verify + restore drill)
+40. Compliance operations gate (access review + incidents + evidence export)
 
 Staging companion (non-blocking):
 - macOS desktop action parity smoke (`scripts/release/macos_desktop_parity_smoke.py`)
@@ -141,6 +142,7 @@ python scripts/release/localization_governance_gate.py --output artifacts/locali
 python scripts/release/flow_interaction_gate.py --output artifacts/flow-interaction-gate-report.json
 python scripts/release/action_explainability_gate.py --output artifacts/action-explainability-gate-report.json
 python scripts/release/autonomy_circuit_breaker_gate.py --output artifacts/autonomy-circuit-breaker-gate-report.json
+python scripts/release/autonomy_circuit_breaker_soak_gate.py --cycles 6 --min-success-rate-pct 100 --max-failed-cycles 0 --max-p95-cycle-latency-ms 4500 --output artifacts/autonomy-circuit-breaker-soak-gate-report.json
 python scripts/release/desktop_action_rollback_gate.py --output artifacts/desktop-action-rollback-gate-report.json
 python scripts/release/supervisor_mission_gate.py --output artifacts/supervisor-mission-gate-report.json
 python scripts/release/generation_loop_conformance_gate.py --min-providers 1 --max-warning-providers 2 --output artifacts/generation-loop-conformance-gate-report.json

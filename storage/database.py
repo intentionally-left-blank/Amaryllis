@@ -792,15 +792,22 @@ class Database:
         self,
         *,
         limit: int = 200,
+        event_type: str | None = None,
         action: str | None = None,
         status: str | None = None,
         actor: str | None = None,
+        request_id: str | None = None,
+        target_type: str | None = None,
+        target_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if limit <= 0:
             return []
 
         query = "SELECT * FROM security_audit_events WHERE 1 = 1"
         params: list[Any] = []
+        if event_type:
+            query += " AND event_type = ?"
+            params.append(str(event_type).strip())
         if action:
             query += " AND action = ?"
             params.append(action)
@@ -810,6 +817,15 @@ class Database:
         if actor:
             query += " AND actor = ?"
             params.append(actor)
+        if request_id:
+            query += " AND request_id = ?"
+            params.append(request_id)
+        if target_type:
+            query += " AND target_type = ?"
+            params.append(target_type)
+        if target_id:
+            query += " AND target_id = ?"
+            params.append(target_id)
         query += " ORDER BY id DESC LIMIT ?"
         params.append(limit)
 

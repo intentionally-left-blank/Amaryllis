@@ -134,6 +134,7 @@ jobs:
             tests.test_autonomy_circuit_breaker \
             tests.test_autonomy_circuit_breaker_api \
             tests.test_autonomy_circuit_breaker_gate \
+            tests.test_autonomy_circuit_breaker_soak_gate \
             tests.test_unified_session_manager \
             tests.test_flow_api \
             tests.test_supervisor_task_graph_manager \
@@ -241,6 +242,22 @@ jobs:
         with:
           name: autonomy-circuit-breaker-gate-report
           path: artifacts/autonomy-circuit-breaker-gate-report.json
+          if-no-files-found: error
+
+      - name: Run autonomy circuit breaker stability soak gate (blocking)
+        run: |
+          python scripts/release/autonomy_circuit_breaker_soak_gate.py \
+            --cycles "${AMARYLLIS_BREAKER_SOAK_CYCLES:-6}" \
+            --min-success-rate-pct "${AMARYLLIS_BREAKER_SOAK_MIN_SUCCESS_RATE_PCT:-100}" \
+            --max-failed-cycles "${AMARYLLIS_BREAKER_SOAK_MAX_FAILED_CYCLES:-0}" \
+            --max-p95-cycle-latency-ms "${AMARYLLIS_BREAKER_SOAK_MAX_P95_CYCLE_MS:-4500}" \
+            --output "artifacts/autonomy-circuit-breaker-soak-gate-report.json"
+
+      - name: Upload autonomy circuit breaker stability soak gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: autonomy-circuit-breaker-soak-gate-report
+          path: artifacts/autonomy-circuit-breaker-soak-gate-report.json
           if-no-files-found: error
 
       - name: Run desktop action rollback gate (blocking)
@@ -874,6 +891,12 @@ jobs:
           name: qos-governor-gate-report
           path: artifacts/qos-governor
 
+      - name: Download autonomy circuit breaker stability soak gate report
+        uses: actions/download-artifact@v4
+        with:
+          name: autonomy-circuit-breaker-soak-gate-report
+          path: artifacts/autonomy-circuit-breaker-soak
+
       - name: Download macOS desktop parity smoke report (staging, optional)
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -1018,6 +1041,7 @@ jobs:
             --fault-injection-report "artifacts/fault-injection/fault-injection-reliability-report.json" \
             --quality-dashboard-report "artifacts/release-quality-dashboard-final.json" \
             --adoption-kpi-trend-report "artifacts/adoption-kpi-trend-gate-report.json" \
+            --breaker-soak-report "artifacts/autonomy-circuit-breaker-soak/autonomy-circuit-breaker-soak-gate-report.json" \
             --distribution-resilience-report "artifacts/distribution/distribution-resilience-report.json" \
             --user-journey-report "artifacts/user-journey/user-journey-benchmark-report.json" \
             ${MACOS_DESKTOP_PARITY_ARG} \

@@ -223,6 +223,7 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
             nightly = base / "nightly.json"
             burn = base / "burn.json"
             adoption_trend = base / "adoption-trend.json"
+            breaker_soak = base / "breaker-soak.json"
             output = base / "report.json"
 
             self._write_json(
@@ -268,6 +269,26 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
                     },
                 },
             )
+            self._write_json(
+                breaker_soak,
+                {
+                    "suite": "autonomy_circuit_breaker_soak_gate_v1",
+                    "config": {
+                        "cycles": 3,
+                        "min_success_rate_pct": 100.0,
+                        "max_failed_cycles": 0,
+                        "max_p95_cycle_latency_ms": 4500.0,
+                    },
+                    "summary": {
+                        "status": "pass",
+                        "cycles_total": 3,
+                        "cycles_passed": 3,
+                        "cycles_failed": 0,
+                        "success_rate_pct": 100.0,
+                        "p95_cycle_latency_ms": 1500.0,
+                    },
+                },
+            )
 
             proc = self._run(
                 "--nightly-reliability-report",
@@ -276,6 +297,8 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
                 str(burn),
                 "--adoption-kpi-trend-report",
                 str(adoption_trend),
+                "--breaker-soak-report",
+                str(breaker_soak),
                 "--scope",
                 "nightly",
                 "--output",
@@ -289,6 +312,7 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
             class_breakdown = payload.get("class_breakdown", {})
             self.assertEqual(str(class_breakdown.get("nightly_reliability", {}).get("status")), "fail")
             self.assertIn("nightly_adoption_trend_gate_passed", payload.get("kpis", {}))
+            self.assertIn("nightly_breaker_soak_gate_passed", payload.get("kpis", {}))
 
     def test_missing_source_report_returns_error(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-mission-report-pack-") as tmp:

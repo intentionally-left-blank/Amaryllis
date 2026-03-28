@@ -239,6 +239,15 @@ jobs:
           python scripts/release/autonomy_circuit_breaker_gate.py \
             --output "artifacts/nightly-autonomy-circuit-breaker-gate-report.json"
 
+      - name: Run nightly autonomy circuit breaker stability soak gate (blocking)
+        run: |
+          python scripts/release/autonomy_circuit_breaker_soak_gate.py \
+            --cycles "${AMARYLLIS_NIGHTLY_BREAKER_SOAK_CYCLES:-9}" \
+            --min-success-rate-pct "${AMARYLLIS_NIGHTLY_BREAKER_SOAK_MIN_SUCCESS_RATE_PCT:-100}" \
+            --max-failed-cycles "${AMARYLLIS_NIGHTLY_BREAKER_SOAK_MAX_FAILED_CYCLES:-0}" \
+            --max-p95-cycle-latency-ms "${AMARYLLIS_NIGHTLY_BREAKER_SOAK_MAX_P95_CYCLE_MS:-4500}" \
+            --output "artifacts/nightly-autonomy-circuit-breaker-soak-gate-report.json"
+
       - name: Run nightly desktop action rollback gate (blocking)
         run: |
           python scripts/release/desktop_action_rollback_gate.py \
@@ -331,6 +340,7 @@ jobs:
             --nightly-burn-rate-report "artifacts/nightly-burn-rate-gate-report.json" \
             --user-journey-report "artifacts/nightly-user-journey-benchmark-report.json" \
             --adoption-kpi-trend-report "artifacts/nightly-adoption-kpi-trend-gate-report.json" \
+            --breaker-soak-report "artifacts/nightly-autonomy-circuit-breaker-soak-gate-report.json" \
             ${MACOS_DESKTOP_PARITY_ARG} \
             --scope "nightly" \
             --output "artifacts/nightly-mission-success-recovery-report.json"
@@ -524,6 +534,14 @@ jobs:
         with:
           name: nightly-autonomy-circuit-breaker-gate-report
           path: artifacts/nightly-autonomy-circuit-breaker-gate-report.json
+          if-no-files-found: error
+
+      - name: Upload nightly autonomy circuit breaker stability soak gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-autonomy-circuit-breaker-soak-gate-report
+          path: artifacts/nightly-autonomy-circuit-breaker-soak-gate-report.json
           if-no-files-found: error
 
       - name: Upload nightly desktop action rollback gate report
