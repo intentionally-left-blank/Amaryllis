@@ -37,6 +37,7 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
             macos_staging = base / "macos-staging.json"
             journey = base / "journey.json"
             adoption_trend = base / "adoption-trend.json"
+            breaker_gate = base / "breaker-gate.json"
             output = base / "report.json"
 
             self._write_json(
@@ -158,6 +159,24 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
                     },
                 },
             )
+            self._write_json(
+                breaker_gate,
+                {
+                    "suite": "autonomy_circuit_breaker_gate_v1",
+                    "summary": {
+                        "status": "pass",
+                        "total": 24,
+                        "passed": 24,
+                        "failed": 0,
+                    },
+                    "checks": [
+                        {"name": "runtime_domains_endpoint_ok", "ok": True},
+                        {"name": "runtime_domains_contract_contains_three_domains", "ok": True},
+                        {"name": "runtime_domains_reports_blocked_counts", "ok": True},
+                        {"name": "runtime_domains_summary_includes_all_blocked_domains", "ok": True},
+                    ],
+                },
+            )
 
             proc = self._run(
                 "--mission-queue-report",
@@ -174,6 +193,8 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
                 str(journey),
                 "--adoption-kpi-trend-report",
                 str(adoption_trend),
+                "--breaker-gate-report",
+                str(breaker_gate),
                 "--scope",
                 "release",
                 "--output",
@@ -195,12 +216,16 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
             self.assertIn("journey.feature_adoption_rate_pct", [c.get("id") for c in payload.get("checks", [])])
             self.assertIn("qos_governor.status", [c.get("id") for c in payload.get("checks", [])])
             self.assertIn("adoption_trend.status", [c.get("id") for c in payload.get("checks", [])])
+            self.assertIn("autonomy.breaker_gate_passed", [c.get("id") for c in payload.get("checks", [])])
+            self.assertIn("autonomy.breaker_domains_contract_passed", [c.get("id") for c in payload.get("checks", [])])
             class_breakdown = payload.get("class_breakdown", {})
             self.assertEqual(str(class_breakdown.get("mission_execution", {}).get("status")), "pass")
             self.assertEqual(str(class_breakdown.get("distribution", {}).get("status")), "pass")
             self.assertEqual(str(class_breakdown.get("desktop_staging", {}).get("status")), "pass")
             self.assertEqual(str(class_breakdown.get("runtime_qos", {}).get("status")), "pass")
             self.assertEqual(str(class_breakdown.get("adoption_growth", {}).get("status")), "pass")
+            self.assertIn("autonomy_breaker_gate_passed", payload.get("kpis", {}))
+            self.assertIn("autonomy_breaker_domains_contract_passed", payload.get("kpis", {}))
             self.assertIn("distribution_score_pct", class_breakdown.get("distribution", {}).get("kpis", {}))
             self.assertIn(
                 "desktop_staging_error_rate_pct",
@@ -224,6 +249,7 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
             burn = base / "burn.json"
             adoption_trend = base / "adoption-trend.json"
             breaker_soak = base / "breaker-soak.json"
+            breaker_gate = base / "breaker-gate.json"
             output = base / "report.json"
 
             self._write_json(
@@ -289,6 +315,24 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
                     },
                 },
             )
+            self._write_json(
+                breaker_gate,
+                {
+                    "suite": "autonomy_circuit_breaker_gate_v1",
+                    "summary": {
+                        "status": "pass",
+                        "total": 30,
+                        "passed": 30,
+                        "failed": 0,
+                    },
+                    "checks": [
+                        {"name": "runtime_domains_endpoint_ok", "ok": True},
+                        {"name": "runtime_domains_contract_contains_three_domains", "ok": True},
+                        {"name": "runtime_domains_reports_blocked_counts", "ok": True},
+                        {"name": "runtime_domains_summary_includes_all_blocked_domains", "ok": True},
+                    ],
+                },
+            )
 
             proc = self._run(
                 "--nightly-reliability-report",
@@ -299,6 +343,8 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
                 str(adoption_trend),
                 "--breaker-soak-report",
                 str(breaker_soak),
+                "--breaker-gate-report",
+                str(breaker_gate),
                 "--scope",
                 "nightly",
                 "--output",
@@ -313,6 +359,8 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
             self.assertEqual(str(class_breakdown.get("nightly_reliability", {}).get("status")), "fail")
             self.assertIn("nightly_adoption_trend_gate_passed", payload.get("kpis", {}))
             self.assertIn("nightly_breaker_soak_gate_passed", payload.get("kpis", {}))
+            self.assertIn("nightly_autonomy_breaker_gate_passed", payload.get("kpis", {}))
+            self.assertIn("nightly_autonomy_breaker_domains_contract_passed", payload.get("kpis", {}))
 
     def test_missing_source_report_returns_error(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-mission-report-pack-") as tmp:

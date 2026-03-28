@@ -191,6 +191,16 @@ class SecurityHTTPAuthzTests(unittest.TestCase):
         denied_payload = denied.json()
         self.assertEqual(denied_payload["error"]["type"], "permission_denied")
 
+    def test_service_autonomy_circuit_breaker_domains_requires_service_scope(self) -> None:
+        denied = self.client.get(
+            "/service/runs/autonomy-circuit-breaker/domains",
+            headers=self._auth("user-token"),
+            params={"limit": 10},
+        )
+        self.assertEqual(denied.status_code, 403)
+        denied_payload = denied.json()
+        self.assertEqual(denied_payload["error"]["type"], "permission_denied")
+
     def test_service_autonomy_circuit_breaker_success_and_validation(self) -> None:
         invalid_action = self.client.post(
             "/service/runs/autonomy-circuit-breaker",

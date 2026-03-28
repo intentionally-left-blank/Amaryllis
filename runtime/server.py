@@ -243,6 +243,13 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return int(default)
 
 
+def _breaker_error_is_blocked(value: Any) -> bool:
+    text = str(value or "").strip().lower()
+    if not text:
+        return False
+    return "autonomy circuit breaker" in text and "block" in text
+
+
 def _build_circuit_breaker_recovery_guidance(
     *,
     circuit_breaker: dict[str, Any],
@@ -747,6 +754,136 @@ def create_app() -> FastAPI:
             )
         return items
 
+    def _autonomy_circuit_breaker_domain_impact_snapshot(
+        *,
+        event_limit: int = 500,
+        supervisor_graph_limit: int = 200,
+        supervisor_timeline_limit: int = 400,
+    ) -> dict[str, Any]:
+        bounded_event_limit = max(1, min(int(event_limit), 5000))
+        bounded_graph_limit = max(1, min(int(supervisor_graph_limit), 2000))
+        bounded_timeline_limit = max(1, min(int(supervisor_timeline_limit), 2000))
+
+        run_events: list[dict[str, Any]] = []
+        run_events.extend(
+            services.security_manager.list_audit_events(
+                limit=bounded_event_limit,
+                event_type="signed_action",
+                action="agent_run_create",
+                status="failed",
+            )
+        )
+        run_events.extend(
+            services.security_manager.list_audit_events(
+                limit=bounded_event_limit,
+                event_type="signed_action",
+                action="agent_run_dispatch",
+                status="failed",
+            )
+        )
+        run_blocked_items: list[dict[str, Any]] = []
+        run_blocked_by_action = {"agent_run_create": 0, "agent_run_dispatch": 0}
+        run_blocked_request_ids: set[str] = set()
+        run_last_blocked_at: str | None = None
+        for item in run_events:
+            details = item.get("details") if isinstance(item.get("details"), dict) else {}
+            error_message = str(details.get("error") or "")
+            if not _breaker_error_is_blocked(error_message):
+                continue
+            run_blocked_items.append(item)
+            action = str(item.get("action") or "").strip()
+            if action in run_blocked_by_action:
+                run_blocked_by_action[action] = int(run_blocked_by_action[action]) + 1
+            request_id = str(item.get("request_id") or "").strip()
+            if request_id:
+                run_blocked_request_ids.add(request_id)
+            created_at = str(item.get("created_at") or "").strip() or None
+            if created_at and (run_last_blocked_at is None or created_at > run_last_blocked_at):
+                run_last_blocked_at = created_at
+
+        automation_events = services.database.list_recent_automation_events(limit=bounded_event_limit)
+        automation_blocked_items = [
+            item
+            for item in automation_events
+            if str(item.get("event_type") or "").strip().lower() == "run_blocked_autonomy_circuit_breaker"
+        ]
+        automation_ids_with_blocks = {
+            str(item.get("automation_id") or "").strip()
+            for item in automation_blocked_items
+            if str(item.get("automation_id") or "").strip()
+        }
+        automation_last_blocked_at: str | None = None
+        for item in automation_blocked_items:
+            created_at = str(item.get("created_at") or "").strip() or None
+            if created_at and (automation_last_blocked_at is None or created_at > automation_last_blocked_at):
+                automation_last_blocked_at = created_at
+
+        supervisor_graphs = services.supervisor_manager.list_graphs(limit=bounded_graph_limit)
+        supervisor_blocked_total = 0
+        supervisor_graphs_with_blocks: set[str] = set()
+        supervisor_last_blocked_at: str | None = None
+        for graph in supervisor_graphs:
+            graph_id = str(graph.get("id") or "").strip()
+            timeline = graph.get("timeline")
+            if not isinstance(timeline, list) or not timeline:
+                continue
+            start_index = max(0, len(timeline) - bounded_timeline_limit)
+            for item in timeline[start_index:]:
+                if not isinstance(item, dict):
+                    continue
+                event_name = str(item.get("event") or "").strip()
+                if event_name != "node_run_blocked_autonomy_circuit_breaker":
+                    continue
+                supervisor_blocked_total += 1
+                if graph_id:
+                    supervisor_graphs_with_blocks.add(graph_id)
+                created_at = str(item.get("at") or "").strip() or None
+                if created_at and (supervisor_last_blocked_at is None or created_at > supervisor_last_blocked_at):
+                    supervisor_last_blocked_at = created_at
+
+        runs_blocked = len(run_blocked_items)
+        automations_blocked = len(automation_blocked_items)
+        supervisor_blocked = int(supervisor_blocked_total)
+        domains_with_blocks: list[str] = []
+        if runs_blocked > 0:
+            domains_with_blocks.append("runs")
+        if automations_blocked > 0:
+            domains_with_blocks.append("automations")
+        if supervisor_blocked > 0:
+            domains_with_blocks.append("supervisor")
+
+        return {
+            "window": {
+                "event_limit": bounded_event_limit,
+                "supervisor_graph_limit": bounded_graph_limit,
+                "supervisor_timeline_limit": bounded_timeline_limit,
+            },
+            "runs": {
+                "blocked_events": runs_blocked,
+                "blocked_by_action": run_blocked_by_action,
+                "blocked_request_ids": len(run_blocked_request_ids),
+                "last_blocked_at": run_last_blocked_at,
+                "source": "security_audit_events",
+            },
+            "automations": {
+                "blocked_events": automations_blocked,
+                "automations_with_blocks": len(automation_ids_with_blocks),
+                "last_blocked_at": automation_last_blocked_at,
+                "source": "automation_events",
+            },
+            "supervisor": {
+                "blocked_events": supervisor_blocked,
+                "graphs_with_blocks": len(supervisor_graphs_with_blocks),
+                "last_blocked_at": supervisor_last_blocked_at,
+                "source": "supervisor_graph_timeline",
+            },
+            "summary": {
+                "blocked_total": runs_blocked + automations_blocked + supervisor_blocked,
+                "domains_with_blocks": domains_with_blocks,
+                "domains_evaluated": ["runs", "automations", "supervisor"],
+            },
+        }
+
     def error_response(
         request: Request,
         *,
@@ -1166,6 +1303,34 @@ def create_app() -> FastAPI:
             "actor": auth.user_id,
             "scopes": sorted(auth.scopes),
             "circuit_breaker": circuit_breaker,
+            "recovery_guidance": recovery_guidance,
+        }
+
+    @app.get("/service/runs/autonomy-circuit-breaker/domains")
+    def service_runs_autonomy_circuit_breaker_domains(
+        request: Request,
+        limit: int = Query(default=500, ge=1, le=5000),
+        supervisor_graph_limit: int = Query(default=200, ge=1, le=2000),
+        supervisor_timeline_limit: int = Query(default=400, ge=1, le=2000),
+    ) -> dict[str, Any]:
+        auth = auth_context_from_request(request)
+        circuit_breaker = services.autonomy_circuit_breaker.snapshot()
+        domain_impact = _autonomy_circuit_breaker_domain_impact_snapshot(
+            event_limit=limit,
+            supervisor_graph_limit=supervisor_graph_limit,
+            supervisor_timeline_limit=supervisor_timeline_limit,
+        )
+        recovery_guidance = _build_circuit_breaker_recovery_guidance(
+            circuit_breaker=circuit_breaker,
+            observability_snapshot=services.observability.sre.snapshot(),
+            recent_timeline=_recent_circuit_breaker_timeline_items(limit=50),
+        )
+        return {
+            "request_id": request_id_from_request(request),
+            "actor": auth.user_id,
+            "scopes": sorted(auth.scopes),
+            "circuit_breaker": circuit_breaker,
+            "domain_impact": domain_impact,
             "recovery_guidance": recovery_guidance,
         }
 

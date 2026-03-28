@@ -28,6 +28,7 @@ Release scope:
 - fault-injection reliability report
 - release quality dashboard snapshot
 - adoption KPI trend gate report
+- autonomy circuit breaker gate report
 - autonomy circuit breaker stability soak gate report
 - distribution resilience report
 - macOS desktop parity smoke report (staging)
@@ -36,6 +37,7 @@ Release scope:
 Nightly scope:
 - nightly reliability report
 - nightly burn-rate gate report
+- autonomy circuit breaker gate report
 - autonomy circuit breaker stability soak gate report
 - adoption KPI trend gate report
 - nightly user journey benchmark report
@@ -70,6 +72,9 @@ Optional adoption trend source flag:
 
 Optional breaker soak source flag:
 - `--breaker-soak-report <path>`
+
+Optional breaker gate source flag:
+- `--breaker-gate-report <path>`
 
 ## CI Integration
 

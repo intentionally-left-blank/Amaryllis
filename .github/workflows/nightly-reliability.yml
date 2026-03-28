@@ -340,6 +340,7 @@ jobs:
             --nightly-burn-rate-report "artifacts/nightly-burn-rate-gate-report.json" \
             --user-journey-report "artifacts/nightly-user-journey-benchmark-report.json" \
             --adoption-kpi-trend-report "artifacts/nightly-adoption-kpi-trend-gate-report.json" \
+            --breaker-gate-report "artifacts/nightly-autonomy-circuit-breaker-gate-report.json" \
             --breaker-soak-report "artifacts/nightly-autonomy-circuit-breaker-soak-gate-report.json" \
             ${MACOS_DESKTOP_PARITY_ARG} \
             --scope "nightly" \

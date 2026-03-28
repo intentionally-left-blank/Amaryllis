@@ -224,6 +224,16 @@ python3 scripts/release/publish_adoption_kpi_snapshot.py \
 Nightly mission report pack gate:
 
 ```bash
+python3 scripts/release/build_mission_success_recovery_report.py \
+  --nightly-reliability-report artifacts/nightly-reliability-report.json \
+  --nightly-burn-rate-report artifacts/nightly-burn-rate-gate-report.json \
+  --user-journey-report artifacts/nightly-user-journey-benchmark-report.json \
+  --adoption-kpi-trend-report artifacts/nightly-adoption-kpi-trend-gate-report.json \
+  --breaker-gate-report artifacts/nightly-autonomy-circuit-breaker-gate-report.json \
+  --breaker-soak-report artifacts/nightly-autonomy-circuit-breaker-soak-gate-report.json \
+  --scope nightly \
+  --output artifacts/nightly-mission-success-recovery-report.json
+
 python3 scripts/release/mission_report_pack_gate.py \
   --report artifacts/nightly-mission-success-recovery-report.json \
   --expected-scope nightly \

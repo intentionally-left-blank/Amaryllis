@@ -1,6 +1,6 @@
 {
   "suite": "autonomy_circuit_breaker_gate_v1",
-  "generated_at": "2026-03-28T23:25:46.191672+00:00",
+  "generated_at": "2026-03-28T23:31:42.335813+00:00",
   "checks": [
     {
       "name": "doc_exists",
@@ -58,6 +58,11 @@
       "detail": "supervisor breaker pause behavior documented"
     },
     {
+      "name": "doc_domains_diagnostics_endpoint",
+      "ok": true,
+      "detail": "cross-domain diagnostics endpoint documented"
+    },
+    {
       "name": "runtime_status_endpoint_ok",
       "ok": true,
       "detail": "status=200"
@@ -80,7 +85,7 @@
     {
       "name": "runtime_create_agent_id",
       "ok": true,
-      "detail": "agent_id=bdd05c94-0f17-4b1c-9e5c-72a50407aa97"
+      "detail": "agent_id=8350d3fb-432f-4755-a505-8148740b95fd"
     },
     {
       "name": "runtime_create_agent_user2_ok",
@@ -90,7 +95,7 @@
     {
       "name": "runtime_create_agent_user2_id",
       "ok": true,
-      "detail": "agent_id=4fe5b481-2268-4a71-9774-9d1ffebd8fa8"
+      "detail": "agent_id=85dcfaa7-335f-4db0-a86d-4a235fc1cbf0"
     },
     {
       "name": "runtime_arm_ok",
@@ -135,7 +140,7 @@
     {
       "name": "runtime_automation_id",
       "ok": true,
-      "detail": "automation_id=5d7ddbbd-2640-4f08-9f74-8b6fe97b1443"
+      "detail": "automation_id=39036c89-d0ea-40fb-a418-50e6a9832ffa"
     },
     {
       "name": "runtime_automation_run_blocked_gracefully",
@@ -160,7 +165,7 @@
     {
       "name": "runtime_supervisor_graph_id",
       "ok": true,
-      "detail": "graph_id=sup-a02c4fdc72dd4abaa64b407afee44e8b"
+      "detail": "graph_id=sup-2add782e66044eb083c85e3b56c06645"
     },
     {
       "name": "runtime_supervisor_launch_blocked_gracefully",
@@ -171,6 +176,26 @@
       "name": "runtime_supervisor_block_event_emitted",
       "ok": true,
       "detail": "supervisor emits node_run_blocked_autonomy_circuit_breaker while breaker is armed"
+    },
+    {
+      "name": "runtime_domains_endpoint_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_domains_contract_contains_three_domains",
+      "ok": true,
+      "detail": "domain_impact includes runs/automations/supervisor"
+    },
+    {
+      "name": "runtime_domains_reports_blocked_counts",
+      "ok": true,
+      "detail": "runs=2, automations=1, supervisor=1"
+    },
+    {
+      "name": "runtime_domains_summary_includes_all_blocked_domains",
+      "ok": true,
+      "detail": "domain summary marks runs/automations/supervisor as blocked domains"
     },
     {
       "name": "runtime_disarm_ok",
@@ -240,7 +265,7 @@
     {
       "name": "runtime_supervisor_user_scope_graph_id",
       "ok": true,
-      "detail": "graph_id=sup-526aaad4ade54a83971d7ea4e7749523"
+      "detail": "graph_id=sup-945c17b9941b42a8ad579e0dde3ed0ef"
     },
     {
       "name": "runtime_supervisor_user_scope_blocks_target_user",
@@ -290,7 +315,7 @@
     {
       "name": "runtime_supervisor_agent_scope_graph_id",
       "ok": true,
-      "detail": "graph_id=sup-e4f4954474b44cccb4d5bbbc12c0f781"
+      "detail": "graph_id=sup-7ad0bc3bfc574c03880708b90ec48019"
     },
     {
       "name": "runtime_supervisor_agent_scope_blocks_target_agent",
@@ -330,8 +355,8 @@
   ],
   "summary": {
     "status": "pass",
-    "total": 65,
-    "passed": 65,
+    "total": 70,
+    "passed": 70,
     "failed": 0
   }
 }

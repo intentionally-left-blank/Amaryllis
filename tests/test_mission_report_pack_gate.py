@@ -44,6 +44,8 @@ class MissionReportPackGateTests(unittest.TestCase):
                         "distribution_score_pct": 100.0,
                         "journey_success_rate_pct": 100.0,
                         "journey_plan_to_execute_conversion_rate_pct": 100.0,
+                        "autonomy_breaker_gate_passed": True,
+                        "autonomy_breaker_domains_contract_passed": True,
                         "adoption_trend_gate_passed": True,
                     },
                     "class_order": [
@@ -145,6 +147,8 @@ class MissionReportPackGateTests(unittest.TestCase):
                         "nightly_success_rate_pct": 100.0,
                         "nightly_burn_rate_gate_passed": True,
                         "nightly_breaker_soak_gate_passed": True,
+                        "nightly_autonomy_breaker_gate_passed": True,
+                        "nightly_autonomy_breaker_domains_contract_passed": True,
                         "nightly_adoption_trend_gate_passed": True,
                         "journey_success_rate_pct": 100.0,
                         "journey_plan_to_execute_conversion_rate_pct": 100.0,

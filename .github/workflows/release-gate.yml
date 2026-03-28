@@ -897,6 +897,12 @@ jobs:
           name: autonomy-circuit-breaker-soak-gate-report
           path: artifacts/autonomy-circuit-breaker-soak
 
+      - name: Download autonomy circuit breaker gate report
+        uses: actions/download-artifact@v4
+        with:
+          name: autonomy-circuit-breaker-gate-report
+          path: artifacts/autonomy-circuit-breaker
+
       - name: Download macOS desktop parity smoke report (staging, optional)
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -1041,6 +1047,7 @@ jobs:
             --fault-injection-report "artifacts/fault-injection/fault-injection-reliability-report.json" \
             --quality-dashboard-report "artifacts/release-quality-dashboard-final.json" \
             --adoption-kpi-trend-report "artifacts/adoption-kpi-trend-gate-report.json" \
+            --breaker-gate-report "artifacts/autonomy-circuit-breaker/autonomy-circuit-breaker-gate-report.json" \
             --breaker-soak-report "artifacts/autonomy-circuit-breaker-soak/autonomy-circuit-breaker-soak-gate-report.json" \
             --distribution-resilience-report "artifacts/distribution/distribution-resilience-report.json" \
             --user-journey-report "artifacts/user-journey/user-journey-benchmark-report.json" \

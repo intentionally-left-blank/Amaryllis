@@ -16,6 +16,13 @@ Requires `service` or `admin` scope.
 - `GET /service/runs/autonomy-circuit-breaker`
   - returns current breaker state (`armed`, revision, actor, reason, timestamps).
   - includes `recovery_guidance` with deterministic next steps (`status`, `priority`, `recommendations`) based on SLO and recent breaker transitions.
+- `GET /service/runs/autonomy-circuit-breaker/domains`
+  - cross-domain diagnostics snapshot for breaker impact across:
+    - `runs` (failed execute admission attempts blocked by breaker),
+    - `automations` (scheduler/manual dispatch pauses),
+    - `supervisor` (child-node dispatch pauses).
+  - returns `domain_impact` with per-domain blocked counters and `last_blocked_at`.
+  - supports window controls: `limit`, `supervisor_graph_limit`, `supervisor_timeline_limit`.
 - `POST /service/runs/autonomy-circuit-breaker`
   - `action: arm|disarm`
   - `scope_type: global|user|agent` (default: `global`)
@@ -54,6 +61,10 @@ Scope parity applies to all execute dispatch domains:
 - direct runs (`/agents/*/runs`, execute dispatch),
 - automation dispatch (`/automations/*/run`, scheduler),
 - supervisor child-run dispatch (`/supervisor/graphs/*/launch|tick`).
+
+Operator diagnostics:
+- `GET /service/runs/autonomy-circuit-breaker/domains` is the unified control-plane view for blocker impact
+  across `runs`, `automations`, and `supervisor` in one payload.
 
 State persistence:
 - Breaker state is persisted to `AMARYLLIS_AUTONOMY_CIRCUIT_BREAKER_STATE_PATH`

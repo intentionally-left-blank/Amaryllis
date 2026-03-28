@@ -29,7 +29,7 @@ Mandatory gates before publish:
 23. Localization/governance gate (RU/EN docs + starter templates + contributor/legal governance package contract)
 24. Flow/interaction gate (unified `/flow/sessions/*` + `/runs/dispatch` plan-vs-execute trust-boundary contract)
 25. Action explainability gate (timeline stream + plain-language `reason/result/next_step` payload contract)
-26. Autonomy circuit breaker gate (service emergency brake contract + execute-mode blocking + automation pause-without-escalation + supervisor dispatch-pause parity assertions)
+26. Autonomy circuit breaker gate (service emergency brake contract + execute-mode blocking + automation/supervisor pause parity + cross-domain diagnostics surface assertions)
 27. Autonomy circuit breaker stability soak gate (multi-cycle emergency drill cadence + scope parity + p95 cycle SLO assertions)
 28. Desktop action rollback gate (Linux desktop action + rollback hint + terminal receipt contract)
 29. Supervisor mission gate (bounded task-graph + checkpoint/resume + objective verification contract)
@@ -40,7 +40,7 @@ Mandatory gates before publish:
 34. Adoption KPI snapshot build gate (publishable adoption artifact + summary score)
 35. Adoption KPI trend regression gate (baseline-relative regression budget enforcement)
 36. Release quality dashboard snapshot gate (final post-Linux benchmark/reliability artifact + trend deltas)
-37. Mission success/recovery report pack gate (v2 schema + class/KPI completeness contract)
+37. Mission success/recovery report pack gate (v2 schema + class/KPI completeness contract + autonomy breaker gate KPI presence)
 38. Mission success/recovery report pack export (public KPI artifact)
 39. Disaster recovery gate (backup + verify + restore drill)
 40. Compliance operations gate (access review + incidents + evidence export)
@@ -154,7 +154,7 @@ python scripts/release/build_adoption_kpi_snapshot.py --schema-gate-report artif
 python scripts/release/adoption_kpi_trend_gate.py --snapshot-report artifacts/adoption-kpi-snapshot-final.json --baseline eval/baselines/quality/adoption_kpi_snapshot_baseline.json --max-activation-success-regression-pct 1 --max-activation-blocked-rate-increase-pct 0 --max-install-success-regression-pct 1 --max-retention-proxy-regression-pct 1 --max-feature-adoption-regression-pct 2 --max-api-quickstart-pass-rate-regression-pct 1 --max-channel-coverage-regression-pct 1 --output artifacts/adoption-kpi-trend-gate-report.json
 python scripts/release/publish_adoption_kpi_snapshot.py --snapshot-report artifacts/adoption-kpi-snapshot-final.json --channel release --install-root ~/.local/share/amaryllis
 python scripts/release/publish_release_quality_snapshot.py --snapshot-report artifacts/release-quality-dashboard-final.json --trend-report artifacts/release-quality-dashboard-trend-final.json --install-root ~/.local/share/amaryllis
-python scripts/release/build_mission_success_recovery_report.py --mission-queue-report artifacts/mission-queue-load-report.json --fault-injection-report artifacts/fault-injection-reliability-report.json --quality-dashboard-report artifacts/release-quality-dashboard-final.json --adoption-kpi-trend-report artifacts/adoption-kpi-trend-gate-report.json --distribution-resilience-report artifacts/distribution-resilience-report.json --macos-desktop-parity-report artifacts/macos-desktop-parity-smoke-report.json --user-journey-report artifacts/user-journey-benchmark-report.json --scope release --output artifacts/mission-success-recovery-report.json
+python scripts/release/build_mission_success_recovery_report.py --mission-queue-report artifacts/mission-queue-load-report.json --fault-injection-report artifacts/fault-injection-reliability-report.json --quality-dashboard-report artifacts/release-quality-dashboard-final.json --adoption-kpi-trend-report artifacts/adoption-kpi-trend-gate-report.json --breaker-gate-report artifacts/autonomy-circuit-breaker-gate-report.json --distribution-resilience-report artifacts/distribution-resilience-report.json --macos-desktop-parity-report artifacts/macos-desktop-parity-smoke-report.json --user-journey-report artifacts/user-journey-benchmark-report.json --scope release --output artifacts/mission-success-recovery-report.json
 python scripts/release/mission_report_pack_gate.py --report artifacts/mission-success-recovery-report.json --expected-scope release --output artifacts/mission-report-pack-gate-report.json
 python scripts/release/disaster_recovery_gate.py
 python scripts/release/compliance_ops_gate.py

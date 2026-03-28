@@ -31,8 +31,8 @@ Harden autonomy controls across execution domains so emergency state is consiste
 
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
-| P6-B01 | todo | Add cross-domain autonomy status surface | service diagnostics endpoint + docs | Operators see domain-level breaker impact (`runs/automations/supervisor`) in one contract |
-| P6-B02 | todo | Promote cross-domain hardening to blocking gate | release/nightly gate checks + report artifact | Pipelines fail on cross-domain autonomy regression scenarios |
+| P6-B01 | done | Add cross-domain autonomy status surface | service diagnostics endpoint + docs | Operators see domain-level breaker impact (`runs/automations/supervisor`) in one contract |
+| P6-B02 | done | Promote cross-domain hardening to blocking gate | release/nightly gate checks + report artifact | Pipelines fail on cross-domain autonomy regression scenarios |
 
 ## Current Sprint (P6-S0)
 
@@ -40,9 +40,10 @@ Harden autonomy controls across execution domains so emergency state is consiste
 |---|---|---|
 | P6-A01 | done | breaker-aware automation dispatch pause semantics + reliability-noise suppression + gate coverage |
 | P6-A02 | done | supervisor admission parity (global/user/agent) |
-| P6-B01 | todo | unified cross-domain autonomy diagnostics |
+| P6-B01 | done | unified cross-domain autonomy diagnostics (`/service/runs/autonomy-circuit-breaker/domains`) |
+| P6-B02 | done | mission report pack + release/nightly workflow wiring now require autonomy breaker gate KPI contract |
 
 ## Next Checkpoint
 
-- Start `P6-B01` (cross-domain autonomy status surface) as next P0 item.
-- Draft diagnostics contract for `runs/automations/supervisor` breaker impact in one response.
+- Start `P6-A03` (tool-action autonomy boundary policy with explicit risk classes).
+- Define breaker interaction policy for high-risk autonomous tool-action classes.

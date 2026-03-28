@@ -14,8 +14,14 @@ The gate enforces:
 - required KPI key presence for the selected scope,
 - summary consistency (`checks_total`, pass/fail status expectations).
 
-Nightly scope requires breaker soak KPI presence (`nightly_breaker_soak_gate_passed`) in addition to
-nightly reliability/burn/adoption and user-flow KPIs.
+Release scope requires autonomy breaker gate KPIs
+(`autonomy_breaker_gate_passed`, `autonomy_breaker_domains_contract_passed`) in addition to
+mission/recovery/quality/distribution/user-flow/adoption KPIs.
+
+Nightly scope requires breaker soak + autonomy breaker gate KPI presence
+(`nightly_breaker_soak_gate_passed`, `nightly_autonomy_breaker_gate_passed`,
+`nightly_autonomy_breaker_domains_contract_passed`) in addition to nightly reliability/burn/adoption
+and user-flow KPIs.
 
 This turns the mission KPI pack into a formal blocking contract instead of a best-effort export.
 

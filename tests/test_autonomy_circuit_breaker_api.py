@@ -310,6 +310,108 @@ class AutonomyCircuitBreakerAPITests(unittest.TestCase):
             )
         )
 
+    def test_cross_domain_status_surface_reports_runs_automations_and_supervisor(self) -> None:
+        agent_id = self._create_agent(
+            token="user-token",
+            user_id="user-1",
+            name="Autonomy Circuit Breaker Domain Surface Agent",
+        )
+        automation = self.client.post(
+            "/automations/create",
+            headers=self._auth("user-token"),
+            json={
+                "agent_id": agent_id,
+                "user_id": "user-1",
+                "message": "cross-domain breaker diagnostics",
+                "session_id": "breaker-domains-session",
+                "interval_sec": 60,
+                "start_immediately": False,
+                "timezone": "UTC",
+            },
+        )
+        self.assertEqual(automation.status_code, 200)
+        automation_id = str(automation.json().get("automation", {}).get("id") or "")
+        self.assertTrue(bool(automation_id))
+
+        supervisor_graph_id = self._create_supervisor_graph(
+            token="user-token",
+            user_id="user-1",
+            objective="Cross-domain breaker diagnostics graph",
+            node_id="domain-node",
+            agent_id=agent_id,
+            message="run via supervisor while breaker is armed",
+        )
+
+        arm = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={
+                "action": "arm",
+                "reason": "domains-surface-check",
+                "scope_type": "global",
+                "apply_kill_switch": False,
+            },
+        )
+        self.assertEqual(arm.status_code, 200)
+
+        run_blocked = self.client.post(
+            f"/agents/{agent_id}/runs",
+            headers=self._auth("user-token"),
+            json={"user_id": "user-1", "message": "blocked direct execute"},
+        )
+        self.assertEqual(run_blocked.status_code, 400)
+
+        automation_blocked = self.client.post(
+            f"/automations/{automation_id}/run",
+            headers=self._auth("user-token"),
+        )
+        self.assertEqual(automation_blocked.status_code, 200)
+
+        supervisor_blocked = self.client.post(
+            f"/supervisor/graphs/{supervisor_graph_id}/launch",
+            headers=self._auth("user-token"),
+            json={"session_id": "domains-supervisor-session"},
+        )
+        self.assertEqual(supervisor_blocked.status_code, 200)
+        blocked_graph = supervisor_blocked.json().get("supervisor_graph", {})
+        blocked_node = self._graph_node(blocked_graph, "domain-node")
+        self.assertEqual(str(blocked_node.get("status") or ""), "planned")
+
+        domains = self.client.get(
+            "/service/runs/autonomy-circuit-breaker/domains",
+            headers=self._auth("service-token"),
+            params={
+                "limit": 500,
+                "supervisor_graph_limit": 200,
+                "supervisor_timeline_limit": 400,
+            },
+        )
+        self.assertEqual(domains.status_code, 200)
+        domains_payload = domains.json()
+        domain_impact = domains_payload.get("domain_impact", {})
+        self.assertTrue(isinstance(domain_impact, dict))
+        runs_domain = domain_impact.get("runs", {})
+        automations_domain = domain_impact.get("automations", {})
+        supervisor_domain = domain_impact.get("supervisor", {})
+        self.assertGreaterEqual(int(runs_domain.get("blocked_events", 0)), 1)
+        self.assertGreaterEqual(int(automations_domain.get("blocked_events", 0)), 1)
+        self.assertGreaterEqual(int(supervisor_domain.get("blocked_events", 0)), 1)
+        summary = domain_impact.get("summary", {})
+        domains_with_blocks = set(summary.get("domains_with_blocks", []))
+        self.assertTrue({"runs", "automations", "supervisor"}.issubset(domains_with_blocks))
+        self.assertTrue(isinstance((domains_payload.get("recovery_guidance") or {}).get("recommendations"), list))
+
+        disarm = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={
+                "action": "disarm",
+                "scope_type": "global",
+                "reason": "domains-surface-cleanup",
+            },
+        )
+        self.assertEqual(disarm.status_code, 200)
+
     def test_scoped_user_breaker_blocks_only_target_user(self) -> None:
         user1_agent = self._create_agent(token="user-token", user_id="user-1", name="Scoped User Agent 1")
         user2_agent = self._create_agent(token="user2-token", user_id="user-2", name="Scoped User Agent 2")

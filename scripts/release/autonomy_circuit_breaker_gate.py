@@ -146,6 +146,11 @@ def main() -> int:
             "supervisor" in text.lower() and "node_run_blocked_autonomy_circuit_breaker" in text,
             "supervisor breaker pause behavior documented",
         )
+        add_check(
+            "doc_domains_diagnostics_endpoint",
+            "/service/runs/autonomy-circuit-breaker/domains" in text,
+            "cross-domain diagnostics endpoint documented",
+        )
     else:
         add_check("doc_exists", False, f"missing: {doc_path}")
 
@@ -493,6 +498,58 @@ def main() -> int:
                     ),
                     "supervisor emits node_run_blocked_autonomy_circuit_breaker while breaker is armed",
                 )
+
+            domains_status = client.get(
+                "/service/runs/autonomy-circuit-breaker/domains",
+                headers=_auth(service_token),
+                params={
+                    "limit": 500,
+                    "supervisor_graph_limit": 200,
+                    "supervisor_timeline_limit": 400,
+                },
+            )
+            domains_payload = domains_status.json() if _is_json_response(dict(domains_status.headers)) else {}
+            domain_impact = (
+                domains_payload.get("domain_impact")
+                if isinstance(domains_payload.get("domain_impact"), dict)
+                else {}
+            )
+            runs_domain = domain_impact.get("runs") if isinstance(domain_impact.get("runs"), dict) else {}
+            automations_domain = (
+                domain_impact.get("automations") if isinstance(domain_impact.get("automations"), dict) else {}
+            )
+            supervisor_domain = (
+                domain_impact.get("supervisor") if isinstance(domain_impact.get("supervisor"), dict) else {}
+            )
+            add_check(
+                "runtime_domains_endpoint_ok",
+                domains_status.status_code == 200 and bool(domain_impact),
+                f"status={domains_status.status_code}",
+            )
+            add_check(
+                "runtime_domains_contract_contains_three_domains",
+                isinstance(runs_domain, dict)
+                and isinstance(automations_domain, dict)
+                and isinstance(supervisor_domain, dict),
+                "domain_impact includes runs/automations/supervisor",
+            )
+            add_check(
+                "runtime_domains_reports_blocked_counts",
+                int(runs_domain.get("blocked_events", 0)) >= 1
+                and int(automations_domain.get("blocked_events", 0)) >= 1
+                and int(supervisor_domain.get("blocked_events", 0)) >= 1,
+                (
+                    f"runs={runs_domain.get('blocked_events')}, "
+                    f"automations={automations_domain.get('blocked_events')}, "
+                    f"supervisor={supervisor_domain.get('blocked_events')}"
+                ),
+            )
+            add_check(
+                "runtime_domains_summary_includes_all_blocked_domains",
+                set((domain_impact.get("summary") or {}).get("domains_with_blocks") or [])
+                >= {"runs", "automations", "supervisor"},
+                "domain summary marks runs/automations/supervisor as blocked domains",
+            )
 
             disarm = client.post(
                 "/service/runs/autonomy-circuit-breaker",

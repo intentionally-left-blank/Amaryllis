@@ -61,6 +61,11 @@ def _parse_args() -> argparse.Namespace:
         help="Optional autonomy circuit-breaker stability soak gate report JSON path.",
     )
     parser.add_argument(
+        "--breaker-gate-report",
+        default="",
+        help="Optional autonomy circuit-breaker gate report JSON path.",
+    )
+    parser.add_argument(
         "--adoption-kpi-trend-report",
         default="",
         help="Optional adoption KPI trend gate report JSON path.",
@@ -123,6 +128,25 @@ def _signal_value(payload: dict[str, Any], metric_id: str) -> float | None:
     return None
 
 
+def _gate_check_states(payload: dict[str, Any]) -> dict[str, bool]:
+    checks = payload.get("checks")
+    if not isinstance(checks, list):
+        return {}
+    states: dict[str, bool] = {}
+    for item in checks:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        ok_raw = item.get("ok")
+        if isinstance(ok_raw, bool):
+            states[name] = ok_raw
+            continue
+        states[name] = _safe_float(ok_raw, default=0.0) >= 1.0
+    return states
+
+
 def _check(
     *,
     check_id: str,
@@ -158,6 +182,7 @@ def _source_class(source: str) -> str:
     mapping = {
         "mission_queue": "mission_execution",
         "fault_injection": "recovery",
+        "breaker_gate": "recovery",
         "quality_dashboard": "quality",
         "qos_governor": "runtime_qos",
         "distribution_resilience": "distribution",
@@ -177,6 +202,8 @@ def _kpi_class(kpi_key: str) -> str:
         return "mission_execution"
     if normalized.startswith("recovery_"):
         return "recovery"
+    if normalized.startswith("autonomy_breaker_"):
+        return "recovery"
     if normalized.startswith("release_quality_"):
         return "quality"
     if normalized.startswith("qos_"):
@@ -189,6 +216,8 @@ def _kpi_class(kpi_key: str) -> str:
         return "user_flow"
     if normalized.startswith("adoption_trend_") or normalized.startswith("nightly_adoption_trend_"):
         return "adoption_growth"
+    if normalized.startswith("nightly_autonomy_breaker_"):
+        return "nightly_reliability"
     if normalized.startswith("nightly_"):
         return "nightly_reliability"
     return "other"
@@ -291,6 +320,7 @@ def main() -> int:
         "nightly_reliability": _resolve_optional_path(project_root, str(args.nightly_reliability_report)),
         "nightly_burn_rate": _resolve_optional_path(project_root, str(args.nightly_burn_rate_report)),
         "breaker_soak": _resolve_optional_path(project_root, str(args.breaker_soak_report)),
+        "breaker_gate": _resolve_optional_path(project_root, str(args.breaker_gate_report)),
     }
 
     reports: dict[str, dict[str, Any]] = {}
@@ -815,6 +845,70 @@ def main() -> int:
         kpis["nightly_breaker_soak_success_rate_pct"] = round(success_rate, 4)
         kpis["nightly_breaker_soak_cycles_failed"] = int(max(0.0, cycles_failed))
         kpis["nightly_breaker_soak_p95_cycle_latency_ms"] = round(p95_cycle_latency, 4)
+
+    breaker_gate = reports.get("breaker_gate")
+    if isinstance(breaker_gate, dict):
+        summary = breaker_gate.get("summary") if isinstance(breaker_gate.get("summary"), dict) else {}
+        status = str(summary.get("status") or "").strip().lower()
+        checks_total = _safe_float(summary.get("total"))
+        checks_failed = _safe_float(summary.get("failed"))
+        checks_state = _gate_check_states(breaker_gate)
+        required_domain_checks = (
+            "runtime_domains_endpoint_ok",
+            "runtime_domains_contract_contains_three_domains",
+            "runtime_domains_reports_blocked_counts",
+            "runtime_domains_summary_includes_all_blocked_domains",
+        )
+        domain_checks_present = sum(1 for name in required_domain_checks if name in checks_state)
+        domain_contract_ok = (
+            domain_checks_present >= len(required_domain_checks)
+            and all(bool(checks_state.get(name, False)) for name in required_domain_checks)
+        )
+        gate_passed = status == "pass" and checks_failed <= 0.0
+        checks.extend(
+            [
+                _check(
+                    check_id="autonomy.breaker_gate_passed",
+                    source="breaker_gate",
+                    value=1.0 if gate_passed else 0.0,
+                    threshold=1.0,
+                    comparator="gte",
+                    unit="bool",
+                ),
+                _check(
+                    check_id="autonomy.breaker_gate_checks_failed",
+                    source="breaker_gate",
+                    value=checks_failed,
+                    threshold=0.0,
+                    comparator="lte",
+                    unit="count",
+                ),
+                _check(
+                    check_id="autonomy.breaker_domains_contract_passed",
+                    source="breaker_gate",
+                    value=1.0 if domain_contract_ok else 0.0,
+                    threshold=1.0,
+                    comparator="gte",
+                    unit="bool",
+                ),
+                _check(
+                    check_id="autonomy.breaker_domains_required_checks_present",
+                    source="breaker_gate",
+                    value=float(domain_checks_present),
+                    threshold=float(len(required_domain_checks)),
+                    comparator="gte",
+                    unit="count",
+                ),
+            ]
+        )
+        kpis["autonomy_breaker_gate_passed"] = bool(gate_passed)
+        kpis["autonomy_breaker_gate_checks_total"] = int(max(0.0, checks_total))
+        kpis["autonomy_breaker_gate_checks_failed"] = int(max(0.0, checks_failed))
+        kpis["autonomy_breaker_domains_contract_passed"] = bool(domain_contract_ok)
+        kpis["autonomy_breaker_domains_required_checks_present"] = int(max(0.0, domain_checks_present))
+        if scope == "nightly":
+            kpis["nightly_autonomy_breaker_gate_passed"] = bool(gate_passed)
+            kpis["nightly_autonomy_breaker_domains_contract_passed"] = bool(domain_contract_ok)
 
     passed_checks = sum(1 for item in checks if bool(item.get("passed")))
     failed_checks = len(checks) - passed_checks

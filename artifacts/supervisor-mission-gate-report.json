@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-28T23:25:56.669713+00:00",
+  "generated_at": "2026-03-28T23:31:52.634210+00:00",
   "suite": "supervisor_mission_gate_v1",
   "summary": {
     "status": "pass",
@@ -31,7 +31,7 @@
     {
       "name": "manager_create_graph_id",
       "ok": true,
-      "detail": "graph_id=sup-9834ea07a50449f9b1e2d0d4556a45d6"
+      "detail": "graph_id=sup-07eab3224bd54e14a2af4e142fe005ad"
     },
     {
       "name": "manager_launch_triage_run",
@@ -101,7 +101,7 @@
     {
       "name": "runtime_supervisor_triage_agent_id",
       "ok": true,
-      "detail": "agent_id=c6aaead4-a1d9-4689-b42d-2550ee3210d8"
+      "detail": "agent_id=c11bfa3e-3f5a-4cf3-aa60-417bbe267414"
     },
     {
       "name": "runtime_supervisor_create_fix_agent_ok",
@@ -111,7 +111,7 @@
     {
       "name": "runtime_supervisor_fix_agent_id",
       "ok": true,
-      "detail": "agent_id=cf30c08a-763b-4673-b4e3-35498e834146"
+      "detail": "agent_id=312928b7-9915-4cbb-b43e-3dcd573378cc"
     },
     {
       "name": "runtime_supervisor_create_graph_ok",
@@ -121,7 +121,7 @@
     {
       "name": "runtime_supervisor_create_graph_id",
       "ok": true,
-      "detail": "graph_id=sup-4179c4c7cd794fdb9885f7264e8e782f"
+      "detail": "graph_id=sup-a15b4ed452904529949254cbc826ad4c"
     },
     {
       "name": "runtime_supervisor_launch_ok",
@@ -181,7 +181,7 @@
     {
       "name": "runtime_supervisor_restart_graph_id",
       "ok": true,
-      "detail": "graph_id=sup-9afab75731534c39bf9d5e9ed9cd9795"
+      "detail": "graph_id=sup-16d198bc20d24c1a8ed86d75365c77d5"
     },
     {
       "name": "runtime_supervisor_restart_graph_launch_ok",
@@ -196,7 +196,7 @@
     {
       "name": "runtime_supervisor_restart_recovery_graph_id",
       "ok": true,
-      "detail": "recovered_graph_id=sup-9afab75731534c39bf9d5e9ed9cd9795"
+      "detail": "recovered_graph_id=sup-16d198bc20d24c1a8ed86d75365c77d5"
     },
     {
       "name": "runtime_supervisor_restart_recovery_nodes",

@@ -82,7 +82,8 @@ Execution-ready breakdown:
 - Outcomes:
 - breaker-aware automation dispatch semantics (`run_blocked_autonomy_circuit_breaker`) without scheduler failure escalation drift.
 - cross-domain admission parity for `runs`, `automations`, and `supervisor` breaker scopes.
-- release/nightly contract expansion for cross-domain autonomy hardening.
+- cross-domain operator diagnostics surface (`/service/runs/autonomy-circuit-breaker/domains`) with unified impact counters for `runs/automations/supervisor`.
+- release/nightly contract expansion for cross-domain autonomy hardening, including mission report pack KPI contract enforcement for breaker gate results.
 
 Execution-ready breakdown:
 - `/Users/bogdan/Amaryllis/docs/jarvis-phase6-backlog.md`
