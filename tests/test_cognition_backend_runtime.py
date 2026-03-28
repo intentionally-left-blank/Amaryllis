@@ -86,6 +86,33 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         self.assertIn("grounded", provenance)
         self.assertIn("sources", provenance)
 
+    def test_chat_endpoint_returns_grounded_provenance_when_memory_fact_exists(self) -> None:
+        services = self.server_module.app.state.services
+        services.memory_manager.remember_fact(
+            user_id="user-1",
+            text="The codename for this release is amaryllis-orbit.",
+            metadata={"source": "runtime_test"},
+        )
+        response = self.client.post(
+            "/v1/chat/completions",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "messages": [{"role": "user", "content": "What is the codename for this release?"}],
+                "stream": False,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        provenance = payload.get("provenance")
+        self.assertIsInstance(provenance, dict)
+        assert isinstance(provenance, dict)
+        self.assertTrue(bool(provenance.get("grounded", False)))
+        sources = provenance.get("sources")
+        self.assertIsInstance(sources, list)
+        assert isinstance(sources, list)
+        self.assertGreaterEqual(len(sources), 1)
+
     def test_model_route_endpoint_uses_same_backend_contract(self) -> None:
         response = self.client.post(
             "/models/route",

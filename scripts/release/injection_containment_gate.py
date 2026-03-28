@@ -173,6 +173,34 @@ def _run_scenarios() -> list[dict[str, Any]]:
     )
     scenarios.append(
         _evaluate_policy(
+            scenario_id="cloudpickle_deserialization_blocked",
+            name="cloudpickle deserialization token is blocked",
+            category="attack",
+            tool=python_exec_tool,
+            arguments={
+                "code": "import cloudpickle\ncloudpickle.loads(payload)\n",
+                "timeout": 1,
+            },
+            expect_allow=False,
+            policy=policy,
+        )
+    )
+    scenarios.append(
+        _evaluate_policy(
+            scenario_id="pandas_read_pickle_blocked",
+            name="pandas read_pickle token is blocked",
+            category="attack",
+            tool=python_exec_tool,
+            arguments={
+                "code": "import pandas as pd\npd.read_pickle('payload.pkl')\n",
+                "timeout": 1,
+            },
+            expect_allow=False,
+            policy=policy,
+        )
+    )
+    scenarios.append(
+        _evaluate_policy(
             scenario_id="yaml_python_tag_blocked",
             name="YAML python object tag is blocked",
             category="attack",

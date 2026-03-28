@@ -121,6 +121,40 @@ class ToolIsolationPolicyTests(unittest.TestCase):
         self.assertTrue(decision.allow)
         self.assertTrue(decision.requires_approval)
 
+    def test_python_exec_blocks_cloudpickle_deserialization_snippet(self) -> None:
+        registry = ToolRegistry()
+        registry.load_builtin_tools()
+        tool = registry.get("python_exec")
+        assert tool is not None
+
+        policy = ToolIsolationPolicy(profile="balanced")
+        decision = policy.evaluate(
+            tool=tool,
+            arguments={
+                "code": "import cloudpickle\ncloudpickle.loads(payload)\n",
+                "timeout": 2,
+            },
+        )
+        self.assertFalse(decision.allow)
+        self.assertIn("cloudpickle_load", str(decision.reason or ""))
+
+    def test_python_exec_blocks_pandas_read_pickle_snippet(self) -> None:
+        registry = ToolRegistry()
+        registry.load_builtin_tools()
+        tool = registry.get("python_exec")
+        assert tool is not None
+
+        policy = ToolIsolationPolicy(profile="balanced")
+        decision = policy.evaluate(
+            tool=tool,
+            arguments={
+                "code": "import pandas as pd\npd.read_pickle('payload.pkl')\n",
+                "timeout": 2,
+            },
+        )
+        self.assertFalse(decision.allow)
+        self.assertIn("pd_read_pickle", str(decision.reason or ""))
+
 
 if __name__ == "__main__":
     unittest.main()

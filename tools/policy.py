@@ -16,11 +16,18 @@ _MAX_DESERIALIZATION_SCAN_VALUES = 200
 _MAX_DESERIALIZATION_SCAN_TEXT_CHARS = 4000
 _UNSAFE_DESERIALIZATION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("pickle_load", re.compile(r"\bpickle\s*\.\s*loads?\s*\(", flags=re.IGNORECASE)),
+    ("pickle_unpickler", re.compile(r"\bpickle\s*\.\s*Unpickler\s*\(", flags=re.IGNORECASE)),
     ("cpickle_load", re.compile(r"\bcpickle\s*\.\s*loads?\s*\(", flags=re.IGNORECASE)),
+    ("cloudpickle_load", re.compile(r"\bcloudpickle\s*\.\s*loads?\s*\(", flags=re.IGNORECASE)),
     ("dill_load", re.compile(r"\bdill\s*\.\s*loads?\s*\(", flags=re.IGNORECASE)),
     ("marshal_load", re.compile(r"\bmarshal\s*\.\s*loads?\s*\(", flags=re.IGNORECASE)),
     ("yaml_load", re.compile(r"\byaml\s*\.\s*load\s*\(", flags=re.IGNORECASE)),
+    ("yaml_full_load", re.compile(r"\byaml\s*\.\s*full_load\s*\(", flags=re.IGNORECASE)),
     ("yaml_unsafe_load", re.compile(r"\byaml\s*\.\s*unsafe_load\s*\(", flags=re.IGNORECASE)),
+    (
+        "yaml_unsafe_loader",
+        re.compile(r"\bLoader\s*=\s*yaml\s*\.\s*(Loader|UnsafeLoader)\b", flags=re.IGNORECASE),
+    ),
     (
         "yaml_python_tag",
         re.compile(
@@ -34,6 +41,8 @@ _UNSAFE_DESERIALIZATION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
     ("torch_load", re.compile(r"\btorch\s*\.\s*load\s*\(", flags=re.IGNORECASE)),
     ("joblib_load", re.compile(r"\bjoblib\s*\.\s*load\s*\(", flags=re.IGNORECASE)),
+    ("pandas_read_pickle", re.compile(r"\bpandas\s*\.\s*read_pickle\s*\(", flags=re.IGNORECASE)),
+    ("pd_read_pickle", re.compile(r"\bpd\s*\.\s*read_pickle\s*\(", flags=re.IGNORECASE)),
     ("jsonpickle_decode", re.compile(r"\bjsonpickle\s*\.\s*decode\s*\(", flags=re.IGNORECASE)),
 )
 

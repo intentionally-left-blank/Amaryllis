@@ -3,11 +3,15 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
+import hmac
 import inspect
+import json
 import logging
 import os
 import platform
 import random
+import re
 from threading import Lock, Thread
 import time
 from typing import Any, Iterator
@@ -83,6 +87,12 @@ class _ModelDownloadJob:
         }
 
 
+@dataclass
+class _PersonalizationRegistryState:
+    adapters: dict[str, dict[str, Any]]
+    active_by_scope: dict[str, str]
+
+
 def _parse_bool_env(value: Any) -> bool:
     normalized = str(value or "").strip().lower()
     return normalized in {"1", "true", "yes", "on"}
@@ -145,6 +155,9 @@ class ModelManager:
         self._download_lock = Lock()
         self._download_jobs: dict[str, _ModelDownloadJob] = {}
         self._download_job_order: deque[str] = deque(maxlen=800)
+        self._personalization_lock = Lock()
+        self._personalization_registry_setting_key = "personalization_adapter_registry_v1"
+        self._personalization_registry = self._load_personalization_registry()
 
     def list_models(
         self,
@@ -858,6 +871,404 @@ class ModelManager:
             "package_id": self._package_id_from_target(provider_name=provider_name, model_name=model_name),
             "require_metadata": effective_require_metadata,
         }
+
+    def personalization_adapter_contract(self) -> dict[str, Any]:
+        with self._personalization_lock:
+            adapters_total = len(self._personalization_registry.adapters)
+            active_scopes = len(self._personalization_registry.active_by_scope)
+        return {
+            "contract_version": "personalization_adapter_contract_v1",
+            "generated_at": self._utc_now_iso(),
+            "policy": {
+                "signature_algorithm": "hmac-sha256",
+                "signature_key_env": "AMARYLLIS_ADAPTER_SIGNING_KEY",
+                "signature_key_id_env": "AMARYLLIS_ADAPTER_KEY_ID",
+                "require_managed_trust": self.config.security_profile == "production",
+                "max_active_adapters_per_scope": 1,
+                "scope": "user_id + base_package_id",
+                "base_model_immutable": True,
+            },
+            "summary": {
+                "adapters_total": adapters_total,
+                "active_scopes_total": active_scopes,
+            },
+        }
+
+    def list_personalization_adapters(
+        self,
+        *,
+        user_id: str,
+        base_package_id: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_user = str(user_id or "").strip()
+        if not normalized_user:
+            raise ValueError("user_id is required")
+
+        normalized_base = str(base_package_id or "").strip()
+        if normalized_base:
+            provider_name, _ = self._parse_package_id(normalized_base)
+            if provider_name not in self.providers:
+                raise ValueError(f"Unknown provider in base_package_id: {provider_name}")
+
+        with self._personalization_lock:
+            rows: list[dict[str, Any]] = []
+            for adapter in self._personalization_registry.adapters.values():
+                if not isinstance(adapter, dict):
+                    continue
+                if str(adapter.get("user_id") or "").strip() != normalized_user:
+                    continue
+                if normalized_base and str(adapter.get("base_package_id") or "").strip() != normalized_base:
+                    continue
+                rows.append(dict(adapter))
+
+            rows.sort(
+                key=lambda item: (
+                    str(item.get("updated_at") or ""),
+                    str(item.get("created_at") or ""),
+                    str(item.get("adapter_id") or ""),
+                ),
+                reverse=True,
+            )
+
+            active_by_scope: dict[str, str] = {}
+            for scope_key, adapter_id in self._personalization_registry.active_by_scope.items():
+                parsed = self._parse_personalization_scope_key(scope_key)
+                if parsed is None:
+                    continue
+                scope_user_id, scope_base_package_id = parsed
+                if scope_user_id != normalized_user:
+                    continue
+                if normalized_base and scope_base_package_id != normalized_base:
+                    continue
+                active_by_scope[scope_base_package_id] = str(adapter_id)
+
+        return {
+            "registry_version": "personalization_registry_v1",
+            "generated_at": self._utc_now_iso(),
+            "user_id": normalized_user,
+            "base_package_id": normalized_base or None,
+            "count": len(rows),
+            "active_by_base_package": active_by_scope,
+            "items": rows,
+        }
+
+    def register_personalization_adapter(
+        self,
+        *,
+        user_id: str,
+        adapter_id: str,
+        base_package_id: str,
+        artifact_sha256: str,
+        recipe_id: str,
+        signature: dict[str, Any],
+        metadata: dict[str, Any] | None = None,
+        activate: bool = False,
+    ) -> dict[str, Any]:
+        normalized_user = str(user_id or "").strip()
+        if not normalized_user:
+            raise ValueError("user_id is required")
+        normalized_adapter_id = str(adapter_id or "").strip()
+        if not normalized_adapter_id:
+            raise ValueError("adapter_id is required")
+        normalized_base = str(base_package_id or "").strip()
+        provider_name, _ = self._parse_package_id(normalized_base)
+        if provider_name not in self.providers:
+            raise ValueError(f"Unknown provider in base_package_id: {provider_name}")
+        normalized_artifact_sha256 = self._normalize_sha256_hex(artifact_sha256)
+        if normalized_artifact_sha256 is None:
+            raise ValueError("artifact_sha256 must be a 64-char SHA-256 hex string")
+        normalized_recipe_id = str(recipe_id or "").strip()
+        if not normalized_recipe_id:
+            raise ValueError("recipe_id is required")
+        metadata_payload = dict(metadata) if isinstance(metadata, dict) else {}
+
+        signature_error = self._verify_personalization_signature(
+            user_id=normalized_user,
+            adapter_id=normalized_adapter_id,
+            base_package_id=normalized_base,
+            artifact_sha256=normalized_artifact_sha256,
+            recipe_id=normalized_recipe_id,
+            metadata=metadata_payload,
+            signature=signature,
+        )
+        if signature_error is not None:
+            raise ValueError(signature_error)
+
+        with self._personalization_lock:
+            if normalized_adapter_id in self._personalization_registry.adapters:
+                raise ValueError(f"adapter_id already exists: {normalized_adapter_id}")
+
+            now = self._utc_now_iso()
+            record = {
+                "adapter_id": normalized_adapter_id,
+                "user_id": normalized_user,
+                "base_package_id": normalized_base,
+                "artifact_sha256": normalized_artifact_sha256,
+                "recipe_id": normalized_recipe_id,
+                "metadata": metadata_payload,
+                "signature": dict(signature),
+                "status": "registered",
+                "created_at": now,
+                "updated_at": now,
+                "activated_at": None,
+                "previous_adapter_id": None,
+                "rolled_back_at": None,
+                "rollback_of": None,
+            }
+            self._personalization_registry.adapters[normalized_adapter_id] = record
+            previous_adapter_id: str | None = None
+            if bool(activate):
+                previous_adapter_id = self._activate_personalization_adapter_unlocked(
+                    user_id=normalized_user,
+                    adapter_id=normalized_adapter_id,
+                )
+            self._persist_personalization_registry_unlocked()
+            persisted = dict(self._personalization_registry.adapters[normalized_adapter_id])
+
+        return {
+            "registry_version": "personalization_registry_v1",
+            "status": "activated" if bool(activate) else "registered",
+            "adapter": persisted,
+            "previous_active_adapter_id": previous_adapter_id,
+            "generated_at": self._utc_now_iso(),
+        }
+
+    def activate_personalization_adapter(
+        self,
+        *,
+        user_id: str,
+        adapter_id: str,
+    ) -> dict[str, Any]:
+        normalized_user = str(user_id or "").strip()
+        normalized_adapter_id = str(adapter_id or "").strip()
+        if not normalized_user:
+            raise ValueError("user_id is required")
+        if not normalized_adapter_id:
+            raise ValueError("adapter_id is required")
+
+        with self._personalization_lock:
+            previous_adapter_id = self._activate_personalization_adapter_unlocked(
+                user_id=normalized_user,
+                adapter_id=normalized_adapter_id,
+            )
+            self._persist_personalization_registry_unlocked()
+            record = dict(self._personalization_registry.adapters[normalized_adapter_id])
+
+        return {
+            "registry_version": "personalization_registry_v1",
+            "status": "activated",
+            "adapter": record,
+            "previous_active_adapter_id": previous_adapter_id,
+            "generated_at": self._utc_now_iso(),
+        }
+
+    def rollback_personalization_adapter(
+        self,
+        *,
+        user_id: str,
+        base_package_id: str,
+    ) -> dict[str, Any]:
+        normalized_user = str(user_id or "").strip()
+        if not normalized_user:
+            raise ValueError("user_id is required")
+        normalized_base = str(base_package_id or "").strip()
+        provider_name, _ = self._parse_package_id(normalized_base)
+        if provider_name not in self.providers:
+            raise ValueError(f"Unknown provider in base_package_id: {provider_name}")
+
+        with self._personalization_lock:
+            scope_key = self._personalization_scope_key(
+                user_id=normalized_user,
+                base_package_id=normalized_base,
+            )
+            current_active_adapter_id = str(
+                self._personalization_registry.active_by_scope.get(scope_key) or ""
+            ).strip()
+            if not current_active_adapter_id:
+                raise ValueError("No active adapter to rollback for this base_package_id")
+
+            current = self._personalization_registry.adapters.get(current_active_adapter_id)
+            if not isinstance(current, dict):
+                raise ValueError("Active adapter record is missing")
+            if str(current.get("user_id") or "").strip() != normalized_user:
+                raise ValueError("Adapter ownership mismatch")
+
+            previous_adapter_id = str(current.get("previous_adapter_id") or "").strip()
+            if not previous_adapter_id:
+                raise ValueError("No previous adapter available for rollback")
+            previous = self._personalization_registry.adapters.get(previous_adapter_id)
+            if not isinstance(previous, dict):
+                raise ValueError("Previous adapter record is missing")
+            if str(previous.get("user_id") or "").strip() != normalized_user:
+                raise ValueError("Previous adapter ownership mismatch")
+
+            now = self._utc_now_iso()
+            current["status"] = "rolled_back"
+            current["updated_at"] = now
+            current["rolled_back_at"] = now
+            current["rollback_of"] = previous_adapter_id
+
+            previous["status"] = "active"
+            previous["updated_at"] = now
+            previous["activated_at"] = now
+            self._personalization_registry.active_by_scope[scope_key] = previous_adapter_id
+            self._persist_personalization_registry_unlocked()
+
+            rolled_back = dict(current)
+            active = dict(previous)
+
+        return {
+            "registry_version": "personalization_registry_v1",
+            "status": "rolled_back",
+            "user_id": normalized_user,
+            "base_package_id": normalized_base,
+            "rolled_back_adapter": rolled_back,
+            "active_adapter": active,
+            "generated_at": self._utc_now_iso(),
+        }
+
+    def _activate_personalization_adapter_unlocked(
+        self,
+        *,
+        user_id: str,
+        adapter_id: str,
+    ) -> str | None:
+        adapter = self._personalization_registry.adapters.get(adapter_id)
+        if not isinstance(adapter, dict):
+            raise ValueError(f"Unknown adapter_id: {adapter_id}")
+        adapter_user_id = str(adapter.get("user_id") or "").strip()
+        if adapter_user_id != user_id:
+            raise ValueError("Adapter does not belong to the user")
+        base_package_id = str(adapter.get("base_package_id") or "").strip()
+        if not base_package_id:
+            raise ValueError("Adapter is missing base_package_id")
+
+        scope_key = self._personalization_scope_key(
+            user_id=adapter_user_id,
+            base_package_id=base_package_id,
+        )
+        previous_adapter_id = str(self._personalization_registry.active_by_scope.get(scope_key) or "").strip()
+        now = self._utc_now_iso()
+
+        if previous_adapter_id and previous_adapter_id != adapter_id:
+            previous = self._personalization_registry.adapters.get(previous_adapter_id)
+            if isinstance(previous, dict):
+                previous["status"] = "inactive"
+                previous["updated_at"] = now
+
+        adapter["status"] = "active"
+        adapter["updated_at"] = now
+        adapter["activated_at"] = now
+        adapter["rolled_back_at"] = None
+        adapter["rollback_of"] = None
+        if previous_adapter_id and previous_adapter_id != adapter_id:
+            adapter["previous_adapter_id"] = previous_adapter_id
+        self._personalization_registry.active_by_scope[scope_key] = adapter_id
+        return previous_adapter_id if previous_adapter_id and previous_adapter_id != adapter_id else None
+
+    def _load_personalization_registry(self) -> _PersonalizationRegistryState:
+        raw = str(self.database.get_setting(self._personalization_registry_setting_key, "") or "").strip()
+        if not raw:
+            return _PersonalizationRegistryState(adapters={}, active_by_scope={})
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return _PersonalizationRegistryState(adapters={}, active_by_scope={})
+        if not isinstance(payload, dict):
+            return _PersonalizationRegistryState(adapters={}, active_by_scope={})
+
+        adapters_raw = payload.get("adapters")
+        active_raw = payload.get("active_by_scope")
+        adapters: dict[str, dict[str, Any]] = {}
+        active_by_scope: dict[str, str] = {}
+        if isinstance(adapters_raw, dict):
+            for adapter_id, item in adapters_raw.items():
+                if not isinstance(item, dict):
+                    continue
+                normalized_adapter_id = str(adapter_id or "").strip()
+                if not normalized_adapter_id:
+                    continue
+                adapter = dict(item)
+                adapter["adapter_id"] = normalized_adapter_id
+                adapters[normalized_adapter_id] = adapter
+        if isinstance(active_raw, dict):
+            for scope_key, adapter_id in active_raw.items():
+                normalized_scope_key = str(scope_key or "").strip()
+                normalized_adapter_id = str(adapter_id or "").strip()
+                if not normalized_scope_key or not normalized_adapter_id:
+                    continue
+                if normalized_adapter_id not in adapters:
+                    continue
+                active_by_scope[normalized_scope_key] = normalized_adapter_id
+        return _PersonalizationRegistryState(adapters=adapters, active_by_scope=active_by_scope)
+
+    def _persist_personalization_registry_unlocked(self) -> None:
+        payload = {
+            "schema_version": "personalization_registry_v1",
+            "updated_at": self._utc_now_iso(),
+            "adapters": self._personalization_registry.adapters,
+            "active_by_scope": self._personalization_registry.active_by_scope,
+        }
+        self.database.set_setting(
+            self._personalization_registry_setting_key,
+            json.dumps(payload, ensure_ascii=False, sort_keys=True),
+        )
+
+    def _verify_personalization_signature(
+        self,
+        *,
+        user_id: str,
+        adapter_id: str,
+        base_package_id: str,
+        artifact_sha256: str,
+        recipe_id: str,
+        metadata: dict[str, Any],
+        signature: dict[str, Any],
+    ) -> str | None:
+        if not isinstance(signature, dict):
+            return "adapter.signature_missing"
+
+        algorithm = str(signature.get("algorithm") or "").strip().lower()
+        if algorithm != "hmac-sha256":
+            return "adapter.signature.algorithm_invalid"
+        key_id = str(signature.get("key_id") or "").strip()
+        if not key_id:
+            return "adapter.signature.key_id_missing"
+        trust_level = str(signature.get("trust_level") or "").strip().lower()
+        if trust_level not in {"managed", "development"}:
+            return "adapter.signature.trust_level_invalid"
+        if self.config.security_profile == "production" and trust_level != "managed":
+            return "adapter.signature.trust_level_not_managed"
+
+        expected_key_id = str(os.getenv("AMARYLLIS_ADAPTER_KEY_ID", "")).strip()
+        if expected_key_id and key_id != expected_key_id:
+            return "adapter.signature.key_id_mismatch"
+
+        signature_value = self._normalize_sha256_hex(signature.get("value"))
+        if signature_value is None:
+            return "adapter.signature.value_invalid"
+
+        signing_key = str(os.getenv("AMARYLLIS_ADAPTER_SIGNING_KEY", "")).strip()
+        if not signing_key:
+            return "adapter.signature.signing_key_missing"
+
+        unsigned_payload = {
+            "adapter_id": adapter_id,
+            "artifact_sha256": artifact_sha256,
+            "base_package_id": base_package_id,
+            "metadata": metadata,
+            "recipe_id": recipe_id,
+            "user_id": user_id,
+        }
+        canonical = self._canonical_json(unsigned_payload)
+        expected_signature = hmac.new(
+            signing_key.encode("utf-8"),
+            canonical.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(expected_signature, signature_value):
+            return "adapter.signature.mismatch"
+        return None
 
     def choose_route(
         self,
@@ -2441,6 +2852,37 @@ class ModelManager:
         if not provider_name or not model_name:
             raise ValueError("package_id must include both provider and model")
         return provider_name, model_name
+
+    @staticmethod
+    def _normalize_sha256_hex(value: Any) -> str | None:
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            return None
+        if re.fullmatch(r"[0-9a-f]{64}", normalized) is None:
+            return None
+        return normalized
+
+    @staticmethod
+    def _canonical_json(payload: dict[str, Any]) -> str:
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    @staticmethod
+    def _personalization_scope_key(*, user_id: str, base_package_id: str) -> str:
+        return f"{str(user_id).strip()}||{str(base_package_id).strip()}"
+
+    @staticmethod
+    def _parse_personalization_scope_key(scope_key: str) -> tuple[str, str] | None:
+        normalized = str(scope_key or "").strip()
+        if not normalized:
+            return None
+        parts = normalized.split("||", 1)
+        if len(parts) != 2:
+            return None
+        user_id = str(parts[0] or "").strip()
+        base_package_id = str(parts[1] or "").strip()
+        if not user_id or not base_package_id:
+            return None
+        return user_id, base_package_id
 
     @staticmethod
     def _estimated_download_size_bytes(candidate: ModelCandidate) -> int | None:

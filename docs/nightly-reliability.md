@@ -111,6 +111,22 @@ python3 scripts/release/generation_loop_conformance_gate.py \
   --output artifacts/nightly-generation-loop-conformance-gate-report.json
 ```
 
+Nightly provenance coverage gate:
+
+```bash
+python3 scripts/release/provenance_coverage_gate.py \
+  --min-grounded-sources 1 \
+  --output artifacts/nightly-provenance-coverage-gate-report.json
+```
+
+Nightly personalization adapter gate:
+
+```bash
+python3 scripts/release/personalization_adapter_gate.py \
+  --min-registered-adapters 2 \
+  --output artifacts/nightly-personalization-adapter-gate-report.json
+```
+
 Nightly KV pressure policy gate:
 
 ```bash
@@ -268,6 +284,18 @@ Nightly generation-loop conformance gate artifact:
 
 ```text
 artifacts/nightly-generation-loop-conformance-gate-report.json
+```
+
+Nightly provenance coverage gate artifact:
+
+```text
+artifacts/nightly-provenance-coverage-gate-report.json
+```
+
+Nightly personalization adapter gate artifact:
+
+```text
+artifacts/nightly-personalization-adapter-gate-report.json
 ```
 
 Nightly KV pressure policy gate artifact:

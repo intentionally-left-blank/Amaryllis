@@ -3,7 +3,7 @@
 `scripts/release/injection_containment_gate.py` runs deterministic regression scenarios for:
 - embedded tool-call prompt injection in RAG context,
 - multi-payload tool-call responses,
-- unsafe deserialization payloads in tool arguments.
+- unsafe deserialization payloads in tool arguments (`pickle`, `cloudpickle`, `pandas.read_pickle`, YAML python tags).
 
 The gate produces `injection_containment_gate_v1` report JSON and blocks when:
 - containment score for attack scenarios is below threshold,
@@ -16,6 +16,11 @@ The gate produces `injection_containment_gate_v1` report JSON and blocks when:
 python scripts/release/injection_containment_gate.py \
   --min-containment-score-pct 100 \
   --max-failed-scenarios 0 \
+  --require-scenario rag_embedded_tool_call_is_ignored \
+  --require-scenario pickle_deserialization_blocked \
+  --require-scenario cloudpickle_deserialization_blocked \
+  --require-scenario pandas_read_pickle_blocked \
+  --require-scenario yaml_python_tag_blocked \
   --output artifacts/injection-containment-report.json
 ```
 

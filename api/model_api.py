@@ -155,6 +155,13 @@ def _sign_action(
         return {}
 
 
+def _effective_user_id(*, request_user_id: str | None, auth_user_id: str | None) -> str:
+    resolved = str(request_user_id or "").strip() or str(auth_user_id or "").strip()
+    if not resolved:
+        raise ValidationError("user_id is required")
+    return resolved
+
+
 class DownloadModelRequest(BaseModel):
     model_id: str = Field(min_length=1)
     provider: str | None = None
@@ -197,6 +204,34 @@ class OnboardingActivateRequest(BaseModel):
     activate: bool = True
     run_smoke_test: bool = True
     smoke_prompt: str | None = Field(default=None, max_length=2000)
+
+
+class PersonalizationAdapterSignature(BaseModel):
+    algorithm: str = Field(min_length=1)
+    key_id: str = Field(min_length=1)
+    value: str = Field(min_length=1)
+    trust_level: str = Field(default="managed", min_length=1)
+
+
+class RegisterPersonalizationAdapterRequest(BaseModel):
+    user_id: str | None = None
+    adapter_id: str = Field(min_length=1, max_length=160)
+    base_package_id: str = Field(min_length=1)
+    artifact_sha256: str = Field(min_length=64, max_length=64)
+    recipe_id: str = Field(min_length=1, max_length=200)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    signature: PersonalizationAdapterSignature
+    activate: bool = False
+
+
+class ActivatePersonalizationAdapterRequest(BaseModel):
+    user_id: str | None = None
+    adapter_id: str = Field(min_length=1, max_length=160)
+
+
+class RollbackPersonalizationAdapterRequest(BaseModel):
+    user_id: str | None = None
+    base_package_id: str = Field(min_length=1)
 
 
 class ModelFailoverDebugResponse(BaseModel):
@@ -477,6 +512,208 @@ def install_model_package(payload: InstallModelPackageRequest, request: Request)
             payload=payload.model_dump(),
             actor=auth.user_id,
             target_id=payload.package_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
+        raise ProviderError(str(exc)) from exc
+
+
+@router.get("/models/personalization/contract")
+def personalization_adapter_contract(request: Request) -> dict[str, Any]:
+    services = request.app.state.services
+    payload = services.model_manager.personalization_adapter_contract()
+    payload["request_id"] = _request_id(request)
+    return payload
+
+
+@router.get("/models/personalization/adapters")
+def list_personalization_adapters(
+    request: Request,
+    user_id: str | None = None,
+    base_package_id: str | None = None,
+) -> dict[str, Any]:
+    services = request.app.state.services
+    auth = auth_context_from_request(request)
+    try:
+        resolved_user_id = _effective_user_id(
+            request_user_id=user_id,
+            auth_user_id=auth.user_id,
+        )
+        payload = services.model_manager.list_personalization_adapters(
+            user_id=resolved_user_id,
+            base_package_id=base_package_id,
+        )
+        payload["request_id"] = _request_id(request)
+        return payload
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
+    except Exception as exc:
+        raise ProviderError(str(exc)) from exc
+
+
+@router.post("/models/personalization/adapters/register")
+def register_personalization_adapter(
+    payload: RegisterPersonalizationAdapterRequest,
+    request: Request,
+) -> dict[str, Any]:
+    services = request.app.state.services
+    auth = auth_context_from_request(request)
+    try:
+        resolved_user_id = _effective_user_id(
+            request_user_id=payload.user_id,
+            auth_user_id=auth.user_id,
+        )
+        result = services.model_manager.register_personalization_adapter(
+            user_id=resolved_user_id,
+            adapter_id=payload.adapter_id,
+            base_package_id=payload.base_package_id,
+            artifact_sha256=payload.artifact_sha256,
+            recipe_id=payload.recipe_id,
+            metadata=payload.metadata,
+            signature=payload.signature.model_dump(),
+            activate=bool(payload.activate),
+        )
+        result["action_receipt"] = _sign_action(
+            request,
+            action="model_personalization_adapter_register",
+            payload=payload.model_dump(),
+            actor=auth.user_id,
+            target_id=payload.adapter_id,
+            status="succeeded",
+            details={
+                "user_id": resolved_user_id,
+                "base_package_id": payload.base_package_id,
+                "status": str(result.get("status", "")),
+            },
+        )
+        result["request_id"] = _request_id(request)
+        return result
+    except ValueError as exc:
+        _sign_action(
+            request,
+            action="model_personalization_adapter_register",
+            payload=payload.model_dump(),
+            actor=auth.user_id,
+            target_id=payload.adapter_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
+        raise ValidationError(str(exc)) from exc
+    except Exception as exc:
+        _sign_action(
+            request,
+            action="model_personalization_adapter_register",
+            payload=payload.model_dump(),
+            actor=auth.user_id,
+            target_id=payload.adapter_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
+        raise ProviderError(str(exc)) from exc
+
+
+@router.post("/models/personalization/adapters/activate")
+def activate_personalization_adapter(
+    payload: ActivatePersonalizationAdapterRequest,
+    request: Request,
+) -> dict[str, Any]:
+    services = request.app.state.services
+    auth = auth_context_from_request(request)
+    try:
+        resolved_user_id = _effective_user_id(
+            request_user_id=payload.user_id,
+            auth_user_id=auth.user_id,
+        )
+        result = services.model_manager.activate_personalization_adapter(
+            user_id=resolved_user_id,
+            adapter_id=payload.adapter_id,
+        )
+        result["action_receipt"] = _sign_action(
+            request,
+            action="model_personalization_adapter_activate",
+            payload=payload.model_dump(),
+            actor=auth.user_id,
+            target_id=payload.adapter_id,
+            status="succeeded",
+            details={
+                "user_id": resolved_user_id,
+                "status": str(result.get("status", "")),
+            },
+        )
+        result["request_id"] = _request_id(request)
+        return result
+    except ValueError as exc:
+        _sign_action(
+            request,
+            action="model_personalization_adapter_activate",
+            payload=payload.model_dump(),
+            actor=auth.user_id,
+            target_id=payload.adapter_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
+        raise ValidationError(str(exc)) from exc
+    except Exception as exc:
+        _sign_action(
+            request,
+            action="model_personalization_adapter_activate",
+            payload=payload.model_dump(),
+            actor=auth.user_id,
+            target_id=payload.adapter_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
+        raise ProviderError(str(exc)) from exc
+
+
+@router.post("/models/personalization/adapters/rollback")
+def rollback_personalization_adapter(
+    payload: RollbackPersonalizationAdapterRequest,
+    request: Request,
+) -> dict[str, Any]:
+    services = request.app.state.services
+    auth = auth_context_from_request(request)
+    try:
+        resolved_user_id = _effective_user_id(
+            request_user_id=payload.user_id,
+            auth_user_id=auth.user_id,
+        )
+        result = services.model_manager.rollback_personalization_adapter(
+            user_id=resolved_user_id,
+            base_package_id=payload.base_package_id,
+        )
+        result["action_receipt"] = _sign_action(
+            request,
+            action="model_personalization_adapter_rollback",
+            payload=payload.model_dump(),
+            actor=auth.user_id,
+            target_id=payload.base_package_id,
+            status="succeeded",
+            details={
+                "user_id": resolved_user_id,
+                "active_adapter_id": str((result.get("active_adapter") or {}).get("adapter_id") or ""),
+            },
+        )
+        result["request_id"] = _request_id(request)
+        return result
+    except ValueError as exc:
+        _sign_action(
+            request,
+            action="model_personalization_adapter_rollback",
+            payload=payload.model_dump(),
+            actor=auth.user_id,
+            target_id=payload.base_package_id,
+            status="failed",
+            details={"error": str(exc)},
+        )
+        raise ValidationError(str(exc)) from exc
+    except Exception as exc:
+        _sign_action(
+            request,
+            action="model_personalization_adapter_rollback",
+            payload=payload.model_dump(),
+            actor=auth.user_id,
+            target_id=payload.base_package_id,
             status="failed",
             details={"error": str(exc)},
         )

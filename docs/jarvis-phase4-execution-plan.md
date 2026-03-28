@@ -74,6 +74,47 @@ Evidence:
 - QoS mode envelope benchmark validates user-journey KPI thresholds per mode with contract checks on `active_mode/route_mode/auto_enabled`;
 - gate tests (`tests/test_qos_governor_gate.py`, `tests/test_qos_mode_envelope_gate.py`) validate pass/fail behavior and report contracts.
 
+`WP-05` (`P4-F01`) is closed as implemented and release/nightly-gated.
+
+Evidence:
+- chat responses expose provenance payload contract by default (`provenance_v1`) for non-stream and stream responses;
+- grounded-response source trace coverage is enforced with explicit source-field checks;
+- release/nightly workflows run blocking `provenance_coverage_gate.py` with machine-readable reports;
+- gate and runtime tests (`tests/test_provenance_coverage_gate.py`, `tests/test_cognition_backend_runtime.py`) validate grounded provenance behavior and telemetry fields.
+
+`WP-06` (`P4-F02` + `P4-F03`) is closed as implemented and release/nightly-gated.
+
+Evidence:
+- tool isolation policy enforces expanded unsafe-deserialization denylist coverage (`pickle`, `cloudpickle`, `pandas.read_pickle`, YAML unsafe loaders/tags) with deterministic policy-deny reasons;
+- injection containment suite includes RAG payload injection and unsafe-deserialization attack scenarios with explicit required-scenario enforcement;
+- release/nightly workflows run blocking `injection_containment_gate.py` with required scenarios and machine-readable reports;
+- policy and gate tests (`tests/test_tool_isolation_policy.py`, `tests/test_injection_containment_gate.py`) validate pass/fail behavior and contract semantics.
+
+`WP-08` (`P4-G01`) is closed as implemented and release/nightly-gated.
+
+Evidence:
+- `environment_passport_gate.py` builds runtime environment passport artifacts (host/runtime/toolchain/dependency lock/quantization/drivers) and enforces completeness thresholds;
+- release/nightly workflows run blocking environment passport checks and publish machine-readable passport reports;
+- quality dashboard snapshot ingests environment passport signals (`completeness_score_pct`, missing-required-fields);
+- gate tests (`tests/test_environment_passport_gate.py`) validate pass/fail behavior and quantization-reference integration.
+
+`WP-09` (`P4-G02`) is closed as implemented and release/nightly-gated.
+
+Evidence:
+- license admission policy engine is enforced for model package onboarding and dedicated license-admission API/manager path;
+- release/nightly workflows run blocking `license_admission_gate.py` with required scenarios for allow/deny/non-commercial cases;
+- quality dashboard snapshot ingests license admission signals (`admission_score_pct`, failed_scenarios);
+- gate tests (`tests/test_license_admission_gate.py`, `tests/test_model_artifact_admission_gate.py`) validate policy regression behavior.
+
+`WP-10` (`P4-G03`) is closed as implemented and release/nightly-gated.
+
+Evidence:
+- personalization adapter runtime contract is implemented via `/models/personalization/*` API endpoints for register/list/activate/rollback flows;
+- adapter admission requires signed manifests (`hmac-sha256`) with managed trust enforcement under production security profile;
+- adapter stack activation is scope-bounded (`user_id + base_package_id`) with deterministic rollback to previous active adapter;
+- release/nightly workflows run blocking `personalization_adapter_gate.py` with machine-readable reports;
+- API/gate tests (`tests/test_model_personalization_api.py`, `tests/test_personalization_adapter_gate.py`) validate reversible stack behavior and signature rejection paths.
+
 `WP-16` (`P4-H08`) is closed as implemented and release/nightly-gated.
 
 Evidence:
@@ -279,6 +320,13 @@ Adoption lane slices (next 10 working days after PR-1..PR-8):
 | desktop action rollback gate | `scripts/release/desktop_action_rollback_gate.py` | blocking |
 | supervisor mission gate | `scripts/release/supervisor_mission_gate.py` | blocking |
 | generation-loop conformance gate | `scripts/release/generation_loop_conformance_gate.py` | blocking |
+| provenance coverage gate | `scripts/release/provenance_coverage_gate.py` | blocking |
+| injection containment gate | `scripts/release/injection_containment_gate.py` | blocking |
+| personalization adapter gate | `scripts/release/personalization_adapter_gate.py` | blocking |
+| offline transparency gate | `scripts/release/offline_transparency_gate.py` | blocking |
+| model artifact admission gate | `scripts/release/model_artifact_admission_gate.py` | blocking |
+| license admission gate | `scripts/release/license_admission_gate.py` | blocking |
+| environment passport completeness gate | `scripts/release/environment_passport_gate.py` | blocking |
 | KV pressure policy gate | `scripts/release/kv_pressure_policy_gate.py` | blocking |
 | adoption KPI schema gate | `scripts/release/adoption_kpi_schema_gate.py` | blocking |
 | adoption KPI snapshot build/publish | `scripts/release/build_adoption_kpi_snapshot.py` + `scripts/release/publish_adoption_kpi_snapshot.py` | blocking |
@@ -286,12 +334,7 @@ Adoption lane slices (next 10 working days after PR-1..PR-8):
 | mission report pack gate | `scripts/release/mission_report_pack_gate.py` | blocking |
 
 Additional Phase 4 gates to add in this plan:
-- provenance coverage gate
-- injection containment regression gate
-- model package + quant passport admission gate
-- environment passport completeness gate
-- license admission gate
-- offline transparency/network intent gate
+- none from the original list; all listed gates are now promoted to blocking in release/nightly pipelines.
 
 ## Ownership Boundaries
 

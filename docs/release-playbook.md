@@ -32,15 +32,16 @@ Mandatory gates before publish:
 26. Desktop action rollback gate (Linux desktop action + rollback hint + terminal receipt contract)
 27. Supervisor mission gate (bounded task-graph + checkpoint/resume + objective verification contract)
 28. Generation-loop conformance gate (backend portability matrix + contract identity assertions)
-29. KV pressure policy gate (generation-loop KV telemetry contract + pressure-driven QoS transition assertions)
-30. Adoption KPI schema gate (install/activation/retention/feature-adoption contract assertions)
-31. Adoption KPI snapshot build gate (publishable adoption artifact + summary score)
-32. Adoption KPI trend regression gate (baseline-relative regression budget enforcement)
-33. Release quality dashboard snapshot gate (final post-Linux benchmark/reliability artifact + trend deltas)
-34. Mission success/recovery report pack gate (v2 schema + class/KPI completeness contract)
-35. Mission success/recovery report pack export (public KPI artifact)
-36. Disaster recovery gate (backup + verify + restore drill)
-37. Compliance operations gate (access review + incidents + evidence export)
+29. Provenance coverage gate (grounded-response source-trace coverage + stream/telemetry provenance contract assertions)
+30. KV pressure policy gate (generation-loop KV telemetry contract + pressure-driven QoS transition assertions)
+31. Adoption KPI schema gate (install/activation/retention/feature-adoption contract assertions)
+32. Adoption KPI snapshot build gate (publishable adoption artifact + summary score)
+33. Adoption KPI trend regression gate (baseline-relative regression budget enforcement)
+34. Release quality dashboard snapshot gate (final post-Linux benchmark/reliability artifact + trend deltas)
+35. Mission success/recovery report pack gate (v2 schema + class/KPI completeness contract)
+36. Mission success/recovery report pack export (public KPI artifact)
+37. Disaster recovery gate (backup + verify + restore drill)
+38. Compliance operations gate (access review + incidents + evidence export)
 
 Staging companion (non-blocking):
 - macOS desktop action parity smoke (`scripts/release/macos_desktop_parity_smoke.py`)
@@ -78,6 +79,12 @@ Supervisor mission gate reference:
 Generation-loop conformance gate reference:
 - `docs/generation-loop-conformance-gate.md`
 
+Provenance coverage gate reference:
+- `docs/provenance-coverage-gate.md`
+
+Personalization adapter gate reference:
+- `docs/personalization-adapter-gate.md`
+
 KV pressure policy gate reference:
 - `docs/kv-pressure-policy-gate.md`
 
@@ -99,7 +106,16 @@ python scripts/release/canary_smoke.py
 python scripts/release/perf_smoke_gate.py --iterations 3 --max-p95-latency-ms 350 --max-error-rate-pct 0 --output artifacts/perf-smoke-report.json
 python scripts/release/runtime_lifecycle_smoke_gate.py --max-startup-slo-latency-ms 3000 --output artifacts/runtime-lifecycle-smoke-report.json
 python scripts/release/fault_injection_reliability_gate.py --retry-max-attempts 2 --scenario-timeout-sec 8 --min-pass-rate-pct 100
-python scripts/release/injection_containment_gate.py --min-containment-score-pct 100 --max-failed-scenarios 0 --output artifacts/injection-containment-report.json
+python scripts/release/injection_containment_gate.py \
+  --min-containment-score-pct 100 \
+  --max-failed-scenarios 0 \
+  --require-scenario rag_embedded_tool_call_is_ignored \
+  --require-scenario pickle_deserialization_blocked \
+  --require-scenario cloudpickle_deserialization_blocked \
+  --require-scenario pandas_read_pickle_blocked \
+  --require-scenario yaml_python_tag_blocked \
+  --output artifacts/injection-containment-report.json
+python scripts/release/personalization_adapter_gate.py --min-registered-adapters 2 --output artifacts/personalization-adapter-gate-report.json
 python scripts/release/model_artifact_admission_gate.py --min-admission-score-pct 100 --max-failed-scenarios 0 --require-scenario valid_manifest_admitted --require-scenario missing_quant_recipe_rejected --require-scenario denied_license_rejected --output artifacts/model-artifact-admission-report.json
 python scripts/release/license_admission_gate.py --min-admission-score-pct 100 --max-failed-scenarios 0 --require-scenario allowed_license_admitted --require-scenario denied_spdx_rejected --require-scenario noncommercial_rejected --output artifacts/license-admission-report.json
 python scripts/release/environment_passport_gate.py --model-artifact-admission-report artifacts/model-artifact-admission-report.json --min-completeness-score-pct 100 --max-missing-required 0 --output artifacts/environment-passport-report.json
@@ -123,6 +139,7 @@ python scripts/release/action_explainability_gate.py --output artifacts/action-e
 python scripts/release/desktop_action_rollback_gate.py --output artifacts/desktop-action-rollback-gate-report.json
 python scripts/release/supervisor_mission_gate.py --output artifacts/supervisor-mission-gate-report.json
 python scripts/release/generation_loop_conformance_gate.py --min-providers 1 --max-warning-providers 2 --output artifacts/generation-loop-conformance-gate-report.json
+python scripts/release/provenance_coverage_gate.py --min-grounded-sources 1 --output artifacts/provenance-coverage-gate-report.json
 python scripts/release/kv_pressure_policy_gate.py --min-pressure-events 1 --min-critical-events 1 --output artifacts/kv-pressure-policy-gate-report.json
 python scripts/release/build_quality_dashboard_snapshot.py --perf-report artifacts/perf-smoke-report.json --fault-injection-report artifacts/fault-injection-reliability-report.json --injection-containment-report artifacts/injection-containment-report.json --model-artifact-admission-report artifacts/model-artifact-admission-report.json --license-admission-report artifacts/license-admission-report.json --environment-passport-report artifacts/environment-passport-report.json --mission-queue-report artifacts/mission-queue-load-report.json --runtime-lifecycle-report artifacts/runtime-lifecycle-smoke-report.json --user-journey-report artifacts/user-journey-benchmark-report.json --qos-governor-report artifacts/qos-governor-gate-report.json --long-context-report artifacts/long-context-reliability-report.json --distribution-resilience-report artifacts/distribution-resilience-report.json --distribution-channel-manifest-report artifacts/distribution-channel-manifest-report.json --api-quickstart-report artifacts/api-quickstart-compat-report.json --macos-desktop-parity-report artifacts/macos-desktop-parity-smoke-report.json --baseline eval/baselines/quality/release_quality_dashboard_baseline.json --output artifacts/release-quality-dashboard-final.json --trend-output artifacts/release-quality-dashboard-trend-final.json
 python scripts/release/adoption_kpi_schema_gate.py --user-journey-report artifacts/user-journey-benchmark-report.json --api-quickstart-report artifacts/api-quickstart-compat-report.json --distribution-channel-manifest-report artifacts/distribution-channel-manifest-report.json --quality-dashboard-report artifacts/release-quality-dashboard-final.json --output artifacts/adoption-kpi-schema-gate-report.json

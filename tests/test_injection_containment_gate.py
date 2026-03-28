@@ -33,6 +33,11 @@ class InjectionContainmentGateTests(unittest.TestCase):
         self.assertIn("[injection-containment] FAILED", proc.stdout)
         self.assertIn("missing_required_scenarios:missing-scenario", proc.stdout)
 
+    def test_injection_containment_gate_accepts_required_scenario_when_present(self) -> None:
+        proc = self._run("--require-scenario", "cloudpickle_deserialization_blocked")
+        self.assertEqual(proc.returncode, 0, msg=f"stdout={proc.stdout}\nstderr={proc.stderr}")
+        self.assertIn("[injection-containment] OK", proc.stdout)
+
     def test_injection_containment_gate_writes_report(self) -> None:
         with tempfile.TemporaryDirectory(prefix="amaryllis-injection-gate-test-") as tmp:
             output = Path(tmp) / "report.json"

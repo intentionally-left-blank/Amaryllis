@@ -113,6 +113,7 @@ jobs:
             tests.test_tool_call_parsing_security \
             tests.test_tool_sandbox \
             tests.test_injection_containment_gate \
+            tests.test_personalization_adapter_gate \
             tests.test_model_artifact_admission \
             tests.test_model_artifact_admission_api \
             tests.test_model_artifact_admission_gate \
@@ -125,6 +126,7 @@ jobs:
             tests.test_model_onboarding_profile_api \
             tests.test_model_package_catalog \
             tests.test_model_package_catalog_api \
+            tests.test_model_personalization_api \
             tests.test_first_run_activation_gate \
             tests.test_localization_governance_gate \
             tests.test_flow_interaction_gate \
@@ -154,6 +156,7 @@ jobs:
             tests.test_qos_governor \
             tests.test_qos_governor_gate \
             tests.test_qos_mode_envelope_gate \
+            tests.test_provenance_coverage_gate \
             tests.test_kv_pressure_policy_gate \
             tests.test_generation_loop_conformance_gate \
             tests.test_long_context_reliability_gate \
@@ -263,6 +266,19 @@ jobs:
           path: artifacts/generation-loop-conformance-gate-report.json
           if-no-files-found: error
 
+      - name: Run provenance coverage gate (blocking)
+        run: |
+          python scripts/release/provenance_coverage_gate.py \
+            --min-grounded-sources "${AMARYLLIS_PROVENANCE_GATE_MIN_GROUNDED_SOURCES:-1}" \
+            --output "artifacts/provenance-coverage-gate-report.json"
+
+      - name: Upload provenance coverage gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: provenance-coverage-gate-report
+          path: artifacts/provenance-coverage-gate-report.json
+          if-no-files-found: error
+
       - name: Run KV pressure policy gate (blocking)
         run: |
           python scripts/release/kv_pressure_policy_gate.py \
@@ -362,6 +378,11 @@ jobs:
           python scripts/release/injection_containment_gate.py \
             --min-containment-score-pct "${AMARYLLIS_INJECTION_MIN_CONTAINMENT_PCT:-100}" \
             --max-failed-scenarios "${AMARYLLIS_INJECTION_MAX_FAILED_SCENARIOS:-0}" \
+            --require-scenario "rag_embedded_tool_call_is_ignored" \
+            --require-scenario "pickle_deserialization_blocked" \
+            --require-scenario "cloudpickle_deserialization_blocked" \
+            --require-scenario "pandas_read_pickle_blocked" \
+            --require-scenario "yaml_python_tag_blocked" \
             --output "artifacts/injection-containment-report.json"
 
       - name: Upload injection containment report
@@ -369,6 +390,19 @@ jobs:
         with:
           name: injection-containment-report
           path: artifacts/injection-containment-report.json
+          if-no-files-found: error
+
+      - name: Run personalization adapter gate (blocking)
+        run: |
+          python scripts/release/personalization_adapter_gate.py \
+            --min-registered-adapters "${AMARYLLIS_PERSONALIZATION_GATE_MIN_REGISTERED:-2}" \
+            --output "artifacts/personalization-adapter-gate-report.json"
+
+      - name: Upload personalization adapter gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: personalization-adapter-gate-report
+          path: artifacts/personalization-adapter-gate-report.json
           if-no-files-found: error
 
       - name: Run offline transparency gate (blocking)

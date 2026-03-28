@@ -71,18 +71,18 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
-| P4-F01 | in_progress | Make provenance mandatory for RAG-grounded answers | provenance contract + UI/API exposure | Responses using external context include verifiable source trace by default |
-| P4-F02 | in_progress | Enforce zero-trust tool execution and unsafe-deserialization bans | hardened executor + security policy tests | Tool chain blocks known unsafe deserialization patterns and enforces sandbox permissions |
-| P4-F03 | in_progress | Build injection-resilience regression suite for RAG and agent flows | attack scenarios + CI gate | Release/nightly publish containment score and block severe regressions |
+| P4-F01 | done | Make provenance mandatory for RAG-grounded answers | provenance contract + UI/API exposure | Responses using external context include verifiable source trace by default |
+| P4-F02 | done | Enforce zero-trust tool execution and unsafe-deserialization bans | hardened executor + security policy tests | Tool chain blocks known unsafe deserialization patterns and enforces sandbox permissions |
+| P4-F03 | done | Build injection-resilience regression suite for RAG and agent flows | attack scenarios + CI gate | Release/nightly publish containment score and block severe regressions |
 | P4-F04 | done | Introduce secure model package + quantization passport | signed artifact spec + validator tooling | Model artifacts fail admission without signatures, hashes, and quant recipe metadata |
 
 ### Epic G - Reproducibility, Licensing, and Personalization Discipline
 
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
-| P4-G01 | in_progress | Add runtime environment passport generation (hardware, drivers, runtime, quant recipe) | env passport artifact + collector | Every benchmark and release bundle contains environment passport metadata |
-| P4-G02 | in_progress | Add license admission policy for models/adapters/index packs | license policy engine + report | Artifact onboarding is blocked on incompatible licensing constraints |
-| P4-G03 | todo | Add adapter-based personalization lane with rollback and signature checks | personalization workflow + adapter registry | Personalization uses reversible adapter stacks; base weights remain immutable in default path |
+| P4-G01 | done | Add runtime environment passport generation (hardware, drivers, runtime, quant recipe) | env passport artifact + collector | Every benchmark and release bundle contains environment passport metadata |
+| P4-G02 | done | Add license admission policy for models/adapters/index packs | license policy engine + report | Artifact onboarding is blocked on incompatible licensing constraints |
+| P4-G03 | done | Add adapter-based personalization lane with rollback and signature checks | personalization workflow + adapter registry | Personalization uses reversible adapter stacks; base weights remain immutable in default path |
 
 ### Epic H - Mass Adoption, Distribution, and Ecosystem
 
@@ -122,12 +122,12 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 | P4-E02 | done | KV telemetry schema + initial pressure-policy transitions |
 | P4-E03 | done | QoS governor baseline with `balanced` and `power-save` modes |
 | P4-E04 | done | long-context reliability eval dataset + release/nightly blocking gate |
-| P4-F01 | in_progress | provenance contract for RAG responses + API payload wiring |
-| P4-F02 | in_progress | unsafe-deserialization denylist checks + sandbox policy tests |
-| P4-F03 | in_progress | injection-containment regression gate + release/nightly artifact wiring |
+| P4-F01 | done | provenance contract for RAG responses + API payload wiring |
+| P4-F02 | done | unsafe-deserialization denylist checks + sandbox policy tests |
+| P4-F03 | done | injection-containment regression gate + release/nightly artifact wiring |
 | P4-F04 | done | signed model artifact and quant-passport validator MVP + admission gate wiring |
-| P4-G01 | in_progress | environment passport collector in release/nightly artifacts |
-| P4-G02 | in_progress | license admission checker for model/adapters onboarding |
+| P4-G01 | done | environment passport collector in release/nightly artifacts |
+| P4-G02 | done | license admission checker for model/adapters onboarding |
 
 ## Planned Sprint (P4-S2, Mass Adoption Foundation)
 

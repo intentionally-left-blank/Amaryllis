@@ -127,7 +127,18 @@ jobs:
           python scripts/release/injection_containment_gate.py \
             --min-containment-score-pct "${AMARYLLIS_NIGHTLY_INJECTION_MIN_CONTAINMENT_PCT:-100}" \
             --max-failed-scenarios "${AMARYLLIS_NIGHTLY_INJECTION_MAX_FAILED_SCENARIOS:-0}" \
+            --require-scenario "rag_embedded_tool_call_is_ignored" \
+            --require-scenario "pickle_deserialization_blocked" \
+            --require-scenario "cloudpickle_deserialization_blocked" \
+            --require-scenario "pandas_read_pickle_blocked" \
+            --require-scenario "yaml_python_tag_blocked" \
             --output "artifacts/nightly-injection-containment-report.json"
+
+      - name: Run nightly personalization adapter gate (blocking)
+        run: |
+          python scripts/release/personalization_adapter_gate.py \
+            --min-registered-adapters "${AMARYLLIS_NIGHTLY_PERSONALIZATION_GATE_MIN_REGISTERED:-2}" \
+            --output "artifacts/nightly-personalization-adapter-gate-report.json"
 
       - name: Run nightly offline transparency gate (blocking)
         run: |
@@ -239,6 +250,12 @@ jobs:
             --min-providers "${AMARYLLIS_NIGHTLY_GENLOOP_MIN_PROVIDERS:-1}" \
             --max-warning-providers "${AMARYLLIS_NIGHTLY_GENLOOP_MAX_WARNING_PROVIDERS:-1000000}" \
             --output "artifacts/nightly-generation-loop-conformance-gate-report.json"
+
+      - name: Run nightly provenance coverage gate (blocking)
+        run: |
+          python scripts/release/provenance_coverage_gate.py \
+            --min-grounded-sources "${AMARYLLIS_NIGHTLY_PROVENANCE_GATE_MIN_GROUNDED_SOURCES:-1}" \
+            --output "artifacts/nightly-provenance-coverage-gate-report.json"
 
       - name: Run nightly KV pressure policy gate (blocking)
         run: |
@@ -390,6 +407,14 @@ jobs:
           path: artifacts/nightly-injection-containment-report.json
           if-no-files-found: error
 
+      - name: Upload nightly personalization adapter gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-personalization-adapter-gate-report
+          path: artifacts/nightly-personalization-adapter-gate-report.json
+          if-no-files-found: error
+
       - name: Upload nightly offline transparency report
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -510,6 +535,14 @@ jobs:
         with:
           name: nightly-generation-loop-conformance-gate-report
           path: artifacts/nightly-generation-loop-conformance-gate-report.json
+          if-no-files-found: error
+
+      - name: Upload nightly provenance coverage gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-provenance-coverage-gate-report
+          path: artifacts/nightly-provenance-coverage-gate-report.json
           if-no-files-found: error
 
       - name: Upload nightly KV pressure policy gate report
