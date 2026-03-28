@@ -26,8 +26,8 @@ strict global autonomy controls, stronger service-operability contracts, and blo
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
 | P5-A01 | done | Add global autonomy circuit breaker for run creation | runtime state module + service API + run-manager enforcement | Execute-mode run creation is blocked while breaker is armed; plan-mode stays available |
-| P5-A02 | todo | Add scoped breaker policies (`global`, `user`, `agent`) | scope-aware breaker contract | Service operator can isolate blast radius without full global freeze |
-| P5-A03 | todo | Add breaker persistence/recovery policy | persisted breaker state + startup restore policy | Runtime restarts do not silently lose emergency state |
+| P5-A02 | done | Add scoped breaker policies (`global`, `user`, `agent`) | scope-aware breaker contract | Service operator can isolate blast radius without full global freeze |
+| P5-A03 | done | Add breaker persistence/recovery policy | persisted breaker state + startup restore policy | Runtime restarts do not silently lose emergency state |
 
 ### Epic B - Incident Runbook and Operability
 
@@ -42,10 +42,12 @@ strict global autonomy controls, stronger service-operability contracts, and blo
 | ID | Status | Scope |
 |---|---|---|
 | P5-A01 | done | global autonomy circuit breaker state + `/service/runs/autonomy-circuit-breaker` API + run creation enforcement |
+| P5-A02 | done | scoped autonomy breaker (`global/user/agent`) + targeted run-create blocking + scope-aware optional kill-switch |
+| P5-A03 | done | persisted breaker state file + startup restore + fail-safe recovery policy |
 | P5-B01 | done | breaker release/nightly gate wiring + docs/runbook alignment |
 
 ## Next Checkpoint
 
-- Complete CI artifact publication for breaker gate in release and nightly workflows.
-- Validate service scope and signed-action audit coverage in security suite.
-- Move to `P5-A02` scoped breaker policy design after 3 stable nightlies.
+- Move to `P5-B02` (incident audit timeline for arm/disarm transitions).
+- Add query tooling/report contract for breaker transition events.
+- Define `P5-B03` deterministic recovery guidance payload + runbook automation hooks.

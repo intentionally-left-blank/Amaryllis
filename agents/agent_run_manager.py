@@ -36,10 +36,15 @@ class TelemetrySink(Protocol):
 
 
 class AutonomyCircuitBreakerContract(Protocol):
-    def is_armed(self) -> bool:
+    def snapshot(self) -> dict[str, Any]:
         ...
 
-    def snapshot(self) -> dict[str, Any]:
+    def evaluate_run_creation(
+        self,
+        *,
+        user_id: str | None,
+        agent_id: str | None,
+    ) -> dict[str, Any]:
         ...
 
 
@@ -236,33 +241,53 @@ class AgentRunManager:
         actor = str(user_id or "").strip()
         if not owner or not actor or owner != actor:
             raise ValueError(f"Agent ownership mismatch for agent: {agent.id}")
-        if self.autonomy_circuit_breaker is not None and self.autonomy_circuit_breaker.is_armed():
-            snapshot_raw = self.autonomy_circuit_breaker.snapshot()
-            snapshot = dict(snapshot_raw) if isinstance(snapshot_raw, dict) else {}
-            details: list[str] = []
-            armed_by = str(snapshot.get("armed_by") or "").strip()
-            armed_at = str(snapshot.get("armed_at") or "").strip()
-            reason = str(snapshot.get("reason") or "").strip()
-            if armed_by:
-                details.append(f"armed_by={armed_by}")
-            if armed_at:
-                details.append(f"armed_at={armed_at}")
-            if reason:
-                details.append(f"reason={reason}")
-            detail_suffix = f" ({', '.join(details)})" if details else ""
-            self._emit(
-                "agent_run_blocked_autonomy_circuit_breaker",
-                {
-                    "agent_id": agent.id,
-                    "user_id": user_id,
-                    "session_id": session_id,
-                    "autonomy_circuit_breaker": snapshot,
-                },
+        if self.autonomy_circuit_breaker is not None:
+            decision_raw = self.autonomy_circuit_breaker.evaluate_run_creation(
+                user_id=user_id,
+                agent_id=agent.id,
             )
-            raise ValueError(
-                "Autonomy circuit breaker is armed. "
-                f"New runs are temporarily blocked{detail_suffix}."
-            )
+            decision = dict(decision_raw) if isinstance(decision_raw, dict) else {}
+            if bool(decision.get("blocked")):
+                matched_raw = decision.get("matched_scopes")
+                matched_scopes = [item for item in (matched_raw if isinstance(matched_raw, list) else []) if isinstance(item, dict)]
+                scope_tokens: list[str] = []
+                for scope in matched_scopes:
+                    scope_type = str(scope.get("scope_type") or "").strip().lower()
+                    scope_user_id = str(scope.get("scope_user_id") or "").strip()
+                    scope_agent_id = str(scope.get("scope_agent_id") or "").strip()
+                    if scope_type == "global":
+                        scope_tokens.append("scope=global")
+                    elif scope_type == "user" and scope_user_id:
+                        scope_tokens.append(f"scope=user:{scope_user_id}")
+                    elif scope_type == "agent" and scope_agent_id:
+                        scope_tokens.append(f"scope=agent:{scope_agent_id}")
+                    else:
+                        scope_tokens.append(f"scope={scope_type or 'unknown'}")
+                details: list[str] = []
+                if scope_tokens:
+                    details.append(", ".join(scope_tokens))
+                if matched_scopes:
+                    reason = str(matched_scopes[0].get("reason") or "").strip()
+                    if reason:
+                        details.append(f"reason={reason}")
+                detail_suffix = f" ({'; '.join(details)})" if details else ""
+                snapshot_raw = self.autonomy_circuit_breaker.snapshot()
+                snapshot = dict(snapshot_raw) if isinstance(snapshot_raw, dict) else {}
+                self._emit(
+                    "agent_run_blocked_autonomy_circuit_breaker",
+                    {
+                        "agent_id": agent.id,
+                        "user_id": user_id,
+                        "session_id": session_id,
+                        "autonomy_circuit_breaker": snapshot,
+                        "matched_scopes": matched_scopes,
+                    },
+                )
+                raise ValueError(
+                    "Autonomy circuit breaker is armed for this run scope. "
+                    f"New runs are temporarily blocked{detail_suffix}."
+                )
+
 
         run_id = str(uuid4())
         attempts_limit = max(1, max_attempts or self.default_max_attempts)

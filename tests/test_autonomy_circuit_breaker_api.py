@@ -23,6 +23,7 @@ class AutonomyCircuitBreakerAPITests(unittest.TestCase):
         auth_tokens = {
             "admin-token": {"user_id": "admin", "scopes": ["admin", "user"]},
             "user-token": {"user_id": "user-1", "scopes": ["user"]},
+            "user2-token": {"user_id": "user-2", "scopes": ["user"]},
             "service-token": {"user_id": "svc-runtime", "scopes": ["service"]},
         }
         cls._env_patch = patch.dict(
@@ -56,19 +57,26 @@ class AutonomyCircuitBreakerAPITests(unittest.TestCase):
     def _auth(token: str) -> dict[str, str]:
         return {"Authorization": f"Bearer {token}"}
 
-    def _create_agent(self, *, name: str) -> str:
+    def _create_agent(self, *, token: str, user_id: str, name: str) -> str:
         created = self.client.post(
             "/agents/create",
-            headers=self._auth("user-token"),
+            headers=self._auth(token),
             json={
                 "name": name,
                 "system_prompt": "autonomy-circuit-breaker-api-test",
-                "user_id": "user-1",
+                "user_id": user_id,
                 "tools": ["web_search"],
             },
         )
         self.assertEqual(created.status_code, 200)
         return str(created.json().get("id") or "")
+
+    def _disarm_global_for_cleanup(self) -> None:
+        self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={"action": "disarm", "reason": "cleanup", "scope_type": "global"},
+        )
 
     def test_service_scope_is_required_for_circuit_breaker_endpoints(self) -> None:
         denied_get = self.client.get(
@@ -85,7 +93,7 @@ class AutonomyCircuitBreakerAPITests(unittest.TestCase):
         self.assertEqual(denied_post.status_code, 403)
 
     def test_arm_blocks_execute_and_disarm_restores_create_run(self) -> None:
-        agent_id = self._create_agent(name="Autonomy Circuit Breaker Agent")
+        agent_id = self._create_agent(token="user-token", user_id="user-1", name="Autonomy Circuit Breaker Agent")
 
         arm = self.client.post(
             "/service/runs/autonomy-circuit-breaker",
@@ -93,6 +101,7 @@ class AutonomyCircuitBreakerAPITests(unittest.TestCase):
             json={
                 "action": "arm",
                 "reason": "incident-response",
+                "scope_type": "global",
                 "apply_kill_switch": False,
             },
         )
@@ -150,6 +159,7 @@ class AutonomyCircuitBreakerAPITests(unittest.TestCase):
             headers=self._auth("service-token"),
             json={
                 "action": "disarm",
+                "scope_type": "global",
                 "reason": "incident-mitigated",
             },
         )
@@ -168,7 +178,97 @@ class AutonomyCircuitBreakerAPITests(unittest.TestCase):
         run_id = str(create_after_disarm.json().get("run", {}).get("id") or "")
         self.assertTrue(bool(run_id))
 
-    def test_validation_for_invalid_action_and_kill_switch_scope(self) -> None:
+    def test_scoped_user_breaker_blocks_only_target_user(self) -> None:
+        user1_agent = self._create_agent(token="user-token", user_id="user-1", name="Scoped User Agent 1")
+        user2_agent = self._create_agent(token="user2-token", user_id="user-2", name="Scoped User Agent 2")
+
+        arm = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={
+                "action": "arm",
+                "scope_type": "user",
+                "scope_user_id": "user-1",
+                "reason": "scope-user-1",
+                "apply_kill_switch": False,
+            },
+        )
+        self.assertEqual(arm.status_code, 200)
+
+        blocked_user1 = self.client.post(
+            f"/agents/{user1_agent}/runs",
+            headers=self._auth("user-token"),
+            json={"user_id": "user-1", "message": "blocked by user scope"},
+        )
+        self.assertEqual(blocked_user1.status_code, 400)
+
+        allowed_user2 = self.client.post(
+            f"/agents/{user2_agent}/runs",
+            headers=self._auth("user2-token"),
+            json={"user_id": "user-2", "message": "must stay allowed"},
+        )
+        self.assertEqual(allowed_user2.status_code, 200)
+
+        disarm = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={
+                "action": "disarm",
+                "scope_type": "user",
+                "scope_user_id": "user-1",
+                "reason": "scope-user-1-done",
+            },
+        )
+        self.assertEqual(disarm.status_code, 200)
+
+        self._disarm_global_for_cleanup()
+
+    def test_scoped_agent_breaker_blocks_only_target_agent(self) -> None:
+        agent1 = self._create_agent(token="user-token", user_id="user-1", name="Scoped Agent 1")
+        agent2 = self._create_agent(token="user-token", user_id="user-1", name="Scoped Agent 2")
+
+        arm = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={
+                "action": "arm",
+                "scope_type": "agent",
+                "scope_agent_id": agent1,
+                "reason": "scope-agent-1",
+                "apply_kill_switch": False,
+            },
+        )
+        self.assertEqual(arm.status_code, 200)
+
+        blocked_agent1 = self.client.post(
+            f"/agents/{agent1}/runs",
+            headers=self._auth("user-token"),
+            json={"user_id": "user-1", "message": "blocked by agent scope"},
+        )
+        self.assertEqual(blocked_agent1.status_code, 400)
+
+        allowed_agent2 = self.client.post(
+            f"/agents/{agent2}/runs",
+            headers=self._auth("user-token"),
+            json={"user_id": "user-1", "message": "must stay allowed"},
+        )
+        self.assertEqual(allowed_agent2.status_code, 200)
+
+        disarm = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={
+                "action": "disarm",
+                "scope_type": "agent",
+                "scope_agent_id": agent1,
+                "reason": "scope-agent-1-done",
+            },
+        )
+        self.assertEqual(disarm.status_code, 200)
+
+        self._disarm_global_for_cleanup()
+
+    def test_validation_for_invalid_action_and_scope_contract(self) -> None:
         invalid_action = self.client.post(
             "/service/runs/autonomy-circuit-breaker",
             headers=self._auth("service-token"),
@@ -176,7 +276,7 @@ class AutonomyCircuitBreakerAPITests(unittest.TestCase):
         )
         self.assertEqual(invalid_action.status_code, 400)
 
-        invalid_scope = self.client.post(
+        invalid_kill_scope = self.client.post(
             "/service/runs/autonomy-circuit-breaker",
             headers=self._auth("service-token"),
             json={
@@ -186,13 +286,107 @@ class AutonomyCircuitBreakerAPITests(unittest.TestCase):
                 "include_queued": False,
             },
         )
-        self.assertEqual(invalid_scope.status_code, 400)
+        self.assertEqual(invalid_kill_scope.status_code, 400)
 
-        self.client.post(
+        missing_user_scope = self.client.post(
             "/service/runs/autonomy-circuit-breaker",
             headers=self._auth("service-token"),
-            json={"action": "disarm", "reason": "cleanup"},
+            json={"action": "arm", "scope_type": "user"},
         )
+        self.assertEqual(missing_user_scope.status_code, 400)
+
+        missing_agent_scope = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={"action": "arm", "scope_type": "agent"},
+        )
+        self.assertEqual(missing_agent_scope.status_code, 400)
+
+        invalid_global_extra = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={"action": "arm", "scope_type": "global", "scope_user_id": "user-1"},
+        )
+        self.assertEqual(invalid_global_extra.status_code, 400)
+
+        self._disarm_global_for_cleanup()
+
+    def test_z_breaker_state_restores_after_server_restart(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="amaryllis-tests-autonomy-circuit-breaker-restart-") as tmp:
+            support_dir = Path(tmp) / "support"
+            auth_tokens = {
+                "service-token": {"user_id": "svc-runtime", "scopes": ["service"]},
+                "user-token": {"user_id": "user-1", "scopes": ["user"]},
+            }
+            with patch.dict(
+                os.environ,
+                {
+                    "AMARYLLIS_SUPPORT_DIR": str(support_dir),
+                    "AMARYLLIS_AUTH_ENABLED": "true",
+                    "AMARYLLIS_AUTH_TOKENS": json.dumps(auth_tokens, ensure_ascii=False),
+                    "AMARYLLIS_MEMORY_CONSOLIDATION_ENABLED": "false",
+                    "AMARYLLIS_MCP_ENDPOINTS": "",
+                    "AMARYLLIS_SECURITY_PROFILE": "production",
+                    "AMARYLLIS_COGNITION_BACKEND": "deterministic",
+                    "AMARYLLIS_AUTOMATION_ENABLED": "false",
+                    "AMARYLLIS_BACKUP_ENABLED": "false",
+                    "AMARYLLIS_BACKUP_RESTORE_DRILL_ENABLED": "false",
+                },
+                clear=False,
+            ):
+                import runtime.server as server_module
+
+                first_boot = importlib.reload(server_module)
+                with TestClient(first_boot.app) as boot1_client:
+                    create_agent = boot1_client.post(
+                        "/agents/create",
+                        headers=self._auth("user-token"),
+                        json={
+                            "name": "Restart Restore Agent",
+                            "system_prompt": "restart-restore-check",
+                            "user_id": "user-1",
+                            "tools": ["web_search"],
+                        },
+                    )
+                    self.assertEqual(create_agent.status_code, 200)
+                    agent_id = str(create_agent.json().get("id") or "")
+                    self.assertTrue(bool(agent_id))
+
+                    arm = boot1_client.post(
+                        "/service/runs/autonomy-circuit-breaker",
+                        headers=self._auth("service-token"),
+                        json={
+                            "action": "arm",
+                            "scope_type": "global",
+                            "reason": "restart-restore-check",
+                            "apply_kill_switch": False,
+                        },
+                    )
+                    self.assertEqual(arm.status_code, 200)
+
+                second_boot = importlib.reload(server_module)
+                with TestClient(second_boot.app) as boot2_client:
+                    status = boot2_client.get(
+                        "/service/runs/autonomy-circuit-breaker",
+                        headers=self._auth("service-token"),
+                    )
+                    self.assertEqual(status.status_code, 200)
+                    state = status.json().get("circuit_breaker", {})
+                    self.assertTrue(bool(state.get("armed")))
+
+                    create_blocked = boot2_client.post(
+                        f"/agents/{agent_id}/runs",
+                        headers=self._auth("user-token"),
+                        json={"user_id": "user-1", "message": "blocked after restart"},
+                    )
+                    self.assertEqual(create_blocked.status_code, 400)
+
+                    disarm = boot2_client.post(
+                        "/service/runs/autonomy-circuit-breaker",
+                        headers=self._auth("service-token"),
+                        json={"action": "disarm", "scope_type": "global", "reason": "cleanup"},
+                    )
+                    self.assertEqual(disarm.status_code, 200)
 
 
 if __name__ == "__main__":

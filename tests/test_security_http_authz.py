@@ -204,12 +204,36 @@ class SecurityHTTPAuthzTests(unittest.TestCase):
         invalid_scope_payload = invalid_scope.json()
         self.assertEqual(invalid_scope_payload["error"]["type"], "validation_error")
 
+        missing_user_scope = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={
+                "action": "arm",
+                "scope_type": "user",
+            },
+        )
+        self.assertEqual(missing_user_scope.status_code, 400)
+        self.assertEqual(missing_user_scope.json()["error"]["type"], "validation_error")
+
+        invalid_global_extra = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={
+                "action": "arm",
+                "scope_type": "global",
+                "scope_user_id": "user-1",
+            },
+        )
+        self.assertEqual(invalid_global_extra.status_code, 400)
+        self.assertEqual(invalid_global_extra.json()["error"]["type"], "validation_error")
+
         arm = self.client.post(
             "/service/runs/autonomy-circuit-breaker",
             headers=self._auth("service-token"),
             json={
                 "action": "arm",
                 "reason": "security-http-authz",
+                "scope_type": "global",
                 "apply_kill_switch": False,
             },
         )
@@ -220,6 +244,8 @@ class SecurityHTTPAuthzTests(unittest.TestCase):
         state = arm_payload.get("circuit_breaker", {})
         self.assertTrue(bool(state.get("armed")))
         self.assertEqual(str(state.get("status")), "armed")
+        target_scope = arm_payload.get("circuit_breaker", {}).get("target_scope", {}).get("scope", {})
+        self.assertEqual(str(target_scope.get("scope_type")), "global")
         self.assertTrue(bool(arm_payload.get("action_receipt", {}).get("signature")))
 
         disarm = self.client.post(
@@ -227,6 +253,7 @@ class SecurityHTTPAuthzTests(unittest.TestCase):
             headers=self._auth("service-token"),
             json={
                 "action": "disarm",
+                "scope_type": "global",
                 "reason": "security-http-authz-cleanup",
             },
         )

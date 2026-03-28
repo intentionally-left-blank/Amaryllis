@@ -7,6 +7,7 @@ Amaryllis stores runtime state in:
 - SQLite database (`AMARYLLIS_DATABASE_PATH`)
 - vector index/meta files (`AMARYLLIS_VECTOR_INDEX_PATH`, `*.meta.json`)
 - local identity bundle (`AMARYLLIS_IDENTITY_PATH`)
+- autonomy circuit breaker state (`AMARYLLIS_AUTONOMY_CIRCUIT_BREAKER_STATE_PATH`)
 
 Task 09 introduces production-grade backup + restore controls for these assets.
 
@@ -30,7 +31,7 @@ Task 09 introduces production-grade backup + restore controls for these assets.
 - `POST /service/backup/verify`
 - `POST /service/backup/restore-drill`
 - `GET /service/runs/autonomy-circuit-breaker` (inspect emergency brake state)
-- `POST /service/runs/autonomy-circuit-breaker` (arm/disarm emergency brake; optional auto kill-switch)
+- `POST /service/runs/autonomy-circuit-breaker` (arm/disarm emergency brake for `global/user/agent` scope; optional auto kill-switch)
 - `POST /service/runs/kill-switch` (interrupt queued/running agent runs)
 
 All endpoints require `service` or `admin` scope and include signed action receipts.

@@ -1,0 +1,162 @@
+{
+  "suite": "autonomy_circuit_breaker_gate_v1",
+  "generated_at": "2026-03-28T22:40:04.432728+00:00",
+  "checks": [
+    {
+      "name": "doc_exists",
+      "ok": true,
+      "detail": "/Users/bogdan/Amaryllis/docs/autonomy-circuit-breaker.md"
+    },
+    {
+      "name": "doc_status_endpoint",
+      "ok": true,
+      "detail": "status endpoint documented"
+    },
+    {
+      "name": "doc_update_endpoint",
+      "ok": true,
+      "detail": "update endpoint documented"
+    },
+    {
+      "name": "doc_actions",
+      "ok": true,
+      "detail": "arm/disarm action contract documented"
+    },
+    {
+      "name": "doc_execute_blocking",
+      "ok": true,
+      "detail": "execute-mode blocking behavior documented"
+    },
+    {
+      "name": "doc_scope_type",
+      "ok": true,
+      "detail": "scope_type contract documented"
+    },
+    {
+      "name": "doc_restart_restore_policy",
+      "ok": true,
+      "detail": "restart/restore policy documented"
+    },
+    {
+      "name": "runtime_status_endpoint_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_initially_disarmed",
+      "ok": true,
+      "detail": "armed=False"
+    },
+    {
+      "name": "runtime_create_agent_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_create_agent_id",
+      "ok": true,
+      "detail": "agent_id=54ea0e43-2785-4174-8a4a-0344e7c57d7b"
+    },
+    {
+      "name": "runtime_create_agent_user2_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_create_agent_user2_id",
+      "ok": true,
+      "detail": "agent_id=ec3e1a65-57b8-4c0c-a494-1e2b05171fa2"
+    },
+    {
+      "name": "runtime_arm_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_arm_state",
+      "ok": true,
+      "detail": "armed=True"
+    },
+    {
+      "name": "runtime_arm_receipt",
+      "ok": true,
+      "detail": "signed action receipt present"
+    },
+    {
+      "name": "runtime_execute_create_blocked",
+      "ok": true,
+      "detail": "status=400"
+    },
+    {
+      "name": "runtime_execute_dispatch_blocked",
+      "ok": true,
+      "detail": "status=400"
+    },
+    {
+      "name": "runtime_plan_dispatch_allowed",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_disarm_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_disarm_state",
+      "ok": true,
+      "detail": "armed=False"
+    },
+    {
+      "name": "runtime_execute_restored_after_disarm",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_arm_user_scope_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_user_scope_blocks_target_user",
+      "ok": true,
+      "detail": "status=400"
+    },
+    {
+      "name": "runtime_user_scope_allows_other_user",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_disarm_user_scope_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_arm_for_restart_ok",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_restart_restores_armed_state",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "runtime_restart_execute_create_blocked",
+      "ok": true,
+      "detail": "status=400"
+    },
+    {
+      "name": "runtime_restart_disarm_ok",
+      "ok": true,
+      "detail": "status=200"
+    }
+  ],
+  "summary": {
+    "status": "pass",
+    "total": 30,
+    "passed": 30,
+    "failed": 0
+  }
+}

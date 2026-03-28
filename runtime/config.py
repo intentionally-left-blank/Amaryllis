@@ -185,6 +185,7 @@ class AppConfig:
     compliance_identity_rotation_max_age_days: int
     compliance_access_review_max_age_days: int
     identity_path: Path
+    autonomy_circuit_breaker_state_path: Path
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -264,6 +265,12 @@ class AppConfig:
             env.get(
                 "AMARYLLIS_IDENTITY_PATH",
                 str(data_dir / "identity.json"),
+            )
+        ).expanduser()
+        autonomy_circuit_breaker_state_path = Path(
+            env.get(
+                "AMARYLLIS_AUTONOMY_CIRCUIT_BREAKER_STATE_PATH",
+                str(data_dir / "autonomy-circuit-breaker-state.json"),
             )
         ).expanduser()
 
@@ -707,6 +714,7 @@ class AppConfig:
                 1, int(env.get("AMARYLLIS_ACCESS_REVIEW_MAX_AGE_DAYS", "30"))
             ),
             identity_path=identity_path,
+            autonomy_circuit_breaker_state_path=autonomy_circuit_breaker_state_path,
         )
         config._validate_security_configuration()
         return config
@@ -719,6 +727,7 @@ class AppConfig:
         self.evidence_dir.mkdir(parents=True, exist_ok=True)
         self.plugins_dir.mkdir(parents=True, exist_ok=True)
         self.identity_path.parent.mkdir(parents=True, exist_ok=True)
+        self.autonomy_circuit_breaker_state_path.parent.mkdir(parents=True, exist_ok=True)
 
     def _validate_security_configuration(self) -> None:
         if self.security_profile != "production":

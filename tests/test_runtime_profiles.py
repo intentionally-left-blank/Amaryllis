@@ -134,6 +134,23 @@ class RuntimeProfilesTests(unittest.TestCase):
                 config = AppConfig.from_env()
         self.assertEqual(config.qos_thermal_state, "unknown")
 
+    def test_default_autonomy_circuit_breaker_state_path_is_under_data_dir(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="amaryllis-runtime-profile-") as tmp:
+            support_dir = Path(tmp) / "support"
+            with patch.dict(
+                os.environ,
+                {
+                    "AMARYLLIS_SUPPORT_DIR": str(support_dir),
+                    "AMARYLLIS_AUTH_TOKENS": "token-user:user-1:user",
+                },
+                clear=True,
+            ):
+                config = AppConfig.from_env()
+        self.assertEqual(
+            config.autonomy_circuit_breaker_state_path,
+            config.data_dir / "autonomy-circuit-breaker-state.json",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

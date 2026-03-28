@@ -116,17 +116,30 @@ def main() -> int:
             "interaction_mode=execute" in text,
             "execute-mode blocking behavior documented",
         )
+        add_check(
+            "doc_scope_type",
+            "scope_type" in text and "global" in text and "user" in text and "agent" in text,
+            "scope_type contract documented",
+        )
+        add_check(
+            "doc_restart_restore_policy",
+            "restart" in text.lower() and "state" in text.lower(),
+            "restart/restore policy documented",
+        )
     else:
         add_check("doc_exists", False, f"missing: {doc_path}")
 
     tmp_dir = tempfile.TemporaryDirectory(prefix="amaryllis-autonomy-circuit-breaker-gate-")
     support_dir = Path(tmp_dir.name) / "support"
     app = None
+    restart_app = None
+    restart_agent_id = ""
 
     os.environ["AMARYLLIS_AUTH_ENABLED"] = "true"
     os.environ["AMARYLLIS_AUTH_TOKENS"] = json.dumps(
         {
             user_token: {"user_id": "gate-user", "scopes": ["user"]},
+            "gate-user2-token": {"user_id": "gate-user-2", "scopes": ["user"]},
             service_token: {"user_id": "gate-service", "scopes": ["service"]},
             "gate-admin-token": {"user_id": "gate-admin", "scopes": ["admin", "user"]},
         },
@@ -183,6 +196,27 @@ def main() -> int:
             create_payload = create_agent.json() if _is_json_response(dict(create_agent.headers)) else {}
             agent_id = str(create_payload.get("id") or "").strip()
             add_check("runtime_create_agent_id", bool(agent_id), f"agent_id={agent_id}")
+
+            create_agent_user2 = client.post(
+                "/agents/create",
+                headers=_auth("gate-user2-token"),
+                json={
+                    "name": "Autonomy Circuit Breaker Gate Agent User2",
+                    "system_prompt": "autonomy-circuit-breaker-gate",
+                    "user_id": "gate-user-2",
+                    "tools": ["web_search"],
+                },
+            )
+            add_check(
+                "runtime_create_agent_user2_ok",
+                create_agent_user2.status_code == 200,
+                f"status={create_agent_user2.status_code}",
+            )
+            create_payload_user2 = (
+                create_agent_user2.json() if _is_json_response(dict(create_agent_user2.headers)) else {}
+            )
+            agent2_id = str(create_payload_user2.get("id") or "").strip()
+            add_check("runtime_create_agent_user2_id", bool(agent2_id), f"agent_id={agent2_id}")
 
             arm = client.post(
                 "/service/runs/autonomy-circuit-breaker",
@@ -299,11 +333,139 @@ def main() -> int:
                 f"status={create_run_after.status_code}",
             )
 
+            arm_user_scope = client.post(
+                "/service/runs/autonomy-circuit-breaker",
+                headers=_auth(service_token),
+                json={
+                    "action": "arm",
+                    "scope_type": "user",
+                    "scope_user_id": "gate-user",
+                    "reason": "gate-user-scope-check",
+                    "apply_kill_switch": False,
+                },
+            )
+            add_check(
+                "runtime_arm_user_scope_ok",
+                arm_user_scope.status_code == 200,
+                f"status={arm_user_scope.status_code}",
+            )
+
+            create_run_blocked_user_scope = client.post(
+                f"/agents/{agent_id}/runs",
+                headers=_auth(user_token),
+                json={
+                    "user_id": "gate-user",
+                    "message": "execute while user scope armed",
+                },
+            )
+            add_check(
+                "runtime_user_scope_blocks_target_user",
+                create_run_blocked_user_scope.status_code == 400,
+                f"status={create_run_blocked_user_scope.status_code}",
+            )
+
+            create_run_allowed_user2 = client.post(
+                f"/agents/{agent2_id}/runs",
+                headers=_auth("gate-user2-token"),
+                json={
+                    "user_id": "gate-user-2",
+                    "message": "execute must stay allowed for non-target user",
+                },
+            )
+            add_check(
+                "runtime_user_scope_allows_other_user",
+                create_run_allowed_user2.status_code == 200,
+                f"status={create_run_allowed_user2.status_code}",
+            )
+
+            disarm_user_scope = client.post(
+                "/service/runs/autonomy-circuit-breaker",
+                headers=_auth(service_token),
+                json={
+                    "action": "disarm",
+                    "scope_type": "user",
+                    "scope_user_id": "gate-user",
+                    "reason": "gate-user-scope-finished",
+                },
+            )
+            add_check(
+                "runtime_disarm_user_scope_ok",
+                disarm_user_scope.status_code == 200,
+                f"status={disarm_user_scope.status_code}",
+            )
+
+            arm_for_restart = client.post(
+                "/service/runs/autonomy-circuit-breaker",
+                headers=_auth(service_token),
+                json={
+                    "action": "arm",
+                    "scope_type": "global",
+                    "reason": "restart-restore-check",
+                    "apply_kill_switch": False,
+                },
+            )
+            add_check(
+                "runtime_arm_for_restart_ok",
+                arm_for_restart.status_code == 200,
+                f"status={arm_for_restart.status_code}",
+            )
+            restart_agent_id = agent_id
+
+        restart_app = create_app()
+        with TestClient(restart_app) as restarted_client:
+            restarted_status = restarted_client.get(
+                "/service/runs/autonomy-circuit-breaker",
+                headers=_auth(service_token),
+            )
+            restarted_payload = (
+                restarted_status.json() if _is_json_response(dict(restarted_status.headers)) else {}
+            )
+            restarted_state = (
+                restarted_payload.get("circuit_breaker") if isinstance(restarted_payload, dict) else {}
+            )
+            add_check(
+                "runtime_restart_restores_armed_state",
+                restarted_status.status_code == 200 and bool((restarted_state or {}).get("armed")),
+                f"status={restarted_status.status_code}",
+            )
+
+            if restart_agent_id:
+                run_blocked_after_restart = restarted_client.post(
+                    f"/agents/{restart_agent_id}/runs",
+                    headers=_auth(user_token),
+                    json={
+                        "user_id": "gate-user",
+                        "message": "execute while breaker armed after restart",
+                    },
+                )
+                add_check(
+                    "runtime_restart_execute_create_blocked",
+                    run_blocked_after_restart.status_code == 400,
+                    f"status={run_blocked_after_restart.status_code}",
+                )
+
+            disarm_after_restart = restarted_client.post(
+                "/service/runs/autonomy-circuit-breaker",
+                headers=_auth(service_token),
+                json={
+                    "action": "disarm",
+                    "scope_type": "global",
+                    "reason": "restart-restore-finished",
+                },
+            )
+            add_check(
+                "runtime_restart_disarm_ok",
+                disarm_after_restart.status_code == 200,
+                f"status={disarm_after_restart.status_code}",
+            )
+
     except Exception as exc:  # pragma: no cover - integration fallback
         add_check("runtime_exception", False, str(exc))
     finally:
         if app is not None:
             _shutdown_app(app)
+        if restart_app is not None:
+            _shutdown_app(restart_app)
         tmp_dir.cleanup()
 
     failed = [item for item in checks if not bool(item.get("ok"))]

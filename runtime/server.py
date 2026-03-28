@@ -50,7 +50,10 @@ from runtime.backup import BackupManager, BackupScheduler
 from runtime.compliance import ComplianceManager
 from runtime.api_lifecycle import APILifecyclePolicy, canonical_api_path
 from runtime.auth import AuthContext, AuthManager, auth_context_from_request
-from runtime.autonomy_circuit_breaker import AutonomyCircuitBreaker
+from runtime.autonomy_circuit_breaker import (
+    AutonomyCircuitBreaker,
+    normalize_circuit_breaker_scope,
+)
 from runtime.config import AppConfig
 from runtime.errors import AmaryllisError, InternalError, PermissionDeniedError, ProviderError, ValidationError
 from runtime.observability import ObservabilityManager, ObservabilityTelemetry, SLOTargets
@@ -127,6 +130,9 @@ class RunKillSwitchRequest(BaseModel):
 class RunAutonomyCircuitBreakerUpdateRequest(BaseModel):
     action: str = Field(default="arm")
     reason: str | None = Field(default=None, max_length=4000)
+    scope_type: str = Field(default="global")
+    scope_user_id: str | None = Field(default=None, max_length=512)
+    scope_agent_id: str | None = Field(default=None, max_length=512)
     apply_kill_switch: bool = True
     include_running: bool = True
     include_queued: bool = True
@@ -341,7 +347,9 @@ def create_services() -> ServiceContainer:
         step_replan_max_attempts=config.task_step_replan_max_attempts,
     )
     kernel_executor = KernelExecutorAdapter(task_executor)
-    autonomy_circuit_breaker = AutonomyCircuitBreaker()
+    autonomy_circuit_breaker = AutonomyCircuitBreaker(
+        state_path=config.autonomy_circuit_breaker_state_path,
+    )
 
     agent_run_manager = AgentRunManager(
         database=database,
@@ -946,6 +954,14 @@ def create_app() -> FastAPI:
         auth = auth_context_from_request(request)
         request_id = request_id_from_request(request)
         action = _normalize_circuit_breaker_action(payload.action)
+        try:
+            scope_type, scope_user_id, scope_agent_id = normalize_circuit_breaker_scope(
+                scope_type=payload.scope_type,
+                scope_user_id=payload.scope_user_id,
+                scope_agent_id=payload.scope_agent_id,
+            )
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
         if (
             action == "arm"
             and payload.apply_kill_switch
@@ -958,6 +974,9 @@ def create_app() -> FastAPI:
         sign_payload = {
             "action": action,
             "reason": payload.reason,
+            "scope_type": scope_type,
+            "scope_user_id": scope_user_id,
+            "scope_agent_id": scope_agent_id,
             "apply_kill_switch": bool(payload.apply_kill_switch),
             "include_running": bool(payload.include_running),
             "include_queued": bool(payload.include_queued),
@@ -970,20 +989,33 @@ def create_app() -> FastAPI:
                     actor=auth.user_id,
                     reason=payload.reason,
                     request_id=request_id,
+                    scope_type=scope_type,
+                    scope_user_id=scope_user_id,
+                    scope_agent_id=scope_agent_id,
                 )
                 if payload.apply_kill_switch:
+                    kill_switch_kwargs: dict[str, Any] = {
+                        "actor": auth.user_id,
+                        "reason": payload.reason,
+                        "include_running": bool(payload.include_running),
+                        "include_queued": bool(payload.include_queued),
+                        "limit": int(payload.limit),
+                    }
+                    if scope_type == "user":
+                        kill_switch_kwargs["user_id"] = scope_user_id
+                    elif scope_type == "agent":
+                        kill_switch_kwargs["agent_id"] = scope_agent_id
                     kill_switch_summary = services.agent_manager.kill_switch_runs(
-                        actor=auth.user_id,
-                        reason=payload.reason,
-                        include_running=bool(payload.include_running),
-                        include_queued=bool(payload.include_queued),
-                        limit=int(payload.limit),
+                        **kill_switch_kwargs,
                     )
             else:
                 state = services.autonomy_circuit_breaker.disarm(
                     actor=auth.user_id,
                     reason=payload.reason,
                     request_id=request_id,
+                    scope_type=scope_type,
+                    scope_user_id=scope_user_id,
+                    scope_agent_id=scope_agent_id,
                 )
 
             receipt_details: dict[str, Any] = {
