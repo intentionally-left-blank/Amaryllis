@@ -66,6 +66,14 @@ Evidence:
 - release/nightly workflows run blocking `kv_pressure_policy_gate.py` with machine-readable reports;
 - gate tests (`tests/test_kv_pressure_policy_gate.py`) validate pass/fail behavior and report contract.
 
+`WP-03` (`P4-E03`) is closed as implemented and release/nightly-gated.
+
+Evidence:
+- QoS governor deterministic mode switching (`quality/balanced/power_save`) is enforced via runtime API and thermal/pressure transition logic;
+- release/nightly workflows run blocking `qos_governor_gate.py` and `qos_mode_envelope_gate.py`;
+- QoS mode envelope benchmark validates user-journey KPI thresholds per mode with contract checks on `active_mode/route_mode/auto_enabled`;
+- gate tests (`tests/test_qos_governor_gate.py`, `tests/test_qos_mode_envelope_gate.py`) validate pass/fail behavior and report contracts.
+
 `WP-16` (`P4-H08`) is closed as implemented and release/nightly-gated.
 
 Evidence:
@@ -253,6 +261,8 @@ Adoption lane slices (next 10 working days after PR-1..PR-8):
 |---|---|---|
 | user journey benchmark | `scripts/release/user_journey_benchmark.py` | blocking |
 | perf smoke | `scripts/release/perf_smoke_gate.py` | blocking |
+| QoS governor gate | `scripts/release/qos_governor_gate.py` | blocking |
+| QoS mode envelope gate | `scripts/release/qos_mode_envelope_gate.py` | blocking |
 | quality dashboard snapshot | `scripts/release/build_quality_dashboard_snapshot.py` | blocking |
 | fault injection reliability | `scripts/release/fault_injection_reliability_gate.py` | blocking |
 | mission queue load | `scripts/release/mission_queue_load_gate.py` | blocking |

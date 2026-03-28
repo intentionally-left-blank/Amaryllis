@@ -96,6 +96,17 @@ jobs:
             --expect-final-mode "${AMARYLLIS_NIGHTLY_QOS_EXPECT_FINAL_MODE:-quality}" \
             --output "artifacts/nightly-qos-governor-gate-report.json"
 
+      - name: Run nightly QoS mode envelope gate (blocking)
+        run: |
+          python scripts/release/qos_mode_envelope_gate.py \
+            --journey-iterations "${AMARYLLIS_NIGHTLY_QOS_ENVELOPE_ITERATIONS:-2}" \
+            --max-p95-journey-latency-ms "${AMARYLLIS_NIGHTLY_QOS_ENVELOPE_MAX_P95_JOURNEY_MS:-4000}" \
+            --max-p95-plan-dispatch-latency-ms "${AMARYLLIS_NIGHTLY_QOS_ENVELOPE_MAX_P95_PLAN_MS:-1800}" \
+            --max-p95-execute-dispatch-latency-ms "${AMARYLLIS_NIGHTLY_QOS_ENVELOPE_MAX_P95_EXECUTE_MS:-1800}" \
+            --max-p95-activation-latency-ms "${AMARYLLIS_NIGHTLY_QOS_ENVELOPE_MAX_P95_ACTIVATION_MS:-600000}" \
+            --max-failed-modes "${AMARYLLIS_NIGHTLY_QOS_ENVELOPE_MAX_FAILED_MODES:-0}" \
+            --output "artifacts/nightly-qos-mode-envelope-gate-report.json"
+
       - name: Run nightly long-context reliability gate (blocking)
         run: |
           python scripts/release/long_context_reliability_gate.py \
@@ -353,6 +364,14 @@ jobs:
         with:
           name: nightly-qos-governor-gate-report
           path: artifacts/nightly-qos-governor-gate-report.json
+          if-no-files-found: error
+
+      - name: Upload nightly QoS mode envelope gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-qos-mode-envelope-gate-report
+          path: artifacts/nightly-qos-mode-envelope-gate-report.json
           if-no-files-found: error
 
       - name: Upload nightly long-context reliability report

@@ -17,29 +17,30 @@ Mandatory gates before publish:
 11. Mission queue concurrency/load gate (queue-drain, p95 latency and success-rate SLO assertions)
 12. User journey benchmark gate (intent -> planning -> execute -> review KPI assertions)
 13. QoS governor gate (thermal-aware deterministic mode-switch contract assertions)
-14. Long-context reliability gate (regression block on relevance/stability/latency envelope)
-15. Linux parity gate (runtime/voice/tools/observability API parity on Linux target)
-16. Linux installer smoke gate (install/upgrade/channel rollback path on Linux target)
-17. Distribution resilience report gate (aggregated parity + installer/rollback + runtime lifecycle blocking checks)
-18. Distribution channel manifest readiness gate (WinGet/Homebrew/Flathub templates + placeholders)
-19. Distribution channel rendered-manifest gate (rendered WinGet/Homebrew/Flathub outputs are publish-ready and verifiable)
-20. API quickstart compatibility gate (OpenAI-compatible developer onboarding contract)
-21. First-run activation gate (onboarding profile + activation plan + package catalog runtime contract)
-22. Localization/governance gate (RU/EN docs + starter templates + contributor/legal governance package contract)
-23. Flow/interaction gate (unified `/flow/sessions/*` + `/runs/dispatch` plan-vs-execute trust-boundary contract)
-24. Action explainability gate (timeline stream + plain-language `reason/result/next_step` payload contract)
-25. Desktop action rollback gate (Linux desktop action + rollback hint + terminal receipt contract)
-26. Supervisor mission gate (bounded task-graph + checkpoint/resume + objective verification contract)
-27. Generation-loop conformance gate (backend portability matrix + contract identity assertions)
-28. KV pressure policy gate (generation-loop KV telemetry contract + pressure-driven QoS transition assertions)
-29. Adoption KPI schema gate (install/activation/retention/feature-adoption contract assertions)
-30. Adoption KPI snapshot build gate (publishable adoption artifact + summary score)
-31. Adoption KPI trend regression gate (baseline-relative regression budget enforcement)
-32. Release quality dashboard snapshot gate (final post-Linux benchmark/reliability artifact + trend deltas)
-33. Mission success/recovery report pack gate (v2 schema + class/KPI completeness contract)
-34. Mission success/recovery report pack export (public KPI artifact)
-35. Disaster recovery gate (backup + verify + restore drill)
-36. Compliance operations gate (access review + incidents + evidence export)
+14. QoS mode envelope gate (journey KPI envelope for `quality/balanced/power_save` + runtime mode contract assertions)
+15. Long-context reliability gate (regression block on relevance/stability/latency envelope)
+16. Linux parity gate (runtime/voice/tools/observability API parity on Linux target)
+17. Linux installer smoke gate (install/upgrade/channel rollback path on Linux target)
+18. Distribution resilience report gate (aggregated parity + installer/rollback + runtime lifecycle blocking checks)
+19. Distribution channel manifest readiness gate (WinGet/Homebrew/Flathub templates + placeholders)
+20. Distribution channel rendered-manifest gate (rendered WinGet/Homebrew/Flathub outputs are publish-ready and verifiable)
+21. API quickstart compatibility gate (OpenAI-compatible developer onboarding contract)
+22. First-run activation gate (onboarding profile + activation plan + package catalog runtime contract)
+23. Localization/governance gate (RU/EN docs + starter templates + contributor/legal governance package contract)
+24. Flow/interaction gate (unified `/flow/sessions/*` + `/runs/dispatch` plan-vs-execute trust-boundary contract)
+25. Action explainability gate (timeline stream + plain-language `reason/result/next_step` payload contract)
+26. Desktop action rollback gate (Linux desktop action + rollback hint + terminal receipt contract)
+27. Supervisor mission gate (bounded task-graph + checkpoint/resume + objective verification contract)
+28. Generation-loop conformance gate (backend portability matrix + contract identity assertions)
+29. KV pressure policy gate (generation-loop KV telemetry contract + pressure-driven QoS transition assertions)
+30. Adoption KPI schema gate (install/activation/retention/feature-adoption contract assertions)
+31. Adoption KPI snapshot build gate (publishable adoption artifact + summary score)
+32. Adoption KPI trend regression gate (baseline-relative regression budget enforcement)
+33. Release quality dashboard snapshot gate (final post-Linux benchmark/reliability artifact + trend deltas)
+34. Mission success/recovery report pack gate (v2 schema + class/KPI completeness contract)
+35. Mission success/recovery report pack export (public KPI artifact)
+36. Disaster recovery gate (backup + verify + restore drill)
+37. Compliance operations gate (access review + incidents + evidence export)
 
 Staging companion (non-blocking):
 - macOS desktop action parity smoke (`scripts/release/macos_desktop_parity_smoke.py`)
@@ -80,6 +81,9 @@ Generation-loop conformance gate reference:
 KV pressure policy gate reference:
 - `docs/kv-pressure-policy-gate.md`
 
+QoS mode envelope gate reference:
+- `docs/qos-mode-envelope-gate.md`
+
 Mission report pack gate reference:
 - `docs/mission-report-pack-gate.md`
 
@@ -102,6 +106,7 @@ python scripts/release/environment_passport_gate.py --model-artifact-admission-r
 python scripts/release/mission_queue_load_gate.py --runs-total 40 --submit-concurrency 8 --worker-count 4 --task-latency-ms 35 --scenario-timeout-sec 30 --min-success-rate-pct 99 --max-failed-runs 0 --max-p95-queue-wait-ms 1500 --max-p95-end-to-end-ms 5000
 python scripts/release/user_journey_benchmark.py --iterations 5 --min-success-rate-pct 100 --max-p95-journey-latency-ms 3000 --max-p95-plan-dispatch-latency-ms 1200 --max-p95-execute-dispatch-latency-ms 1200 --min-plan-to-execute-conversion-rate-pct 100 --min-activation-success-rate-pct 100 --max-blocked-activation-rate-pct 0 --max-p95-activation-latency-ms 600000 --min-install-success-rate-pct 100 --min-retention-proxy-success-rate-pct 100 --min-feature-adoption-rate-pct 100 --baseline eval/baselines/quality/user_journey_benchmark_baseline.json --output artifacts/user-journey-benchmark-report.json --strict
 python scripts/release/qos_governor_gate.py --initial-mode balanced --expect-critical-mode power_save --expect-final-mode quality --output artifacts/qos-governor-gate-report.json
+python scripts/release/qos_mode_envelope_gate.py --journey-iterations 2 --max-p95-journey-latency-ms 3500 --max-p95-plan-dispatch-latency-ms 1500 --max-p95-execute-dispatch-latency-ms 1500 --max-p95-activation-latency-ms 600000 --max-failed-modes 0 --output artifacts/qos-mode-envelope-gate-report.json
 python scripts/release/long_context_reliability_gate.py --dataset eval/datasets/quality/long_context_reliability_cases.json --iterations 2 --min-run-success-rate-pct 100 --min-relevance-score-pct 95 --min-stability-score-pct 100 --max-p95-latency-ms 4000 --baseline eval/baselines/quality/long_context_reliability_baseline.json --max-relevance-regression-pct 2 --max-stability-regression-pct 1 --max-latency-regression-pct 40 --output artifacts/long-context-reliability-report.json
 python scripts/release/macos_desktop_parity_smoke.py --iterations 2 --output artifacts/macos-desktop-parity-smoke-report.json
 python scripts/release/linux_parity_smoke.py --iterations 1 --require-linux --output artifacts/linux-parity-smoke-report.json

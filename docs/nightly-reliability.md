@@ -120,6 +120,19 @@ python3 scripts/release/kv_pressure_policy_gate.py \
   --output artifacts/nightly-kv-pressure-policy-gate-report.json
 ```
 
+Nightly QoS mode envelope gate:
+
+```bash
+python3 scripts/release/qos_mode_envelope_gate.py \
+  --journey-iterations 2 \
+  --max-p95-journey-latency-ms 4000 \
+  --max-p95-plan-dispatch-latency-ms 1800 \
+  --max-p95-execute-dispatch-latency-ms 1800 \
+  --max-p95-activation-latency-ms 600000 \
+  --max-failed-modes 0 \
+  --output artifacts/nightly-qos-mode-envelope-gate-report.json
+```
+
 Nightly distribution channel render + publish-ready validation:
 
 ```bash
@@ -261,6 +274,12 @@ Nightly KV pressure policy gate artifact:
 
 ```text
 artifacts/nightly-kv-pressure-policy-gate-report.json
+```
+
+Nightly QoS mode envelope gate artifact:
+
+```text
+artifacts/nightly-qos-mode-envelope-gate-report.json
 ```
 
 Nightly adoption KPI snapshot artifacts:

@@ -153,6 +153,7 @@ jobs:
             tests.test_runtime_lifecycle_smoke_gate \
             tests.test_qos_governor \
             tests.test_qos_governor_gate \
+            tests.test_qos_mode_envelope_gate \
             tests.test_kv_pressure_policy_gate \
             tests.test_generation_loop_conformance_gate \
             tests.test_long_context_reliability_gate \
@@ -477,6 +478,24 @@ jobs:
         with:
           name: user-journey-benchmark-report
           path: artifacts/user-journey-benchmark-report.json
+          if-no-files-found: error
+
+      - name: Run QoS mode envelope gate (blocking)
+        run: |
+          python scripts/release/qos_mode_envelope_gate.py \
+            --journey-iterations "${AMARYLLIS_QOS_ENVELOPE_ITERATIONS:-2}" \
+            --max-p95-journey-latency-ms "${AMARYLLIS_QOS_ENVELOPE_MAX_P95_JOURNEY_MS:-3500}" \
+            --max-p95-plan-dispatch-latency-ms "${AMARYLLIS_QOS_ENVELOPE_MAX_P95_PLAN_MS:-1500}" \
+            --max-p95-execute-dispatch-latency-ms "${AMARYLLIS_QOS_ENVELOPE_MAX_P95_EXECUTE_MS:-1500}" \
+            --max-p95-activation-latency-ms "${AMARYLLIS_QOS_ENVELOPE_MAX_P95_ACTIVATION_MS:-600000}" \
+            --max-failed-modes "${AMARYLLIS_QOS_ENVELOPE_MAX_FAILED_MODES:-0}" \
+            --output "artifacts/qos-mode-envelope-gate-report.json"
+
+      - name: Upload QoS mode envelope gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: qos-mode-envelope-gate-report
+          path: artifacts/qos-mode-envelope-gate-report.json
           if-no-files-found: error
 
       - name: Run long-context reliability gate (blocking)

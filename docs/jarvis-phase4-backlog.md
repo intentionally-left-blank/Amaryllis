@@ -64,7 +64,7 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 |---|---|---|---|---|
 | P4-E01 | done | Define backend-portable generation-loop contract (`prefill/decode`, cache, fallback semantics) | contract spec + conformance tests | CPU/GPU/NPU backends pass the same functional contract and fallback determinism checks |
 | P4-E02 | done | Add KV cache observability and pressure-policy framework | KV telemetry schema + policy engine | Runtime emits KV pressure signals and applies policy transitions without silent quality collapse |
-| P4-E03 | in_progress | Implement QoS governor (`TTFT`, sustained decode, thermal-aware mode switching) | qos governor module + benchmark hooks | User-visible modes maintain target latency/stability envelopes under stress |
+| P4-E03 | done | Implement QoS governor (`TTFT`, sustained decode, thermal-aware mode switching) | qos governor module + benchmark hooks | User-visible modes maintain target latency/stability envelopes under stress |
 | P4-E04 | done | Add long-context reliability eval pack | eval dataset + gate job | Release/nightly fail on long-context regressions in relevance and stability |
 
 ### Epic F - Trust, Safety, and Supply Chain Hardening
@@ -120,7 +120,7 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 |---|---|---|
 | P4-E01 | done | generation-loop portability contract + backend conformance matrix (`/models/generation-loop/contract` + release/nightly conformance gate) |
 | P4-E02 | done | KV telemetry schema + initial pressure-policy transitions |
-| P4-E03 | in_progress | QoS governor baseline with `balanced` and `power-save` modes |
+| P4-E03 | done | QoS governor baseline with `balanced` and `power-save` modes |
 | P4-E04 | done | long-context reliability eval dataset + release/nightly blocking gate |
 | P4-F01 | in_progress | provenance contract for RAG responses + API payload wiring |
 | P4-F02 | in_progress | unsafe-deserialization denylist checks + sandbox policy tests |
