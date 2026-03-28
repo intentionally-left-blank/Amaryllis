@@ -274,6 +274,23 @@ class AgentManager:
             limit=limit,
         )
 
+    def build_run_explainability_feed(
+        self,
+        run_id: str,
+        *,
+        include_tool_calls: bool = True,
+        include_security_actions: bool = True,
+        limit: int = 2000,
+    ) -> dict[str, Any]:
+        if self.run_manager is None:
+            raise ValueError("Run manager is not configured")
+        return self.run_manager.build_run_explainability_feed(
+            run_id,
+            include_tool_calls=include_tool_calls,
+            include_security_actions=include_security_actions,
+            limit=limit,
+        )
+
     def list_run_issues(self, run_id: str, limit: int = 200) -> list[dict[str, Any]]:
         if self.run_manager is None:
             raise ValueError("Run manager is not configured")

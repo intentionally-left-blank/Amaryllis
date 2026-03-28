@@ -836,6 +836,42 @@ def audit_timeline_agent_run(
         raise ProviderError(str(exc)) from exc
 
 
+@router.get("/agents/runs/{run_id}/explain")
+def explain_agent_run(
+    request: Request,
+    run_id: str = Path(..., min_length=1),
+    include_tool_calls: bool = Query(default=True),
+    include_security_actions: bool = Query(default=True),
+    limit: int = Query(default=2000, ge=1, le=20000),
+) -> dict[str, Any]:
+    services = request.app.state.services
+    auth = auth_context_from_request(request)
+    try:
+        run = services.agent_manager.get_run(run_id=run_id)
+        assert_owner(
+            owner_user_id=str(run.get("user_id") or ""),
+            auth=auth,
+            resource_name="agent_run",
+            resource_id=run_id,
+        )
+        explainability = services.agent_manager.build_run_explainability_feed(
+            run_id=run_id,
+            include_tool_calls=include_tool_calls,
+            include_security_actions=include_security_actions,
+            limit=limit,
+        )
+        return {
+            "explainability": explainability,
+            "request_id": _request_id(request),
+        }
+    except ValueError as exc:
+        raise NotFoundError(str(exc)) from exc
+    except AmaryllisError:
+        raise
+    except Exception as exc:
+        raise ProviderError(str(exc)) from exc
+
+
 @router.get("/agents/runs/{run_id}/audit/export", response_model=None)
 def export_audit_timeline_agent_run(
     request: Request,

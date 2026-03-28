@@ -9,6 +9,7 @@ The timeline combines:
 - run checkpoints (`channel=run_checkpoint`)
 - run tool calls (`channel=tool_call`)
 - security audit actions (`channel=security_audit`)
+- live checkpoint stream (`GET /agents/runs/{run_id}/events`)
 
 Each event keeps actor/policy context so operators can answer:
 
@@ -28,6 +29,8 @@ Each event keeps actor/policy context so operators can answer:
 5. If evidence is needed, user exports:
    - `GET /agents/runs/{run_id}/audit/export?format=json`
    - `GET /agents/runs/{run_id}/audit/export?format=csv`
+6. For plain-language explanation, client calls:
+   - `GET /agents/runs/{run_id}/explain`
 
 ## API Contract
 
@@ -80,4 +83,3 @@ Returns CSV attachment (`Content-Disposition`) with flat columns:
 
 - owner check is enforced (cross-tenant access returns `403`)
 - invalid `format` returns `400 validation_error`
-

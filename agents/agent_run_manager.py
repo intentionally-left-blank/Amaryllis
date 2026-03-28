@@ -939,6 +939,145 @@ class AgentRunManager:
             "evidence": evidence_bundle,
         }
 
+    @staticmethod
+    def _plain_event_result(*, action: str, status: str) -> str:
+        normalized_status = str(status or "").strip().lower()
+        normalized_action = str(action or "").strip() or "Action"
+        if normalized_status in {"succeeded", "success", "completed", "done"}:
+            return f"{normalized_action} completed successfully."
+        if normalized_status in {"failed", "error", "denied"}:
+            return f"{normalized_action} failed."
+        if normalized_status in {"canceled", "cancelled"}:
+            return f"{normalized_action} was canceled."
+        if normalized_status in {"queued", "running", "pending", "in_progress"}:
+            return f"{normalized_action} is in progress."
+        if normalized_status:
+            return f"{normalized_action} status is {normalized_status}."
+        return f"{normalized_action} status is unknown."
+
+    @staticmethod
+    def _plain_event_reason(*, event: dict[str, Any], policy_context: dict[str, Any]) -> str:
+        message = str(event.get("message") or "").strip()
+        if message:
+            return message
+
+        failure_class = str(policy_context.get("failure_class") or "").strip().lower()
+        if failure_class:
+            return f"Failure class: {failure_class}."
+
+        stop_reason = str(policy_context.get("stop_reason") or "").strip().lower()
+        if stop_reason:
+            return f"Stop reason: {stop_reason}."
+
+        stage = str(event.get("stage") or "").strip().lower()
+        if stage:
+            return f"Runtime reported stage '{stage}'."
+
+        return "Runtime recorded this action event."
+
+    @staticmethod
+    def _plain_event_next_step(
+        *,
+        event: dict[str, Any],
+        policy_context: dict[str, Any],
+        fallback_next_step: str,
+    ) -> str:
+        channel = str(event.get("channel") or "").strip().lower()
+        status = str(event.get("status") or "").strip().lower()
+        action = str(event.get("action") or "").strip().lower()
+        failure_class = str(policy_context.get("failure_class") or "").strip().lower()
+        stop_reason = str(policy_context.get("stop_reason") or "").strip().lower()
+
+        if channel == "security_audit" and ("deny" in action or status in {"failed", "denied"}):
+            return "Review policy decision and request approval if this action is expected."
+        if status in {"failed", "error", "denied"}:
+            if failure_class:
+                return f"Fix the {failure_class} issue and retry this step."
+            if stop_reason:
+                return f"Resolve stop reason '{stop_reason}' before retrying."
+            return "Inspect this failed step and retry after fixing the root cause."
+        if status in {"canceled", "cancelled"}:
+            return "Confirm cancellation intent and relaunch only if still needed."
+        if status in {"queued", "running", "pending", "in_progress"}:
+            return "Wait for completion and monitor the next timeline event."
+        if status in {"succeeded", "success", "completed", "done"}:
+            return "Proceed to the next mission step."
+        return fallback_next_step
+
+    def build_run_explainability_feed(
+        self,
+        run_id: str,
+        *,
+        include_tool_calls: bool = True,
+        include_security_actions: bool = True,
+        limit: int = 2000,
+    ) -> dict[str, Any]:
+        audit = self.build_run_audit_timeline(
+            run_id,
+            include_tool_calls=include_tool_calls,
+            include_security_actions=include_security_actions,
+            limit=limit,
+        )
+        diagnostics = self.diagnose_run(run_id)
+        diagnostics_payload = diagnostics.get("diagnostics")
+        diagnostics_dict = dict(diagnostics_payload) if isinstance(diagnostics_payload, dict) else {}
+        recommended_actions_raw = diagnostics_dict.get("recommended_actions")
+        recommended_actions = [
+            str(item).strip()
+            for item in (recommended_actions_raw if isinstance(recommended_actions_raw, list) else [])
+            if str(item).strip()
+        ]
+        fallback_next_step = recommended_actions[0] if recommended_actions else "Continue monitoring mission progress."
+
+        raw_timeline = audit.get("timeline")
+        timeline = raw_timeline if isinstance(raw_timeline, list) else []
+        explain_items: list[dict[str, Any]] = []
+        for index, event in enumerate(timeline, start=1):
+            if not isinstance(event, dict):
+                continue
+            policy_context_raw = event.get("policy_context")
+            policy_context = dict(policy_context_raw) if isinstance(policy_context_raw, dict) else {}
+            action = str(event.get("action") or "").strip() or "action"
+            status = str(event.get("status") or "").strip()
+            explain_items.append(
+                {
+                    "index": index,
+                    "event_id": str(event.get("event_id") or ""),
+                    "timestamp": str(event.get("timestamp") or ""),
+                    "channel": str(event.get("channel") or ""),
+                    "action": action,
+                    "status": status,
+                    "reason": self._plain_event_reason(event=event, policy_context=policy_context),
+                    "result": self._plain_event_result(action=action, status=status),
+                    "next_step": self._plain_event_next_step(
+                        event=event,
+                        policy_context=policy_context,
+                        fallback_next_step=fallback_next_step,
+                    ),
+                }
+            )
+
+        summary_payload = audit.get("summary")
+        summary = dict(summary_payload) if isinstance(summary_payload, dict) else {}
+        return {
+            "feed_version": "run_explainability_feed_v1",
+            "generated_at": self._utc_now(),
+            "run_id": str(audit.get("run_id") or run_id),
+            "agent_id": audit.get("agent_id"),
+            "user_id": audit.get("user_id"),
+            "session_id": audit.get("session_id"),
+            "status": str(audit.get("status") or ""),
+            "timeline_event_count": len(explain_items),
+            "summary": {
+                "channel_counts": dict(summary.get("channel_counts") or {}),
+                "status_counts": dict(summary.get("status_counts") or {}),
+                "terminal_stop_reason": summary.get("terminal_stop_reason"),
+                "terminal_failure_class": summary.get("terminal_failure_class"),
+                "recommended_actions": recommended_actions,
+            },
+            "items": explain_items,
+        }
+
     def build_run_audit_timeline(
         self,
         run_id: str,

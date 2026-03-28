@@ -74,6 +74,20 @@ python3 scripts/release/localization_governance_gate.py \
   --output artifacts/nightly-localization-governance-gate-report.json
 ```
 
+Nightly flow/interaction gate:
+
+```bash
+python3 scripts/release/flow_interaction_gate.py \
+  --output artifacts/nightly-flow-interaction-gate-report.json
+```
+
+Nightly action explainability gate:
+
+```bash
+python3 scripts/release/action_explainability_gate.py \
+  --output artifacts/nightly-action-explainability-gate-report.json
+```
+
 Nightly distribution channel render + publish-ready validation:
 
 ```bash
@@ -170,6 +184,18 @@ Nightly localization/governance gate artifact:
 
 ```text
 artifacts/nightly-localization-governance-gate-report.json
+```
+
+Nightly flow/interaction gate artifact:
+
+```text
+artifacts/nightly-flow-interaction-gate-report.json
+```
+
+Nightly action explainability gate artifact:
+
+```text
+artifacts/nightly-action-explainability-gate-report.json
 ```
 
 Nightly adoption KPI snapshot artifacts:

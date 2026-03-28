@@ -101,6 +101,7 @@ jobs:
             tests.test_automation_mission_plan_api \
             tests.test_automation_scheduler \
             tests.test_agent_run_dispatch_mode_api \
+            tests.test_agent_run_explain_api \
             tests.test_desktop_action_adapter \
             tests.test_desktop_action_runtime_api \
             tests.test_macos_desktop_parity_smoke \
@@ -125,6 +126,8 @@ jobs:
             tests.test_model_package_catalog_api \
             tests.test_first_run_activation_gate \
             tests.test_localization_governance_gate \
+            tests.test_flow_interaction_gate \
+            tests.test_action_explainability_gate \
             tests.test_unified_session_manager \
             tests.test_flow_api \
             tests.test_supervisor_task_graph_manager \
@@ -190,6 +193,30 @@ jobs:
         with:
           name: localization-governance-gate-report
           path: artifacts/localization-governance-gate-report.json
+          if-no-files-found: error
+
+      - name: Run flow/interaction gate (blocking)
+        run: |
+          python scripts/release/flow_interaction_gate.py \
+            --output "artifacts/flow-interaction-gate-report.json"
+
+      - name: Upload flow/interaction gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: flow-interaction-gate-report
+          path: artifacts/flow-interaction-gate-report.json
+          if-no-files-found: error
+
+      - name: Run action explainability gate (blocking)
+        run: |
+          python scripts/release/action_explainability_gate.py \
+            --output "artifacts/action-explainability-gate-report.json"
+
+      - name: Upload action explainability gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: action-explainability-gate-report
+          path: artifacts/action-explainability-gate-report.json
           if-no-files-found: error
 
   canary-smoke:

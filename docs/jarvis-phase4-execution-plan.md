@@ -84,6 +84,15 @@ Evidence:
 - release/nightly workflows run blocking `localization_governance_gate.py` and publish machine-readable reports;
 - gate tests validate pass/fail contract behavior for localization/governance package.
 
+Epic A baseline (`P4-A01` + `P4-A02` + `P4-A03`) is closed as implemented and release/nightly-gated.
+
+Evidence:
+- unified session lifecycle contract is implemented via `flow/session_manager.py` and `/flow/sessions/*` API endpoints (`api/flow_api.py`) with dedicated docs (`docs/flow-session-contract.md`);
+- explicit plan-vs-execute interaction contract is implemented via `/agents/runs/interaction-modes` + `/agents/{agent_id}/runs/dispatch` (`api/agent_api.py`) with dedicated docs (`docs/agent-run-interaction-modes.md`);
+- action timeline stream + explainability payload is implemented via `/agents/runs/{run_id}/events` + `/agents/runs/{run_id}/explain` with dedicated docs (`docs/mission-audit-timeline.md`, `docs/agent-run-explainability-feed.md`);
+- release/nightly workflows run blocking `flow_interaction_gate.py` and `action_explainability_gate.py` and publish machine-readable reports;
+- API/unit/gate tests cover flow session lifecycle, interaction-mode behavior, explainability feed payload semantics, and gate pass/fail behavior.
+
 ## Critical Path
 1. `WP-01` -> baseline contract required before portability and QoS enforcement.
 2. `WP-02` -> required before `WP-03` mode switching can be policy driven.
@@ -212,6 +221,8 @@ Adoption lane slices (next 10 working days after PR-1..PR-8):
 | API quickstart compatibility gate | `scripts/release/api_quickstart_compatibility_gate.py` | blocking |
 | first-run activation journey gate | `scripts/release/first_run_activation_gate.py` | blocking |
 | localization/governance gate | `scripts/release/localization_governance_gate.py` | blocking |
+| flow/interaction contract gate | `scripts/release/flow_interaction_gate.py` | blocking |
+| action explainability gate | `scripts/release/action_explainability_gate.py` | blocking |
 | adoption KPI schema gate | `scripts/release/adoption_kpi_schema_gate.py` | blocking |
 | adoption KPI snapshot build/publish | `scripts/release/build_adoption_kpi_snapshot.py` + `scripts/release/publish_adoption_kpi_snapshot.py` | blocking |
 | adoption KPI trend gate | `scripts/release/adoption_kpi_trend_gate.py` | blocking |
