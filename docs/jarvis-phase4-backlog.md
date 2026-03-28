@@ -88,13 +88,13 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
-| P4-H01 | in_progress | Add first-run onboarding profiles with hardware autodetect (`fast/balanced/quality`) | onboarding wizard + profile selector + tests | New user reaches first successful response with recommended profile and no manual quant tuning |
-| P4-H02 | in_progress | Ship model catalog as package UX (requirements + one-click install) | model package registry + UI/API contract | Users select models by capability/system requirements instead of raw artifact filenames |
+| P4-H01 | done | Add first-run onboarding profiles with hardware autodetect (`fast/balanced/quality`) | onboarding wizard + profile selector + tests | New user reaches first successful response with recommended profile and no manual quant tuning |
+| P4-H02 | done | Ship model catalog as package UX (requirements + one-click install) | model package registry + UI/API contract | Users select models by capability/system requirements instead of raw artifact filenames |
 | P4-H03 | done | Implement privacy/offline transparency contract | offline indicator + network intent panel + policy docs | User can see when network is required; telemetry remains opt-in by default |
 | P4-H04 | done | Expand distribution channels for mass discovery | WinGet/Homebrew/Flathub pipeline + channel docs | Stable channel artifacts are published and verifiable for Windows/macOS/Linux discovery paths |
 | P4-H05 | done | Productize developer adoption path | OpenAI-compatible API starter pack + SDK quickstarts + integration examples | Dev can run local API and complete first integration in under 15 minutes |
-| P4-H06 | todo | Add RU/EN localization and template packs | i18n baseline + localized docs + starter prompts/workflows | RU and EN users have first-class UI/docs/templates with release-level coverage checks |
-| P4-H07 | todo | Harden OSS governance and contribution policy | licensing/trademark policy + DCO/CoC + maintainer map + release discipline | External contributors onboard without legal ambiguity and release governance is explicit |
+| P4-H06 | done | Add RU/EN localization and template packs | i18n baseline + localized docs + starter prompts/workflows | RU and EN users have first-class UI/docs/templates with release-level coverage checks |
+| P4-H07 | done | Harden OSS governance and contribution policy | licensing/trademark policy + DCO/CoC + maintainer map + release discipline | External contributors onboard without legal ambiguity and release governance is explicit |
 | P4-H08 | done | Add adoption KPI funnel and growth dashboards | install/activation/retention/feature-adoption metrics + dashboard | Team can trace product changes to adoption impact while preserving privacy constraints |
 
 ## Current Sprint (P4-S0)
@@ -131,13 +131,13 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 
 | ID | Status | Scope |
 |---|---|---|
-| P4-H01 | in_progress | first-run onboarding wizard + hardware profile recommendation contract |
-| P4-H02 | in_progress | model package catalog and system-requirement-aware install flow |
+| P4-H01 | done | first-run onboarding wizard + hardware profile recommendation contract |
+| P4-H02 | done | model package catalog and system-requirement-aware install flow |
 | P4-H03 | done | offline/privacy transparency controls in runtime + UX |
 | P4-H04 | done | channel packaging pipeline for WinGet/Homebrew/Flathub |
 | P4-H05 | done | developer quickstart pack for OpenAI-compatible API integration |
-| P4-H06 | todo | RU/EN localization baseline and template starter packs |
-| P4-H07 | todo | governance baseline (license/trademark/DCO/CoC/release conventions) |
+| P4-H06 | done | RU/EN localization baseline and template starter packs |
+| P4-H07 | done | governance baseline (license/trademark/DCO/CoC/release conventions) |
 | P4-H08 | done | adoption KPI funnel and privacy-safe analytics surface |
 
 ## Execution Playbook (Start-Now)

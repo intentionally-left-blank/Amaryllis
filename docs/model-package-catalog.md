@@ -36,6 +36,10 @@
 - Strict metadata mode is configurable via `AMARYLLIS_LICENSE_ADMISSION_REQUIRE_METADATA` (default: `false`).
 - `catalog_version` is currently `model_package_catalog_v1`.
 
+## Gate Coverage
+- Blocking release/nightly gate: `scripts/release/first_run_activation_gate.py`
+- Gate validates package catalog/list/install/license-admission runtime contract as part of first-run activation flow.
+
 ## Test Coverage
 - `tests/test_model_package_catalog.py`
 - `tests/test_model_package_catalog_api.py`

@@ -51,6 +51,10 @@ Profile targets are selected from the same candidate matrix used by routing (`Mo
 ## Deterministic Backend
 `DeterministicCognitionBackend` returns a stable onboarding payload with `recommended_profile=balanced` for contract/runtime tests.
 
+## Gate Coverage
+- Blocking release/nightly gate: `scripts/release/first_run_activation_gate.py`
+- Gate report suite: `first_run_activation_gate_v1`
+
 ## Test Coverage
 - `tests/test_model_onboarding_profile.py`
 - `tests/test_model_onboarding_profile_api.py`

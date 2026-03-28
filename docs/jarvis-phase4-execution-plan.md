@@ -68,6 +68,22 @@ Evidence:
 - channel documentation and release playbook include deterministic render and validation commands;
 - channel contract tests cover template gate, render, and render-gate behavior.
 
+`WP-11` (`P4-H01` + `P4-H02`) is closed as implemented and release/nightly-gated.
+
+Evidence:
+- onboarding and package-catalog runtime contracts are exposed via `/models/onboarding/*` and `/models/packages*` APIs;
+- release/nightly workflows run blocking `first_run_activation_gate.py` with machine-readable reports;
+- docs and playbook include first-run activation gate and contract references;
+- API/unit contract tests cover onboarding profile, activation-plan/activate, package catalog, install, and license-admission flows.
+
+`WP-15` (`P4-H06` + `P4-H07`) is closed as implemented and release/nightly-gated.
+
+Evidence:
+- governance baseline is present (`CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `GOVERNANCE.md`, `MAINTAINERS.md`, `TRADEMARK_POLICY.md`, `DCO.md`, `.github/PULL_REQUEST_TEMPLATE.md`);
+- RU/EN localization baseline docs and starter templates are present under `docs/localization/ru/*` and `docs/localization/en/*`;
+- release/nightly workflows run blocking `localization_governance_gate.py` and publish machine-readable reports;
+- gate tests validate pass/fail contract behavior for localization/governance package.
+
 ## Critical Path
 1. `WP-01` -> baseline contract required before portability and QoS enforcement.
 2. `WP-02` -> required before `WP-03` mode switching can be policy driven.
@@ -191,6 +207,11 @@ Adoption lane slices (next 10 working days after PR-1..PR-8):
 | runtime lifecycle smoke | `scripts/release/runtime_lifecycle_smoke_gate.py` | blocking |
 | Linux parity smoke | `scripts/release/linux_parity_smoke.py` | blocking |
 | macOS desktop parity smoke | `scripts/release/macos_desktop_parity_smoke.py` | staging-blocking |
+| distribution channel manifest readiness | `scripts/release/distribution_channel_manifest_gate.py` | blocking |
+| distribution channel rendered-manifest gate | `scripts/release/distribution_channel_render_gate.py` | blocking |
+| API quickstart compatibility gate | `scripts/release/api_quickstart_compatibility_gate.py` | blocking |
+| first-run activation journey gate | `scripts/release/first_run_activation_gate.py` | blocking |
+| localization/governance gate | `scripts/release/localization_governance_gate.py` | blocking |
 | adoption KPI schema gate | `scripts/release/adoption_kpi_schema_gate.py` | blocking |
 | adoption KPI snapshot build/publish | `scripts/release/build_adoption_kpi_snapshot.py` + `scripts/release/publish_adoption_kpi_snapshot.py` | blocking |
 | adoption KPI trend gate | `scripts/release/adoption_kpi_trend_gate.py` | blocking |
@@ -202,10 +223,7 @@ Additional Phase 4 gates to add in this plan:
 - model package + quant passport admission gate
 - environment passport completeness gate
 - license admission gate
-- first-run activation journey gate
 - offline transparency/network intent gate
-- distribution channel manifest readiness gate
-- API quickstart compatibility gate
 
 ## Ownership Boundaries
 

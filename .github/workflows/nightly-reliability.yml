@@ -192,6 +192,16 @@ jobs:
           python scripts/release/api_quickstart_compatibility_gate.py \
             --output "artifacts/nightly-api-quickstart-compat-report.json"
 
+      - name: Run nightly first-run activation gate (blocking)
+        run: |
+          python scripts/release/first_run_activation_gate.py \
+            --output "artifacts/nightly-first-run-activation-gate-report.json"
+
+      - name: Run nightly localization/governance gate (blocking)
+        run: |
+          python scripts/release/localization_governance_gate.py \
+            --output "artifacts/nightly-localization-governance-gate-report.json"
+
       - name: Run nightly adoption KPI schema gate (blocking)
         run: |
           python scripts/release/adoption_kpi_schema_gate.py \
@@ -383,6 +393,22 @@ jobs:
         with:
           name: nightly-api-quickstart-compat-report
           path: artifacts/nightly-api-quickstart-compat-report.json
+          if-no-files-found: error
+
+      - name: Upload nightly first-run activation gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-first-run-activation-gate-report
+          path: artifacts/nightly-first-run-activation-gate-report.json
+          if-no-files-found: error
+
+      - name: Upload nightly localization/governance gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-localization-governance-gate-report
+          path: artifacts/nightly-localization-governance-gate-report.json
           if-no-files-found: error
 
       - name: Upload nightly adoption KPI schema gate report

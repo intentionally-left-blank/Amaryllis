@@ -119,6 +119,12 @@ jobs:
             tests.test_privacy_transparency_contract \
             tests.test_privacy_transparency_api \
             tests.test_offline_transparency_gate \
+            tests.test_model_onboarding_profile \
+            tests.test_model_onboarding_profile_api \
+            tests.test_model_package_catalog \
+            tests.test_model_package_catalog_api \
+            tests.test_first_run_activation_gate \
+            tests.test_localization_governance_gate \
             tests.test_unified_session_manager \
             tests.test_flow_api \
             tests.test_supervisor_task_graph_manager \
@@ -160,6 +166,30 @@ jobs:
         with:
           name: api-quickstart-compat-report
           path: artifacts/api-quickstart-compat-report.json
+          if-no-files-found: error
+
+      - name: Run first-run activation gate (blocking)
+        run: |
+          python scripts/release/first_run_activation_gate.py \
+            --output "artifacts/first-run-activation-gate-report.json"
+
+      - name: Upload first-run activation gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: first-run-activation-gate-report
+          path: artifacts/first-run-activation-gate-report.json
+          if-no-files-found: error
+
+      - name: Run localization/governance gate (blocking)
+        run: |
+          python scripts/release/localization_governance_gate.py \
+            --output "artifacts/localization-governance-gate-report.json"
+
+      - name: Upload localization/governance gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: localization-governance-gate-report
+          path: artifacts/localization-governance-gate-report.json
           if-no-files-found: error
 
   canary-smoke:

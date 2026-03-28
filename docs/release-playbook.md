@@ -24,13 +24,15 @@ Mandatory gates before publish:
 18. Distribution channel manifest readiness gate (WinGet/Homebrew/Flathub templates + placeholders)
 19. Distribution channel rendered-manifest gate (rendered WinGet/Homebrew/Flathub outputs are publish-ready and verifiable)
 20. API quickstart compatibility gate (OpenAI-compatible developer onboarding contract)
-21. Adoption KPI schema gate (install/activation/retention/feature-adoption contract assertions)
-22. Adoption KPI snapshot build gate (publishable adoption artifact + summary score)
-23. Adoption KPI trend regression gate (baseline-relative regression budget enforcement)
-24. Release quality dashboard snapshot gate (final post-Linux benchmark/reliability artifact + trend deltas)
-25. Mission success/recovery report pack export (public KPI artifact)
-26. Disaster recovery gate (backup + verify + restore drill)
-27. Compliance operations gate (access review + incidents + evidence export)
+21. First-run activation gate (onboarding profile + activation plan + package catalog runtime contract)
+22. Localization/governance gate (RU/EN docs + starter templates + contributor/legal governance package contract)
+23. Adoption KPI schema gate (install/activation/retention/feature-adoption contract assertions)
+24. Adoption KPI snapshot build gate (publishable adoption artifact + summary score)
+25. Adoption KPI trend regression gate (baseline-relative regression budget enforcement)
+26. Release quality dashboard snapshot gate (final post-Linux benchmark/reliability artifact + trend deltas)
+27. Mission success/recovery report pack export (public KPI artifact)
+28. Disaster recovery gate (backup + verify + restore drill)
+29. Compliance operations gate (access review + incidents + evidence export)
 
 Staging companion (non-blocking):
 - macOS desktop action parity smoke (`scripts/release/macos_desktop_parity_smoke.py`)
@@ -46,6 +48,12 @@ Adoption KPI schema gate reference:
 
 Adoption KPI snapshot reference:
 - `docs/adoption-kpi-snapshot.md`
+
+First-run activation gate reference:
+- `docs/first-run-activation-gate.md`
+
+Localization/governance gate reference:
+- `docs/localization-governance-gate.md`
 
 Commands:
 
@@ -75,6 +83,8 @@ python scripts/release/distribution_channel_manifest_gate.py --output artifacts/
 python scripts/release/api_quickstart_compatibility_gate.py --output artifacts/api-quickstart-compat-report.json
 python scripts/release/render_distribution_channel_manifests.py --version "<version>" --windows-x64-url "<url>" --windows-x64-sha256 "<sha256>" --macos-arm64-url "<url>" --macos-arm64-sha256 "<sha256>" --macos-x64-url "<url>" --macos-x64-sha256 "<sha256>" --flathub-archive-url "<url>" --flathub-archive-sha256 "<sha256>" --output-dir artifacts/distribution-channels-rendered --report artifacts/distribution-channels-rendered-report.json
 python scripts/release/distribution_channel_render_gate.py --render-report artifacts/distribution-channels-rendered-report.json --expected-version "<version>" --output artifacts/distribution-channel-render-gate-report.json
+python scripts/release/first_run_activation_gate.py --output artifacts/first-run-activation-gate-report.json
+python scripts/release/localization_governance_gate.py --output artifacts/localization-governance-gate-report.json
 python scripts/release/build_quality_dashboard_snapshot.py --perf-report artifacts/perf-smoke-report.json --fault-injection-report artifacts/fault-injection-reliability-report.json --injection-containment-report artifacts/injection-containment-report.json --model-artifact-admission-report artifacts/model-artifact-admission-report.json --license-admission-report artifacts/license-admission-report.json --environment-passport-report artifacts/environment-passport-report.json --mission-queue-report artifacts/mission-queue-load-report.json --runtime-lifecycle-report artifacts/runtime-lifecycle-smoke-report.json --user-journey-report artifacts/user-journey-benchmark-report.json --qos-governor-report artifacts/qos-governor-gate-report.json --long-context-report artifacts/long-context-reliability-report.json --distribution-resilience-report artifacts/distribution-resilience-report.json --distribution-channel-manifest-report artifacts/distribution-channel-manifest-report.json --api-quickstart-report artifacts/api-quickstart-compat-report.json --macos-desktop-parity-report artifacts/macos-desktop-parity-smoke-report.json --baseline eval/baselines/quality/release_quality_dashboard_baseline.json --output artifacts/release-quality-dashboard-final.json --trend-output artifacts/release-quality-dashboard-trend-final.json
 python scripts/release/adoption_kpi_schema_gate.py --user-journey-report artifacts/user-journey-benchmark-report.json --api-quickstart-report artifacts/api-quickstart-compat-report.json --distribution-channel-manifest-report artifacts/distribution-channel-manifest-report.json --quality-dashboard-report artifacts/release-quality-dashboard-final.json --output artifacts/adoption-kpi-schema-gate-report.json
 python scripts/release/build_adoption_kpi_snapshot.py --schema-gate-report artifacts/adoption-kpi-schema-gate-report.json --user-journey-report artifacts/user-journey-benchmark-report.json --api-quickstart-report artifacts/api-quickstart-compat-report.json --distribution-channel-manifest-report artifacts/distribution-channel-manifest-report.json --quality-dashboard-report artifacts/release-quality-dashboard-final.json --output artifacts/adoption-kpi-snapshot-final.json --release-id "<release_id>" --release-channel "<channel>" --commit-sha "<sha>"

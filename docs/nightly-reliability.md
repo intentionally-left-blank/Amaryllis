@@ -60,6 +60,20 @@ python3 scripts/release/adoption_kpi_schema_gate.py \
   --output artifacts/nightly-adoption-kpi-schema-gate-report.json
 ```
 
+Nightly first-run activation gate:
+
+```bash
+python3 scripts/release/first_run_activation_gate.py \
+  --output artifacts/nightly-first-run-activation-gate-report.json
+```
+
+Nightly localization/governance gate:
+
+```bash
+python3 scripts/release/localization_governance_gate.py \
+  --output artifacts/nightly-localization-governance-gate-report.json
+```
+
 Nightly distribution channel render + publish-ready validation:
 
 ```bash
@@ -144,6 +158,18 @@ Nightly adoption KPI schema gate artifact:
 
 ```text
 artifacts/nightly-adoption-kpi-schema-gate-report.json
+```
+
+Nightly first-run activation gate artifact:
+
+```text
+artifacts/nightly-first-run-activation-gate-report.json
+```
+
+Nightly localization/governance gate artifact:
+
+```text
+artifacts/nightly-localization-governance-gate-report.json
 ```
 
 Nightly adoption KPI snapshot artifacts:
