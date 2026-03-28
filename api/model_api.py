@@ -88,6 +88,13 @@ def _generation_loop_contract_payload(request: Request) -> dict[str, Any]:
                 "kv_cache": "required",
                 "cache_policy": "runtime_managed",
                 "pressure_signal_contract": "generation_loop_metrics.kv_cache.pressure_state",
+                "pressure_states": [
+                    "low",
+                    "elevated",
+                    "high",
+                    "critical",
+                ],
+                "pressure_budget_units": "estimated_tokens",
             },
             "fallback": {
                 "deterministic_semantics": True,

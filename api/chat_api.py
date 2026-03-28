@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import math
+import os
 import time
 from typing import Any
 from uuid import uuid4
@@ -175,6 +177,71 @@ def _effective_routing_payload(
     return route_payload, effective_mode
 
 
+def _env_int(name: str, *, default: int) -> int:
+    raw = str(os.getenv(name, str(default)) or "").strip()
+    try:
+        return int(raw)
+    except Exception:
+        return int(default)
+
+
+def _kv_pressure_thresholds_tokens() -> tuple[int, int, int]:
+    elevated = max(1, _env_int("AMARYLLIS_KV_PRESSURE_ELEVATED_TOKENS", default=1536))
+    high = max(elevated + 1, _env_int("AMARYLLIS_KV_PRESSURE_HIGH_TOKENS", default=3072))
+    critical = max(high + 1, _env_int("AMARYLLIS_KV_PRESSURE_CRITICAL_TOKENS", default=6144))
+    return elevated, high, critical
+
+
+def _estimate_kv_cache_payload(
+    payload: ChatCompletionsRequest,
+    *,
+    output_chars: int,
+    tool_rounds: int,
+) -> dict[str, Any]:
+    prompt_chars = 0
+    for item in payload.messages:
+        if item.content:
+            prompt_chars += len(item.content)
+    completion_chars = max(0, int(output_chars))
+
+    prompt_tokens = max(1, int(math.ceil(float(prompt_chars) / 4.0))) if prompt_chars > 0 else 1
+    completion_tokens = int(math.ceil(float(completion_chars) / 4.0)) if completion_chars > 0 else 0
+    planned_decode_tokens = max(1, int(payload.max_tokens))
+    tool_overhead_tokens = max(0, int(tool_rounds)) * 96
+    estimated_tokens = max(
+        1,
+        prompt_tokens + max(completion_tokens, planned_decode_tokens) + tool_overhead_tokens,
+    )
+
+    kv_bytes_per_token = max(512, _env_int("AMARYLLIS_KV_BYTES_PER_TOKEN", default=2048))
+    estimated_bytes = int(estimated_tokens * kv_bytes_per_token)
+
+    elevated_tokens, high_tokens, critical_tokens = _kv_pressure_thresholds_tokens()
+    if estimated_tokens >= critical_tokens:
+        pressure_state = "critical"
+    elif estimated_tokens >= high_tokens:
+        pressure_state = "high"
+    elif estimated_tokens >= elevated_tokens:
+        pressure_state = "elevated"
+    else:
+        pressure_state = "low"
+
+    eviction_count = 0
+    if pressure_state == "high":
+        high_step = max(1, high_tokens - elevated_tokens)
+        eviction_count = max(1, int((estimated_tokens - high_tokens) / high_step) + 1)
+    elif pressure_state == "critical":
+        critical_step = max(1, critical_tokens - high_tokens)
+        eviction_count = max(2, int((estimated_tokens - critical_tokens) / critical_step) + 2)
+
+    return {
+        "pressure_state": pressure_state,
+        "estimated_tokens": int(estimated_tokens),
+        "estimated_bytes": int(estimated_bytes),
+        "eviction_count": int(eviction_count),
+    }
+
+
 def _emit_generation_loop_metrics(
     request: Request,
     *,
@@ -223,12 +290,11 @@ def _emit_generation_loop_metrics(
         "provenance_sources_count": len((provenance or {}).get("sources", []))
         if isinstance((provenance or {}).get("sources", []), list)
         else 0,
-        "kv_cache": {
-            "pressure_state": "unknown",
-            "estimated_tokens": None,
-            "estimated_bytes": None,
-            "eviction_count": 0,
-        },
+        "kv_cache": _estimate_kv_cache_payload(
+            payload,
+            output_chars=int(max(0, output_chars)),
+            tool_rounds=int(max(0, tool_rounds)),
+        ),
     }
     try:
         services.telemetry.emit("generation_loop_metrics", event)

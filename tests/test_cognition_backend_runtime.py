@@ -196,6 +196,12 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(str(payload.get("contract_version")), "generation_loop_contract_v1")
         self.assertIn("request_id", payload)
+        cache = ((payload.get("contract") or {}).get("cache") or {}) if isinstance(payload, dict) else {}
+        self.assertIn("pressure_states", cache)
+        pressure_states = cache.get("pressure_states", [])
+        self.assertIsInstance(pressure_states, list)
+        self.assertIn("critical", pressure_states)
+        self.assertEqual(str(cache.get("pressure_budget_units")), "estimated_tokens")
 
         providers = payload.get("providers", {})
         self.assertIsInstance(providers, dict)

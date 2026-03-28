@@ -1,11 +1,12 @@
 # Mission Success/Recovery Report Pack
 
 ## Purpose
-`P3-D02` provides a public KPI report pack for mission success and recovery signals across
+`P4-D02` provides a public KPI report pack v2 for mission success and recovery signals across
 release and nightly pipelines.
 
 Script:
 - `scripts/release/build_mission_success_recovery_report.py`
+- `scripts/release/mission_report_pack_gate.py` (blocking schema/completeness gate)
 - `scripts/release/publish_mission_success_recovery_snapshot.py` (runtime-export helper)
 
 ## Output
@@ -69,8 +70,13 @@ Optional adoption trend source flag:
 
 - Release workflow (`release-gate.yml`) exports:
   - `artifacts/mission-success-recovery-report.json`
+  - `artifacts/mission-report-pack-gate-report.json`
 - Nightly workflow (`nightly-reliability.yml`) exports:
   - `artifacts/nightly-mission-success-recovery-report.json`
+  - `artifacts/nightly-mission-report-pack-gate-report.json`
   - `artifacts/nightly-mission-success-recovery-runtime-export.json`
 
-This makes mission reliability KPIs available as machine-readable artifacts for each release and nightly run.
+Blocking gate reference:
+- `docs/mission-report-pack-gate.md`
+
+This makes mission reliability KPIs both publishable and contract-validated for each release and nightly run.

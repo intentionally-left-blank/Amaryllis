@@ -74,3 +74,16 @@ Current mode remains explicit operator control (`launch/tick`), but now with cra
   - all nodes `succeeded` is necessary but not sufficient,
   - graph reaches `succeeded` only when objective verification passes,
   - manual mode keeps graph in `review_required` until explicit `POST /verify`.
+
+## Release/Nightly Gate
+- Blocking gate script:
+  - `scripts/release/supervisor_mission_gate.py`
+- Coverage:
+  - doc contract completeness (`/supervisor/graphs/*` + checkpoint/resume + objective verification),
+  - manager-level checkpoint/resume semantics (`SupervisorTaskGraphManager` + SQLite),
+  - runtime API smoke (`create/launch/tick/list/get/verify` + owner boundary checks).
+- Output reports:
+  - release: `artifacts/supervisor-mission-gate-report.json`
+  - nightly: `artifacts/nightly-supervisor-mission-gate-report.json`
+- Detailed gate reference:
+  - `docs/supervisor-mission-gate.md`

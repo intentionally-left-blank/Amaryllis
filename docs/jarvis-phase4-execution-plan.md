@@ -32,7 +32,7 @@ Mass-adoption integration focus:
 | WP | Backlog IDs | Priority | Goal | Primary Code Areas | Blocking Gate |
 |---|---|---|---|---|---|
 | WP-01 | P4-E01 | P0 | Define generation-loop contract and backend conformance matrix | `models/model_manager.py`, `models/routing.py`, `api/model_api.py`, `runtime/config.py` | contract tests + conformance report |
-| WP-02 | P4-E02 | P0 | Add KV pressure telemetry and policy transitions | `runtime/observability.py`, `runtime/telemetry.py`, `runtime/server.py`, `slo_profiles/` | no silent degradation under pressure tests |
+| WP-02 | P4-E02 | P0 | Add KV pressure telemetry and policy transitions | `api/chat_api.py`, `runtime/observability.py`, `runtime/qos_governor.py`, `scripts/release/` | no silent degradation under pressure tests |
 | WP-03 | P4-E03 | P0 | Implement QoS governor with deterministic mode switching (`quality/balanced/power_save`) | `runtime/config.py`, `runtime/server.py`, `scripts/release/perf_smoke_gate.py`, `scripts/release/user_journey_benchmark.py` | KPI gate on TTFT and stability |
 | WP-04 | P4-E04 | P1 | Long-context reliability eval pack and release/nightly blocking | `eval/`, `scripts/release/`, `tests/test_user_journey_benchmark.py` | release/nightly block on long-context regressions |
 | WP-05 | P4-F01 | P0 | Provenance required for RAG-grounded outputs | `memory/memory_manager.py`, `api/chat_api.py`, `api/memory_api.py`, `runtime/observability.py` | provenance coverage gate |
@@ -49,6 +49,22 @@ Mass-adoption integration focus:
 | WP-16 | P4-H08 | P1 | Adoption KPI funnel and growth dashboards | `runtime/observability.py`, `scripts/release/`, `observability/` | install/activation/retention/adoption KPI contracts publishable without breaking privacy policy |
 
 ## Completion Snapshot (Latest)
+
+`WP-01` (`P4-E01`) is closed as implemented and release/nightly-gated.
+
+Evidence:
+- generation-loop portability contract endpoint is implemented and documented (`/models/generation-loop/contract`, `docs/generation-loop-contract.md`);
+- provider conformance matrix includes contract versioning and provider-level pass/warn status surface;
+- release/nightly workflows run blocking `generation_loop_conformance_gate.py` with machine-readable reports;
+- conformance gate tests plus runtime contract tests (`tests/test_generation_loop_conformance_gate.py`, `tests/test_cognition_backend_runtime.py`) validate portability baseline behavior.
+
+`WP-02` (`P4-E02`) is closed as implemented and release/nightly-gated.
+
+Evidence:
+- generation loop telemetry now emits KV pressure payload (`generation_loop_metrics.kv_cache`) with `pressure_state`, `estimated_tokens`, `estimated_bytes`, and `eviction_count` fields;
+- QoS transition path is validated against real pressure telemetry (high/critical) instead of static `unknown` cache signals;
+- release/nightly workflows run blocking `kv_pressure_policy_gate.py` with machine-readable reports;
+- gate tests (`tests/test_kv_pressure_policy_gate.py`) validate pass/fail behavior and report contract.
 
 `WP-16` (`P4-H08`) is closed as implemented and release/nightly-gated.
 
@@ -92,6 +108,33 @@ Evidence:
 - action timeline stream + explainability payload is implemented via `/agents/runs/{run_id}/events` + `/agents/runs/{run_id}/explain` with dedicated docs (`docs/mission-audit-timeline.md`, `docs/agent-run-explainability-feed.md`);
 - release/nightly workflows run blocking `flow_interaction_gate.py` and `action_explainability_gate.py` and publish machine-readable reports;
 - API/unit/gate tests cover flow session lifecycle, interaction-mode behavior, explainability feed payload semantics, and gate pass/fail behavior.
+
+Epic B baseline (`P4-B01` + `P4-B02` + `P4-B03`) is closed as implemented and release/nightly-gated.
+
+Evidence:
+- Linux desktop integration pack is active via `desktop_action` tool and `LinuxDesktopActionAdapter` for notifications/clipboard/app-launch/window controls with policy guardrails;
+- macOS staging parity surface is implemented via `MacOSDesktopActionAdapter` and parity smoke coverage;
+- desktop action rollback metadata is deterministic for risky actions (`metadata.rollback_hint`, `metadata.mutating`) and is persisted in terminal action receipts;
+- release/nightly workflows run blocking `desktop_action_rollback_gate.py` with machine-readable reports;
+- adapter/runtime/gate tests cover Linux/macOS behavior, permission boundary for mutating actions, and rollback hint contract.
+
+Epic C baseline (`P4-C01` + `P4-C02` + `P4-C03`) is closed as implemented and release/nightly-gated.
+
+Evidence:
+- bounded supervisor task-graph orchestration is implemented (`SupervisorTaskGraphManager`) with create/launch/tick execution semantics and ownership checks;
+- runtime API contract is implemented and documented (`/supervisor/graphs/contract`, `create`, `list/get`, `launch`, `tick`, `verify`);
+- checkpoint + resume semantics are persisted in SQLite (`supervisor_graphs`) and auto-hydrated on runtime startup;
+- objective verification policy is enforced (`auto/manual`, keyword/response checks, explicit `/verify` override path);
+- release/nightly workflows run blocking `supervisor_mission_gate.py` with machine-readable reports;
+- manager/API/gate tests cover checkpoint recovery, manual/auto objective verification outcomes, and auth boundary behavior.
+
+Epic D baseline (`P4-D01` + `P4-D02` + `P4-D03`) is closed as implemented and release/nightly-gated.
+
+Evidence:
+- end-to-end user journey benchmark is wired as strict release/nightly gate with stable baseline and KPI regression thresholds;
+- mission success/recovery KPI pack v2 is built with class-level breakdown (`mission_execution`, `recovery`, `quality`, `runtime_qos`, `distribution`, `desktop_staging`, `user_flow`, `adoption_growth`, `nightly_reliability`);
+- mission KPI pack now has explicit schema/completeness blocking gate (`mission_report_pack_gate.py`) in release/nightly workflows;
+- distribution resilience path remains release-blocking and integrated into KPI pack inputs.
 
 ## Critical Path
 1. `WP-01` -> baseline contract required before portability and QoS enforcement.
@@ -223,12 +266,16 @@ Adoption lane slices (next 10 working days after PR-1..PR-8):
 | localization/governance gate | `scripts/release/localization_governance_gate.py` | blocking |
 | flow/interaction contract gate | `scripts/release/flow_interaction_gate.py` | blocking |
 | action explainability gate | `scripts/release/action_explainability_gate.py` | blocking |
+| desktop action rollback gate | `scripts/release/desktop_action_rollback_gate.py` | blocking |
+| supervisor mission gate | `scripts/release/supervisor_mission_gate.py` | blocking |
+| generation-loop conformance gate | `scripts/release/generation_loop_conformance_gate.py` | blocking |
+| KV pressure policy gate | `scripts/release/kv_pressure_policy_gate.py` | blocking |
 | adoption KPI schema gate | `scripts/release/adoption_kpi_schema_gate.py` | blocking |
 | adoption KPI snapshot build/publish | `scripts/release/build_adoption_kpi_snapshot.py` + `scripts/release/publish_adoption_kpi_snapshot.py` | blocking |
 | adoption KPI trend gate | `scripts/release/adoption_kpi_trend_gate.py` | blocking |
+| mission report pack gate | `scripts/release/mission_report_pack_gate.py` | blocking |
 
 Additional Phase 4 gates to add in this plan:
-- generation-loop conformance gate
 - provenance coverage gate
 - injection containment regression gate
 - model package + quant passport admission gate

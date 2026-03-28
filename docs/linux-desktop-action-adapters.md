@@ -91,3 +91,13 @@ Example payload:
   }
 }
 ```
+
+## Release/Nightly Gate
+
+Contract gate:
+- `scripts/release/desktop_action_rollback_gate.py`
+
+The gate validates:
+- desktop tool registration and policy metadata,
+- rollback-hint coverage for mutating actions,
+- terminal receipt rollback metadata persistence.

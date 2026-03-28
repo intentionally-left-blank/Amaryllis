@@ -28,13 +28,18 @@ Mandatory gates before publish:
 22. Localization/governance gate (RU/EN docs + starter templates + contributor/legal governance package contract)
 23. Flow/interaction gate (unified `/flow/sessions/*` + `/runs/dispatch` plan-vs-execute trust-boundary contract)
 24. Action explainability gate (timeline stream + plain-language `reason/result/next_step` payload contract)
-25. Adoption KPI schema gate (install/activation/retention/feature-adoption contract assertions)
-26. Adoption KPI snapshot build gate (publishable adoption artifact + summary score)
-27. Adoption KPI trend regression gate (baseline-relative regression budget enforcement)
-28. Release quality dashboard snapshot gate (final post-Linux benchmark/reliability artifact + trend deltas)
-29. Mission success/recovery report pack export (public KPI artifact)
-30. Disaster recovery gate (backup + verify + restore drill)
-31. Compliance operations gate (access review + incidents + evidence export)
+25. Desktop action rollback gate (Linux desktop action + rollback hint + terminal receipt contract)
+26. Supervisor mission gate (bounded task-graph + checkpoint/resume + objective verification contract)
+27. Generation-loop conformance gate (backend portability matrix + contract identity assertions)
+28. KV pressure policy gate (generation-loop KV telemetry contract + pressure-driven QoS transition assertions)
+29. Adoption KPI schema gate (install/activation/retention/feature-adoption contract assertions)
+30. Adoption KPI snapshot build gate (publishable adoption artifact + summary score)
+31. Adoption KPI trend regression gate (baseline-relative regression budget enforcement)
+32. Release quality dashboard snapshot gate (final post-Linux benchmark/reliability artifact + trend deltas)
+33. Mission success/recovery report pack gate (v2 schema + class/KPI completeness contract)
+34. Mission success/recovery report pack export (public KPI artifact)
+35. Disaster recovery gate (backup + verify + restore drill)
+36. Compliance operations gate (access review + incidents + evidence export)
 
 Staging companion (non-blocking):
 - macOS desktop action parity smoke (`scripts/release/macos_desktop_parity_smoke.py`)
@@ -62,6 +67,21 @@ Flow/interaction gate reference:
 
 Action explainability gate reference:
 - `docs/action-explainability-gate.md`
+
+Desktop action rollback gate reference:
+- `docs/desktop-action-rollback-gate.md`
+
+Supervisor mission gate reference:
+- `docs/supervisor-mission-gate.md`
+
+Generation-loop conformance gate reference:
+- `docs/generation-loop-conformance-gate.md`
+
+KV pressure policy gate reference:
+- `docs/kv-pressure-policy-gate.md`
+
+Mission report pack gate reference:
+- `docs/mission-report-pack-gate.md`
 
 Commands:
 
@@ -95,6 +115,10 @@ python scripts/release/first_run_activation_gate.py --output artifacts/first-run
 python scripts/release/localization_governance_gate.py --output artifacts/localization-governance-gate-report.json
 python scripts/release/flow_interaction_gate.py --output artifacts/flow-interaction-gate-report.json
 python scripts/release/action_explainability_gate.py --output artifacts/action-explainability-gate-report.json
+python scripts/release/desktop_action_rollback_gate.py --output artifacts/desktop-action-rollback-gate-report.json
+python scripts/release/supervisor_mission_gate.py --output artifacts/supervisor-mission-gate-report.json
+python scripts/release/generation_loop_conformance_gate.py --min-providers 1 --max-warning-providers 2 --output artifacts/generation-loop-conformance-gate-report.json
+python scripts/release/kv_pressure_policy_gate.py --min-pressure-events 1 --min-critical-events 1 --output artifacts/kv-pressure-policy-gate-report.json
 python scripts/release/build_quality_dashboard_snapshot.py --perf-report artifacts/perf-smoke-report.json --fault-injection-report artifacts/fault-injection-reliability-report.json --injection-containment-report artifacts/injection-containment-report.json --model-artifact-admission-report artifacts/model-artifact-admission-report.json --license-admission-report artifacts/license-admission-report.json --environment-passport-report artifacts/environment-passport-report.json --mission-queue-report artifacts/mission-queue-load-report.json --runtime-lifecycle-report artifacts/runtime-lifecycle-smoke-report.json --user-journey-report artifacts/user-journey-benchmark-report.json --qos-governor-report artifacts/qos-governor-gate-report.json --long-context-report artifacts/long-context-reliability-report.json --distribution-resilience-report artifacts/distribution-resilience-report.json --distribution-channel-manifest-report artifacts/distribution-channel-manifest-report.json --api-quickstart-report artifacts/api-quickstart-compat-report.json --macos-desktop-parity-report artifacts/macos-desktop-parity-smoke-report.json --baseline eval/baselines/quality/release_quality_dashboard_baseline.json --output artifacts/release-quality-dashboard-final.json --trend-output artifacts/release-quality-dashboard-trend-final.json
 python scripts/release/adoption_kpi_schema_gate.py --user-journey-report artifacts/user-journey-benchmark-report.json --api-quickstart-report artifacts/api-quickstart-compat-report.json --distribution-channel-manifest-report artifacts/distribution-channel-manifest-report.json --quality-dashboard-report artifacts/release-quality-dashboard-final.json --output artifacts/adoption-kpi-schema-gate-report.json
 python scripts/release/build_adoption_kpi_snapshot.py --schema-gate-report artifacts/adoption-kpi-schema-gate-report.json --user-journey-report artifacts/user-journey-benchmark-report.json --api-quickstart-report artifacts/api-quickstart-compat-report.json --distribution-channel-manifest-report artifacts/distribution-channel-manifest-report.json --quality-dashboard-report artifacts/release-quality-dashboard-final.json --output artifacts/adoption-kpi-snapshot-final.json --release-id "<release_id>" --release-channel "<channel>" --commit-sha "<sha>"
@@ -102,6 +126,7 @@ python scripts/release/adoption_kpi_trend_gate.py --snapshot-report artifacts/ad
 python scripts/release/publish_adoption_kpi_snapshot.py --snapshot-report artifacts/adoption-kpi-snapshot-final.json --channel release --install-root ~/.local/share/amaryllis
 python scripts/release/publish_release_quality_snapshot.py --snapshot-report artifacts/release-quality-dashboard-final.json --trend-report artifacts/release-quality-dashboard-trend-final.json --install-root ~/.local/share/amaryllis
 python scripts/release/build_mission_success_recovery_report.py --mission-queue-report artifacts/mission-queue-load-report.json --fault-injection-report artifacts/fault-injection-reliability-report.json --quality-dashboard-report artifacts/release-quality-dashboard-final.json --adoption-kpi-trend-report artifacts/adoption-kpi-trend-gate-report.json --distribution-resilience-report artifacts/distribution-resilience-report.json --macos-desktop-parity-report artifacts/macos-desktop-parity-smoke-report.json --user-journey-report artifacts/user-journey-benchmark-report.json --scope release --output artifacts/mission-success-recovery-report.json
+python scripts/release/mission_report_pack_gate.py --report artifacts/mission-success-recovery-report.json --expected-scope release --output artifacts/mission-report-pack-gate-report.json
 python scripts/release/disaster_recovery_gate.py
 python scripts/release/compliance_ops_gate.py
 ```

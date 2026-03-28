@@ -88,6 +88,38 @@ python3 scripts/release/action_explainability_gate.py \
   --output artifacts/nightly-action-explainability-gate-report.json
 ```
 
+Nightly desktop action rollback gate:
+
+```bash
+python3 scripts/release/desktop_action_rollback_gate.py \
+  --output artifacts/nightly-desktop-action-rollback-gate-report.json
+```
+
+Nightly supervisor mission gate:
+
+```bash
+python3 scripts/release/supervisor_mission_gate.py \
+  --output artifacts/nightly-supervisor-mission-gate-report.json
+```
+
+Nightly generation-loop conformance gate:
+
+```bash
+python3 scripts/release/generation_loop_conformance_gate.py \
+  --min-providers 1 \
+  --max-warning-providers 2 \
+  --output artifacts/nightly-generation-loop-conformance-gate-report.json
+```
+
+Nightly KV pressure policy gate:
+
+```bash
+python3 scripts/release/kv_pressure_policy_gate.py \
+  --min-pressure-events 1 \
+  --min-critical-events 1 \
+  --output artifacts/nightly-kv-pressure-policy-gate-report.json
+```
+
 Nightly distribution channel render + publish-ready validation:
 
 ```bash
@@ -140,6 +172,15 @@ python3 scripts/release/publish_adoption_kpi_snapshot.py \
   --channel nightly \
   --expect-release-channel nightly \
   --output artifacts/nightly-adoption-kpi-snapshot-runtime-export.json
+```
+
+Nightly mission report pack gate:
+
+```bash
+python3 scripts/release/mission_report_pack_gate.py \
+  --report artifacts/nightly-mission-success-recovery-report.json \
+  --expected-scope nightly \
+  --output artifacts/nightly-mission-report-pack-gate-report.json
 ```
 
 ## Report
@@ -198,6 +239,30 @@ Nightly action explainability gate artifact:
 artifacts/nightly-action-explainability-gate-report.json
 ```
 
+Nightly desktop action rollback gate artifact:
+
+```text
+artifacts/nightly-desktop-action-rollback-gate-report.json
+```
+
+Nightly supervisor mission gate artifact:
+
+```text
+artifacts/nightly-supervisor-mission-gate-report.json
+```
+
+Nightly generation-loop conformance gate artifact:
+
+```text
+artifacts/nightly-generation-loop-conformance-gate-report.json
+```
+
+Nightly KV pressure policy gate artifact:
+
+```text
+artifacts/nightly-kv-pressure-policy-gate-report.json
+```
+
 Nightly adoption KPI snapshot artifacts:
 
 ```text
@@ -218,6 +283,12 @@ Mission success/recovery report pack artifact:
 
 ```text
 artifacts/nightly-mission-success-recovery-report.json
+```
+
+Mission report pack gate artifact:
+
+```text
+artifacts/nightly-mission-report-pack-gate-report.json
 ```
 
 Nightly runtime-export companion artifact:

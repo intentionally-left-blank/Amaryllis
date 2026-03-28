@@ -104,6 +104,7 @@ jobs:
             tests.test_agent_run_explain_api \
             tests.test_desktop_action_adapter \
             tests.test_desktop_action_runtime_api \
+            tests.test_desktop_action_rollback_gate \
             tests.test_macos_desktop_parity_smoke \
             tests.test_plugin_compat \
             tests.test_plugin_capabilities \
@@ -132,10 +133,12 @@ jobs:
             tests.test_flow_api \
             tests.test_supervisor_task_graph_manager \
             tests.test_supervisor_api \
+            tests.test_supervisor_mission_gate \
             tests.test_release_quality_dashboard_snapshot \
             tests.test_publish_release_quality_snapshot \
             tests.test_publish_mission_success_recovery_snapshot \
             tests.test_mission_success_recovery_report_pack \
+            tests.test_mission_report_pack_gate \
             tests.test_distribution_resilience_report \
             tests.test_distribution_channel_manifest_gate \
             tests.test_render_distribution_channel_manifests \
@@ -150,6 +153,8 @@ jobs:
             tests.test_runtime_lifecycle_smoke_gate \
             tests.test_qos_governor \
             tests.test_qos_governor_gate \
+            tests.test_kv_pressure_policy_gate \
+            tests.test_generation_loop_conformance_gate \
             tests.test_long_context_reliability_gate \
             tests.test_api_quickstart_compatibility_gate \
             tests.test_sdk_openai_compat_client \
@@ -217,6 +222,58 @@ jobs:
         with:
           name: action-explainability-gate-report
           path: artifacts/action-explainability-gate-report.json
+          if-no-files-found: error
+
+      - name: Run desktop action rollback gate (blocking)
+        run: |
+          python scripts/release/desktop_action_rollback_gate.py \
+            --output "artifacts/desktop-action-rollback-gate-report.json"
+
+      - name: Upload desktop action rollback gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-action-rollback-gate-report
+          path: artifacts/desktop-action-rollback-gate-report.json
+          if-no-files-found: error
+
+      - name: Run supervisor mission gate (blocking)
+        run: |
+          python scripts/release/supervisor_mission_gate.py \
+            --output "artifacts/supervisor-mission-gate-report.json"
+
+      - name: Upload supervisor mission gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: supervisor-mission-gate-report
+          path: artifacts/supervisor-mission-gate-report.json
+          if-no-files-found: error
+
+      - name: Run generation-loop conformance gate (blocking)
+        run: |
+          python scripts/release/generation_loop_conformance_gate.py \
+            --min-providers "${AMARYLLIS_GENLOOP_MIN_PROVIDERS:-1}" \
+            --max-warning-providers "${AMARYLLIS_GENLOOP_MAX_WARNING_PROVIDERS:-1000000}" \
+            --output "artifacts/generation-loop-conformance-gate-report.json"
+
+      - name: Upload generation-loop conformance gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: generation-loop-conformance-gate-report
+          path: artifacts/generation-loop-conformance-gate-report.json
+          if-no-files-found: error
+
+      - name: Run KV pressure policy gate (blocking)
+        run: |
+          python scripts/release/kv_pressure_policy_gate.py \
+            --min-pressure-events "${AMARYLLIS_KV_PRESSURE_GATE_MIN_EVENTS:-1}" \
+            --min-critical-events "${AMARYLLIS_KV_PRESSURE_GATE_MIN_CRITICAL_EVENTS:-1}" \
+            --output "artifacts/kv-pressure-policy-gate-report.json"
+
+      - name: Upload KV pressure policy gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: kv-pressure-policy-gate-report
+          path: artifacts/kv-pressure-policy-gate-report.json
           if-no-files-found: error
 
   canary-smoke:
@@ -898,6 +955,20 @@ jobs:
             ${MACOS_DESKTOP_PARITY_ARG} \
             --scope "release" \
             --output "artifacts/mission-success-recovery-report.json"
+
+      - name: Run mission report pack gate (blocking)
+        run: |
+          python scripts/release/mission_report_pack_gate.py \
+            --report "artifacts/mission-success-recovery-report.json" \
+            --expected-scope "release" \
+            --output "artifacts/mission-report-pack-gate-report.json"
+
+      - name: Upload mission report pack gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: mission-report-pack-gate-report
+          path: artifacts/mission-report-pack-gate-report.json
+          if-no-files-found: error
 
       - name: Upload mission success/recovery report pack
         uses: actions/upload-artifact@v4

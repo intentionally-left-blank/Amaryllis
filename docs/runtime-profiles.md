@@ -82,6 +82,15 @@ QoS governor controls runtime mode switching (`quality` / `balanced` / `power_sa
 - `AMARYLLIS_QOS_KV_PRESSURE_TARGET_EVENTS`
 - `AMARYLLIS_QOS_KV_PRESSURE_CRITICAL_EVENTS`
 
+Generation-loop KV pressure telemetry keys:
+
+- `AMARYLLIS_KV_PRESSURE_ELEVATED_TOKENS`
+- `AMARYLLIS_KV_PRESSURE_HIGH_TOKENS`
+- `AMARYLLIS_KV_PRESSURE_CRITICAL_TOKENS`
+- `AMARYLLIS_KV_BYTES_PER_TOKEN`
+
+`generation_loop_metrics.kv_cache.pressure_state` uses `low/elevated/high/critical`.
+
 Runtime service endpoints:
 
 - `GET /service/qos` (current mode, route mode, thermal state, thresholds, observed metrics)

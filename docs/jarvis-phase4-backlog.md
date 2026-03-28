@@ -38,32 +38,32 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
-| P4-B01 | in_progress | Implement Linux desktop integration pack (notifications/window/clipboard/app launch) | adapter set + tests | Common desktop actions run through policy-gated adapters on Linux |
+| P4-B01 | done | Implement Linux desktop integration pack (notifications/window/clipboard/app launch) | adapter set + tests | Common desktop actions run through policy-gated adapters on Linux |
 | P4-B02 | done | Add macOS staging parity adapters for core desktop actions | mac staging adapters + parity tests | macOS supports critical subset with same contract and policy behavior |
-| P4-B03 | todo | Add transaction-safe rollback hints for desktop actions | action rollback contract + receipts | Risky actions provide deterministic rollback metadata where feasible |
+| P4-B03 | done | Add transaction-safe rollback hints for desktop actions | action rollback contract + receipts | Risky actions provide deterministic rollback metadata where feasible |
 
 ### Epic C - Autonomous Multi-Agent Operations
 
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
-| P4-C01 | in_progress | Introduce supervisor for bounded multi-agent task graphs | supervisor runtime + graph contract | Complex goals split into bounded subtasks with parent-level control |
-| P4-C02 | in_progress | Add mission checkpointing and resume across runtime restarts | checkpoint store + resume policy | Long missions recover from crash/restart without silent state corruption |
-| P4-C03 | in_progress | Add per-mission objective verification gates | verifier policies + escalation routes | Mission completion requires explicit objective checks, not only tool success |
+| P4-C01 | done | Introduce supervisor for bounded multi-agent task graphs | supervisor runtime + graph contract | Complex goals split into bounded subtasks with parent-level control |
+| P4-C02 | done | Add mission checkpointing and resume across runtime restarts | checkpoint store + resume policy | Long missions recover from crash/restart without silent state corruption |
+| P4-C03 | done | Add per-mission objective verification gates | verifier policies + escalation routes | Mission completion requires explicit objective checks, not only tool success |
 
 ### Epic D - Product Reliability and Distribution
 
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
-| P4-D01 | in_progress | Add end-to-end user journey benchmark harness | journey benchmark suite + report | Release/nightly include comparable user-flow success/latency KPIs |
-| P4-D02 | in_progress | Add mission outcome public KPI pack v2 (release + nightly) | expanded KPI report schema | Success/recovery metrics include trendable mission-class breakdowns |
+| P4-D01 | done | Add end-to-end user journey benchmark harness | journey benchmark suite + report | Release/nightly include comparable user-flow success/latency KPIs |
+| P4-D02 | done | Add mission outcome public KPI pack v2 (release + nightly) | expanded KPI report schema | Success/recovery metrics include trendable mission-class breakdowns |
 | P4-D03 | done | Harden packaging/update/rollback path for Linux primary and mac staging | updater/rollback contracts + smoke gates | Operator can safely install/update/rollback without manual recovery steps |
 
 ### Epic E - Runtime Portability and QoS Envelope
 
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
-| P4-E01 | in_progress | Define backend-portable generation-loop contract (`prefill/decode`, cache, fallback semantics) | contract spec + conformance tests | CPU/GPU/NPU backends pass the same functional contract and fallback determinism checks |
-| P4-E02 | in_progress | Add KV cache observability and pressure-policy framework | KV telemetry schema + policy engine | Runtime emits KV pressure signals and applies policy transitions without silent quality collapse |
+| P4-E01 | done | Define backend-portable generation-loop contract (`prefill/decode`, cache, fallback semantics) | contract spec + conformance tests | CPU/GPU/NPU backends pass the same functional contract and fallback determinism checks |
+| P4-E02 | done | Add KV cache observability and pressure-policy framework | KV telemetry schema + policy engine | Runtime emits KV pressure signals and applies policy transitions without silent quality collapse |
 | P4-E03 | in_progress | Implement QoS governor (`TTFT`, sustained decode, thermal-aware mode switching) | qos governor module + benchmark hooks | User-visible modes maintain target latency/stability envelopes under stress |
 | P4-E04 | done | Add long-context reliability eval pack | eval dataset + gate job | Release/nightly fail on long-context regressions in relevance and stability |
 
@@ -104,21 +104,22 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 | P4-A01 | done | unified multimodal session state machine contract (runtime manager + `/flow/sessions/*` API + tests + docs) |
 | P4-A02 | done | explicit plan-vs-execute mode in API (`/agents/{agent_id}/runs/dispatch`) + interaction-mode contract endpoint + tests + docs |
 | P4-A03 | done | action timeline stream + explainability payload (`/agents/runs/{run_id}/events` + `/agents/runs/{run_id}/explain`) + tests + docs |
-| P4-B01 | in_progress | Linux desktop integration adapters (first slice: `desktop_action` tool + Linux/Stub adapters + tests + docs) |
+| P4-B01 | done | Linux desktop integration adapters (first slice: `desktop_action` tool + Linux/Stub adapters + tests + docs) |
 | P4-B02 | done | macOS staging parity adapters (`MacOSDesktopActionAdapter`) + platform selector wiring + adapter contract tests |
-| P4-C01 | in_progress | bounded multi-agent supervisor skeleton (task graph manager + API contract + launch/tick control loop + tests) |
-| P4-C02 | in_progress | supervisor checkpoint store + auto-hydrate on runtime start (SQLite migration + storage methods + recovery tests) |
-| P4-C03 | in_progress | objective verification gates in supervisor (`objective_verification` policy + `/supervisor/graphs/{id}/verify` endpoint + tests) |
-| P4-D01 | in_progress | end-to-end user journey benchmark baseline (`scripts/release/user_journey_benchmark.py` + baseline + release/nightly artifact wiring) |
-| P4-D02 | in_progress | mission KPI pack schema v2 (`mission_success_recovery_report_pack_v2` + class breakdown by mission/recovery/quality/user_flow/nightly) |
+| P4-B03 | done | desktop action rollback-hint contract (`metadata.rollback_hint` + terminal receipts + release/nightly rollback gate) |
+| P4-C01 | done | bounded multi-agent supervisor runtime contract (task graph manager + API contract + launch/tick control loop + release/nightly gate) |
+| P4-C02 | done | supervisor checkpoint store + auto-hydrate on runtime start (SQLite migration + storage methods + recovery tests + release/nightly gate) |
+| P4-C03 | done | objective verification gates in supervisor (`objective_verification` policy + `/supervisor/graphs/{id}/verify` endpoint + release/nightly gate) |
+| P4-D01 | done | end-to-end user journey benchmark baseline (`scripts/release/user_journey_benchmark.py` + baseline + release/nightly artifact wiring + strict KPI thresholds) |
+| P4-D02 | done | mission KPI pack schema v2 (`mission_success_recovery_report_pack_v2` + class breakdown by mission/recovery/quality/user_flow/nightly + release/nightly gate) |
 | P4-D03 | done | distribution resilience report (`scripts/release/build_distribution_resilience_report.py`) + release-gate blocking artifact wiring (`distribution-resilience-report.json`) |
 
 ## Planned Sprint (P4-S1, Research Integration Hardening)
 
 | ID | Status | Scope |
 |---|---|---|
-| P4-E01 | in_progress | generation-loop portability contract draft + backend conformance matrix |
-| P4-E02 | in_progress | KV telemetry schema + initial pressure-policy transitions |
+| P4-E01 | done | generation-loop portability contract + backend conformance matrix (`/models/generation-loop/contract` + release/nightly conformance gate) |
+| P4-E02 | done | KV telemetry schema + initial pressure-policy transitions |
 | P4-E03 | in_progress | QoS governor baseline with `balanced` and `power-save` modes |
 | P4-E04 | done | long-context reliability eval dataset + release/nightly blocking gate |
 | P4-F01 | in_progress | provenance contract for RAG responses + API payload wiring |

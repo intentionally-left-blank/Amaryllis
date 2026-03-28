@@ -212,6 +212,30 @@ jobs:
           python scripts/release/action_explainability_gate.py \
             --output "artifacts/nightly-action-explainability-gate-report.json"
 
+      - name: Run nightly desktop action rollback gate (blocking)
+        run: |
+          python scripts/release/desktop_action_rollback_gate.py \
+            --output "artifacts/nightly-desktop-action-rollback-gate-report.json"
+
+      - name: Run nightly supervisor mission gate (blocking)
+        run: |
+          python scripts/release/supervisor_mission_gate.py \
+            --output "artifacts/nightly-supervisor-mission-gate-report.json"
+
+      - name: Run nightly generation-loop conformance gate (blocking)
+        run: |
+          python scripts/release/generation_loop_conformance_gate.py \
+            --min-providers "${AMARYLLIS_NIGHTLY_GENLOOP_MIN_PROVIDERS:-1}" \
+            --max-warning-providers "${AMARYLLIS_NIGHTLY_GENLOOP_MAX_WARNING_PROVIDERS:-1000000}" \
+            --output "artifacts/nightly-generation-loop-conformance-gate-report.json"
+
+      - name: Run nightly KV pressure policy gate (blocking)
+        run: |
+          python scripts/release/kv_pressure_policy_gate.py \
+            --min-pressure-events "${AMARYLLIS_NIGHTLY_KV_PRESSURE_GATE_MIN_EVENTS:-1}" \
+            --min-critical-events "${AMARYLLIS_NIGHTLY_KV_PRESSURE_GATE_MIN_CRITICAL_EVENTS:-1}" \
+            --output "artifacts/nightly-kv-pressure-policy-gate-report.json"
+
       - name: Run nightly adoption KPI schema gate (blocking)
         run: |
           python scripts/release/adoption_kpi_schema_gate.py \
@@ -277,6 +301,14 @@ jobs:
             ${MACOS_DESKTOP_PARITY_ARG} \
             --scope "nightly" \
             --output "artifacts/nightly-mission-success-recovery-report.json"
+
+      - name: Run nightly mission report pack gate (blocking)
+        if: ${{ always() }}
+        run: |
+          python scripts/release/mission_report_pack_gate.py \
+            --report "artifacts/nightly-mission-success-recovery-report.json" \
+            --expected-scope "nightly" \
+            --output "artifacts/nightly-mission-report-pack-gate-report.json"
 
       - name: Publish nightly mission report for runtime export
         if: ${{ always() }}
@@ -437,6 +469,38 @@ jobs:
           path: artifacts/nightly-action-explainability-gate-report.json
           if-no-files-found: error
 
+      - name: Upload nightly desktop action rollback gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-desktop-action-rollback-gate-report
+          path: artifacts/nightly-desktop-action-rollback-gate-report.json
+          if-no-files-found: error
+
+      - name: Upload nightly supervisor mission gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-supervisor-mission-gate-report
+          path: artifacts/nightly-supervisor-mission-gate-report.json
+          if-no-files-found: error
+
+      - name: Upload nightly generation-loop conformance gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-generation-loop-conformance-gate-report
+          path: artifacts/nightly-generation-loop-conformance-gate-report.json
+          if-no-files-found: error
+
+      - name: Upload nightly KV pressure policy gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-kv-pressure-policy-gate-report
+          path: artifacts/nightly-kv-pressure-policy-gate-report.json
+          if-no-files-found: error
+
       - name: Upload nightly adoption KPI schema gate report
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -479,4 +543,12 @@ jobs:
           path: |
             artifacts/nightly-mission-success-recovery-report.json
             artifacts/nightly-mission-success-recovery-runtime-export.json
+          if-no-files-found: warn
+
+      - name: Upload nightly mission report pack gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-mission-report-pack-gate-report
+          path: artifacts/nightly-mission-report-pack-gate-report.json
           if-no-files-found: warn
