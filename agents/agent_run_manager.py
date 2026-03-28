@@ -35,6 +35,14 @@ class TelemetrySink(Protocol):
         ...
 
 
+class AutonomyCircuitBreakerContract(Protocol):
+    def is_armed(self) -> bool:
+        ...
+
+    def snapshot(self) -> dict[str, Any]:
+        ...
+
+
 class RunBudgetExceededError(TaskGuardrailError):
     pass
 
@@ -98,6 +106,7 @@ class AgentRunManager:
         run_budget_max_tool_errors: int = 3,
         run_lease_ttl_sec: float | None = None,
         telemetry: TelemetrySink | None = None,
+        autonomy_circuit_breaker: AutonomyCircuitBreakerContract | None = None,
     ) -> None:
         self.logger = logging.getLogger("amaryllis.agents.runs")
         self.database = database
@@ -123,6 +132,7 @@ class AgentRunManager:
             "max_tool_errors": max(0, int(run_budget_max_tool_errors)),
         }
         self.telemetry = telemetry
+        self.autonomy_circuit_breaker = autonomy_circuit_breaker
 
         self._queue: Queue[str | None] = Queue()
         self._workers: list[Thread] = []
@@ -226,6 +236,33 @@ class AgentRunManager:
         actor = str(user_id or "").strip()
         if not owner or not actor or owner != actor:
             raise ValueError(f"Agent ownership mismatch for agent: {agent.id}")
+        if self.autonomy_circuit_breaker is not None and self.autonomy_circuit_breaker.is_armed():
+            snapshot_raw = self.autonomy_circuit_breaker.snapshot()
+            snapshot = dict(snapshot_raw) if isinstance(snapshot_raw, dict) else {}
+            details: list[str] = []
+            armed_by = str(snapshot.get("armed_by") or "").strip()
+            armed_at = str(snapshot.get("armed_at") or "").strip()
+            reason = str(snapshot.get("reason") or "").strip()
+            if armed_by:
+                details.append(f"armed_by={armed_by}")
+            if armed_at:
+                details.append(f"armed_at={armed_at}")
+            if reason:
+                details.append(f"reason={reason}")
+            detail_suffix = f" ({', '.join(details)})" if details else ""
+            self._emit(
+                "agent_run_blocked_autonomy_circuit_breaker",
+                {
+                    "agent_id": agent.id,
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "autonomy_circuit_breaker": snapshot,
+                },
+            )
+            raise ValueError(
+                "Autonomy circuit breaker is armed. "
+                f"New runs are temporarily blocked{detail_suffix}."
+            )
 
         run_id = str(uuid4())
         attempts_limit = max(1, max_attempts or self.default_max_attempts)

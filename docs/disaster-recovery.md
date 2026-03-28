@@ -29,6 +29,8 @@ Task 09 introduces production-grade backup + restore controls for these assets.
 - `POST /service/backup/run`
 - `POST /service/backup/verify`
 - `POST /service/backup/restore-drill`
+- `GET /service/runs/autonomy-circuit-breaker` (inspect emergency brake state)
+- `POST /service/runs/autonomy-circuit-breaker` (arm/disarm emergency brake; optional auto kill-switch)
 - `POST /service/runs/kill-switch` (interrupt queued/running agent runs)
 
 All endpoints require `service` or `admin` scope and include signed action receipts.
@@ -67,6 +69,7 @@ python scripts/disaster_recovery/restore_from_archive.py \
 ## Recovery Workflow
 
 1. If unsafe run activity is ongoing, trigger kill switch (`/service/runs/kill-switch` or CLI).
+   For sustained incident response, arm autonomy circuit breaker (`action=arm`) to block new execute-mode runs.
 2. Stop runtime.
 3. Verify target archive (`/service/backup/verify` or CLI verify in restore script).
 4. Restore into data directory.

@@ -131,6 +131,9 @@ jobs:
             tests.test_localization_governance_gate \
             tests.test_flow_interaction_gate \
             tests.test_action_explainability_gate \
+            tests.test_autonomy_circuit_breaker \
+            tests.test_autonomy_circuit_breaker_api \
+            tests.test_autonomy_circuit_breaker_gate \
             tests.test_unified_session_manager \
             tests.test_flow_api \
             tests.test_supervisor_task_graph_manager \
@@ -226,6 +229,18 @@ jobs:
         with:
           name: action-explainability-gate-report
           path: artifacts/action-explainability-gate-report.json
+          if-no-files-found: error
+
+      - name: Run autonomy circuit breaker gate (blocking)
+        run: |
+          python scripts/release/autonomy_circuit_breaker_gate.py \
+            --output "artifacts/autonomy-circuit-breaker-gate-report.json"
+
+      - name: Upload autonomy circuit breaker gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: autonomy-circuit-breaker-gate-report
+          path: artifacts/autonomy-circuit-breaker-gate-report.json
           if-no-files-found: error
 
       - name: Run desktop action rollback gate (blocking)

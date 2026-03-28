@@ -170,6 +170,70 @@ class SecurityHTTPAuthzTests(unittest.TestCase):
         receipt = payload.get("action_receipt", {})
         self.assertTrue(bool(receipt.get("signature")))
 
+    def test_service_autonomy_circuit_breaker_requires_service_scope(self) -> None:
+        denied = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("user-token"),
+            json={"action": "arm"},
+        )
+        self.assertEqual(denied.status_code, 403)
+        denied_payload = denied.json()
+        self.assertEqual(denied_payload["error"]["type"], "permission_denied")
+
+    def test_service_autonomy_circuit_breaker_success_and_validation(self) -> None:
+        invalid_action = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={"action": "freeze"},
+        )
+        self.assertEqual(invalid_action.status_code, 400)
+        invalid_action_payload = invalid_action.json()
+        self.assertEqual(invalid_action_payload["error"]["type"], "validation_error")
+
+        invalid_scope = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={
+                "action": "arm",
+                "apply_kill_switch": True,
+                "include_running": False,
+                "include_queued": False,
+            },
+        )
+        self.assertEqual(invalid_scope.status_code, 400)
+        invalid_scope_payload = invalid_scope.json()
+        self.assertEqual(invalid_scope_payload["error"]["type"], "validation_error")
+
+        arm = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={
+                "action": "arm",
+                "reason": "security-http-authz",
+                "apply_kill_switch": False,
+            },
+        )
+        self.assertEqual(arm.status_code, 200)
+        arm_payload = arm.json()
+        self.assertEqual(str(arm_payload.get("actor")), "svc-runtime")
+        self.assertIn("service", arm_payload.get("scopes", []))
+        state = arm_payload.get("circuit_breaker", {})
+        self.assertTrue(bool(state.get("armed")))
+        self.assertEqual(str(state.get("status")), "armed")
+        self.assertTrue(bool(arm_payload.get("action_receipt", {}).get("signature")))
+
+        disarm = self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={
+                "action": "disarm",
+                "reason": "security-http-authz-cleanup",
+            },
+        )
+        self.assertEqual(disarm.status_code, 200)
+        disarm_payload = disarm.json()
+        self.assertFalse(bool(disarm_payload.get("circuit_breaker", {}).get("armed")))
+
     def test_admin_can_rotate_identity(self) -> None:
         first = self.client.get("/security/identity", headers=self._auth("admin-token"))
         self.assertEqual(first.status_code, 200)

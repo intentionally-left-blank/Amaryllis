@@ -52,7 +52,7 @@ Build a local-first, voice-native, autonomous assistant for developer workflows 
   - L4 bounded autonomous missions.
   - public benchmark + eval dashboards.
 
-### Phase 4 - Jarvis Personal Operator (current)
+### Phase 4 - Jarvis Personal Operator (completed)
 - Goal: deliver an everyday local "Jarvis on PC" experience with safe autonomy and desktop action depth.
 - Outcomes:
   - unified multimodal user flow: intent -> plan -> execute -> explain -> iterate.
@@ -64,6 +64,17 @@ Build a local-first, voice-native, autonomous assistant for developer workflows 
   - offline trust stack: provenance-first answers, RAG threat-model coverage, and injection-resistant tool execution.
   - secure model supply-chain and quantization passport (artifact signatures, hashes, reproducible quant recipe metadata).
   - runtime environment passport and license admission gate for model/adapter/index artifacts.
+
+### Phase 5 - Autonomous Reliability Shell (current)
+- Goal: make autonomy operations incident-resilient and operator-safe under real production failure modes.
+- Outcomes:
+  - global autonomy circuit breaker with service-level arm/disarm API and signed action audit trail.
+  - deterministic emergency sequence: arm breaker -> optional kill switch -> recover -> disarm.
+  - blocking release/nightly contract gate for emergency brake behavior.
+  - phase backlog and sprint structure for scoped breakers and persistence/restart semantics.
+
+Execution-ready breakdown:
+- `/Users/bogdan/Amaryllis/docs/jarvis-phase5-backlog.md`
 
 ### Parallel Track - Post-LLM Cognitive R&D
 - Goal: keep backend swappable for next-gen local cognition.

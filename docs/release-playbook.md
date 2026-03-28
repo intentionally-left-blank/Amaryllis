@@ -29,19 +29,20 @@ Mandatory gates before publish:
 23. Localization/governance gate (RU/EN docs + starter templates + contributor/legal governance package contract)
 24. Flow/interaction gate (unified `/flow/sessions/*` + `/runs/dispatch` plan-vs-execute trust-boundary contract)
 25. Action explainability gate (timeline stream + plain-language `reason/result/next_step` payload contract)
-26. Desktop action rollback gate (Linux desktop action + rollback hint + terminal receipt contract)
-27. Supervisor mission gate (bounded task-graph + checkpoint/resume + objective verification contract)
-28. Generation-loop conformance gate (backend portability matrix + contract identity assertions)
-29. Provenance coverage gate (grounded-response source-trace coverage + stream/telemetry provenance contract assertions)
-30. KV pressure policy gate (generation-loop KV telemetry contract + pressure-driven QoS transition assertions)
-31. Adoption KPI schema gate (install/activation/retention/feature-adoption contract assertions)
-32. Adoption KPI snapshot build gate (publishable adoption artifact + summary score)
-33. Adoption KPI trend regression gate (baseline-relative regression budget enforcement)
-34. Release quality dashboard snapshot gate (final post-Linux benchmark/reliability artifact + trend deltas)
-35. Mission success/recovery report pack gate (v2 schema + class/KPI completeness contract)
-36. Mission success/recovery report pack export (public KPI artifact)
-37. Disaster recovery gate (backup + verify + restore drill)
-38. Compliance operations gate (access review + incidents + evidence export)
+26. Autonomy circuit breaker gate (service emergency brake contract + execute-mode blocking assertions)
+27. Desktop action rollback gate (Linux desktop action + rollback hint + terminal receipt contract)
+28. Supervisor mission gate (bounded task-graph + checkpoint/resume + objective verification contract)
+29. Generation-loop conformance gate (backend portability matrix + contract identity assertions)
+30. Provenance coverage gate (grounded-response source-trace coverage + stream/telemetry provenance contract assertions)
+31. KV pressure policy gate (generation-loop KV telemetry contract + pressure-driven QoS transition assertions)
+32. Adoption KPI schema gate (install/activation/retention/feature-adoption contract assertions)
+33. Adoption KPI snapshot build gate (publishable adoption artifact + summary score)
+34. Adoption KPI trend regression gate (baseline-relative regression budget enforcement)
+35. Release quality dashboard snapshot gate (final post-Linux benchmark/reliability artifact + trend deltas)
+36. Mission success/recovery report pack gate (v2 schema + class/KPI completeness contract)
+37. Mission success/recovery report pack export (public KPI artifact)
+38. Disaster recovery gate (backup + verify + restore drill)
+39. Compliance operations gate (access review + incidents + evidence export)
 
 Staging companion (non-blocking):
 - macOS desktop action parity smoke (`scripts/release/macos_desktop_parity_smoke.py`)
@@ -69,6 +70,9 @@ Flow/interaction gate reference:
 
 Action explainability gate reference:
 - `docs/action-explainability-gate.md`
+
+Autonomy circuit breaker gate reference:
+- `docs/autonomy-circuit-breaker.md`
 
 Desktop action rollback gate reference:
 - `docs/desktop-action-rollback-gate.md`
@@ -136,6 +140,7 @@ python scripts/release/first_run_activation_gate.py --output artifacts/first-run
 python scripts/release/localization_governance_gate.py --output artifacts/localization-governance-gate-report.json
 python scripts/release/flow_interaction_gate.py --output artifacts/flow-interaction-gate-report.json
 python scripts/release/action_explainability_gate.py --output artifacts/action-explainability-gate-report.json
+python scripts/release/autonomy_circuit_breaker_gate.py --output artifacts/autonomy-circuit-breaker-gate-report.json
 python scripts/release/desktop_action_rollback_gate.py --output artifacts/desktop-action-rollback-gate-report.json
 python scripts/release/supervisor_mission_gate.py --output artifacts/supervisor-mission-gate-report.json
 python scripts/release/generation_loop_conformance_gate.py --min-providers 1 --max-warning-providers 2 --output artifacts/generation-loop-conformance-gate-report.json

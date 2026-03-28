@@ -234,6 +234,11 @@ jobs:
           python scripts/release/action_explainability_gate.py \
             --output "artifacts/nightly-action-explainability-gate-report.json"
 
+      - name: Run nightly autonomy circuit breaker gate (blocking)
+        run: |
+          python scripts/release/autonomy_circuit_breaker_gate.py \
+            --output "artifacts/nightly-autonomy-circuit-breaker-gate-report.json"
+
       - name: Run nightly desktop action rollback gate (blocking)
         run: |
           python scripts/release/desktop_action_rollback_gate.py \
@@ -511,6 +516,14 @@ jobs:
         with:
           name: nightly-action-explainability-gate-report
           path: artifacts/nightly-action-explainability-gate-report.json
+          if-no-files-found: error
+
+      - name: Upload nightly autonomy circuit breaker gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-autonomy-circuit-breaker-gate-report
+          path: artifacts/nightly-autonomy-circuit-breaker-gate-report.json
           if-no-files-found: error
 
       - name: Upload nightly desktop action rollback gate report

@@ -50,6 +50,7 @@ from runtime.backup import BackupManager, BackupScheduler
 from runtime.compliance import ComplianceManager
 from runtime.api_lifecycle import APILifecyclePolicy, canonical_api_path
 from runtime.auth import AuthContext, AuthManager, auth_context_from_request
+from runtime.autonomy_circuit_breaker import AutonomyCircuitBreaker
 from runtime.config import AppConfig
 from runtime.errors import AmaryllisError, InternalError, PermissionDeniedError, ProviderError, ValidationError
 from runtime.observability import ObservabilityManager, ObservabilityTelemetry, SLOTargets
@@ -113,10 +114,20 @@ class ServiceContainer:
     security_manager: SecurityManager
     compliance_manager: ComplianceManager
     auth_manager: AuthManager
+    autonomy_circuit_breaker: AutonomyCircuitBreaker
 
 
 class RunKillSwitchRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=4000)
+    include_running: bool = True
+    include_queued: bool = True
+    limit: int = Field(default=5000, ge=1, le=50000)
+
+
+class RunAutonomyCircuitBreakerUpdateRequest(BaseModel):
+    action: str = Field(default="arm")
+    reason: str | None = Field(default=None, max_length=4000)
+    apply_kill_switch: bool = True
     include_running: bool = True
     include_queued: bool = True
     limit: int = Field(default=5000, ge=1, le=50000)
@@ -136,6 +147,13 @@ def _validate_thermal_state(value: str | None) -> str:
     normalized = str(value or "").strip().lower()
     if normalized not in SUPPORTED_THERMAL_STATES:
         raise ValidationError("thermal_state must be one of: " + ", ".join(SUPPORTED_THERMAL_STATES))
+    return normalized
+
+
+def _normalize_circuit_breaker_action(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized not in {"arm", "disarm"}:
+        raise ValidationError("action must be one of: arm, disarm")
     return normalized
 
 
@@ -323,6 +341,7 @@ def create_services() -> ServiceContainer:
         step_replan_max_attempts=config.task_step_replan_max_attempts,
     )
     kernel_executor = KernelExecutorAdapter(task_executor)
+    autonomy_circuit_breaker = AutonomyCircuitBreaker()
 
     agent_run_manager = AgentRunManager(
         database=database,
@@ -340,6 +359,7 @@ def create_services() -> ServiceContainer:
         run_budget_max_tool_calls=config.run_budget_max_tool_calls,
         run_budget_max_tool_errors=config.run_budget_max_tool_errors,
         telemetry=telemetry,
+        autonomy_circuit_breaker=autonomy_circuit_breaker,
     )
     agent_run_manager.start()
     agent_manager = AgentManager(
@@ -441,6 +461,7 @@ def create_services() -> ServiceContainer:
         security_manager=security_manager,
         compliance_manager=compliance_manager,
         auth_manager=auth_manager,
+        autonomy_circuit_breaker=autonomy_circuit_breaker,
     )
 
 
@@ -792,6 +813,7 @@ def create_app() -> FastAPI:
             "active_provider": services.model_manager.active_provider,
             "active_model": services.model_manager.active_model,
             "autonomy_level": services.config.autonomy_level,
+            "autonomy_circuit_breaker": services.autonomy_circuit_breaker.snapshot(),
             "providers": checks,
         }
 
@@ -906,6 +928,125 @@ def create_app() -> FastAPI:
             "compat_contract_path": str(services.config.api_compat_contract_path),
         }
 
+    @app.get("/service/runs/autonomy-circuit-breaker")
+    def service_runs_autonomy_circuit_breaker_status(request: Request) -> dict[str, Any]:
+        auth = auth_context_from_request(request)
+        return {
+            "request_id": request_id_from_request(request),
+            "actor": auth.user_id,
+            "scopes": sorted(auth.scopes),
+            "circuit_breaker": services.autonomy_circuit_breaker.snapshot(),
+        }
+
+    @app.post("/service/runs/autonomy-circuit-breaker")
+    def service_runs_autonomy_circuit_breaker_update(
+        payload: RunAutonomyCircuitBreakerUpdateRequest,
+        request: Request,
+    ) -> dict[str, Any]:
+        auth = auth_context_from_request(request)
+        request_id = request_id_from_request(request)
+        action = _normalize_circuit_breaker_action(payload.action)
+        if (
+            action == "arm"
+            and payload.apply_kill_switch
+            and not payload.include_running
+            and not payload.include_queued
+        ):
+            raise ValidationError(
+                "When apply_kill_switch=true, include_running and/or include_queued must be true."
+            )
+        sign_payload = {
+            "action": action,
+            "reason": payload.reason,
+            "apply_kill_switch": bool(payload.apply_kill_switch),
+            "include_running": bool(payload.include_running),
+            "include_queued": bool(payload.include_queued),
+            "limit": int(payload.limit),
+        }
+        try:
+            kill_switch_summary: dict[str, Any] | None = None
+            if action == "arm":
+                state = services.autonomy_circuit_breaker.arm(
+                    actor=auth.user_id,
+                    reason=payload.reason,
+                    request_id=request_id,
+                )
+                if payload.apply_kill_switch:
+                    kill_switch_summary = services.agent_manager.kill_switch_runs(
+                        actor=auth.user_id,
+                        reason=payload.reason,
+                        include_running=bool(payload.include_running),
+                        include_queued=bool(payload.include_queued),
+                        limit=int(payload.limit),
+                    )
+            else:
+                state = services.autonomy_circuit_breaker.disarm(
+                    actor=auth.user_id,
+                    reason=payload.reason,
+                    request_id=request_id,
+                )
+
+            receipt_details: dict[str, Any] = {
+                "action": action,
+                "circuit_breaker": state,
+            }
+            if kill_switch_summary is not None:
+                receipt_details["kill_switch"] = kill_switch_summary
+            try:
+                receipt = services.security_manager.signed_action(
+                    action="agent_runs_autonomy_circuit_breaker",
+                    payload=sign_payload,
+                    request_id=request_id,
+                    actor=auth.user_id,
+                    target_type="agent_run",
+                    target_id="*",
+                    details=receipt_details,
+                )
+            except Exception:
+                receipt = {}
+            payload_out = {
+                "request_id": request_id,
+                "actor": auth.user_id,
+                "scopes": sorted(auth.scopes),
+                "circuit_breaker": state,
+                "action_receipt": receipt,
+            }
+            if kill_switch_summary is not None:
+                payload_out["kill_switch"] = kill_switch_summary
+            return payload_out
+        except ValueError as exc:
+            try:
+                services.security_manager.signed_action(
+                    action="agent_runs_autonomy_circuit_breaker",
+                    payload=sign_payload,
+                    request_id=request_id,
+                    actor=auth.user_id,
+                    target_type="agent_run",
+                    target_id="*",
+                    status="failed",
+                    details={"action": action, "error": str(exc)},
+                )
+            except Exception:
+                pass
+            raise ValidationError(str(exc)) from exc
+        except AmaryllisError:
+            raise
+        except Exception as exc:
+            try:
+                services.security_manager.signed_action(
+                    action="agent_runs_autonomy_circuit_breaker",
+                    payload=sign_payload,
+                    request_id=request_id,
+                    actor=auth.user_id,
+                    target_type="agent_run",
+                    target_id="*",
+                    status="failed",
+                    details={"action": action, "error": str(exc)},
+                )
+            except Exception:
+                pass
+            raise ProviderError(str(exc)) from exc
+
     @app.post("/service/runs/kill-switch")
     def service_runs_kill_switch(payload: RunKillSwitchRequest, request: Request) -> dict[str, Any]:
         auth = auth_context_from_request(request)
@@ -941,6 +1082,7 @@ def create_app() -> FastAPI:
                 "actor": auth.user_id,
                 "scopes": sorted(auth.scopes),
                 "kill_switch": summary,
+                "circuit_breaker": services.autonomy_circuit_breaker.snapshot(),
                 "action_receipt": receipt,
             }
         except ValueError as exc:
