@@ -120,6 +120,7 @@ def _terminal_action_context(
     *,
     tool_name: str,
     risk_level: str,
+    action_class: str,
     actor: str | None,
     session_id: str | None,
     permission_id: str | None,
@@ -140,6 +141,7 @@ def _terminal_action_context(
         "tool_name": tool_name,
         "high_risk": _is_high_risk(normalized),
         "risk_level": normalized,
+        "action_class": str(action_class or "user_initiated"),
         "policy_level": policy_level,
         "policy": policy,
         "rollback_hint": _rollback_hint_for_tool(
@@ -158,6 +160,7 @@ def _high_risk_context(
     *,
     tool_name: str,
     risk_level: str,
+    action_class: str,
     actor: str | None,
     session_id: str | None,
     permission_id: str | None,
@@ -182,6 +185,7 @@ def _high_risk_context(
     return {
         "high_risk": True,
         "risk_level": normalized,
+        "action_class": str(action_class or "user_initiated"),
         "policy_level": policy_level,
         "policy": policy,
         "rollback_hint": rollback_hint,
@@ -828,6 +832,7 @@ def apply_filesystem_patch_preview(
             user_id=str(preview.get("user_id") or "").strip() or None,
             session_id=str(preview.get("session_id") or "").strip() or None,
             permission_id=payload.permission_id,
+            action_class="user_initiated",
         )
         applied = services.database.mark_filesystem_patch_preview_applied(
             preview_id=preview_id,
@@ -963,11 +968,13 @@ def invoke_mcp_tool(
     tool = services.tool_registry.get(tool_name)
     if tool is None:
         raise NotFoundError(f"Tool not found: {tool_name}")
+    action_class = "user_initiated"
 
     terminal_action = _terminal_action_context(
         request,
         tool_name=tool_name,
         risk_level=str(getattr(tool, "risk_level", "medium")),
+        action_class=action_class,
         actor=auth.user_id,
         session_id=payload.session_id,
         permission_id=payload.permission_id,
@@ -977,6 +984,7 @@ def invoke_mcp_tool(
         request,
         tool_name=tool_name,
         risk_level=str(getattr(tool, "risk_level", "medium")),
+        action_class=action_class,
         actor=auth.user_id,
         session_id=payload.session_id,
         permission_id=payload.permission_id,
@@ -986,6 +994,7 @@ def invoke_mcp_tool(
     sign_details: dict[str, Any] = {
         "session_id": payload.session_id,
         "permission_id": payload.permission_id,
+        "action_class": action_class,
     }
     if high_risk_action is not None:
         sign_details.update(high_risk_action)
@@ -1066,6 +1075,7 @@ def invoke_mcp_tool(
             user_id=effective_user_id,
             session_id=executor_session_id,
             permission_id=payload.permission_id,
+            action_class=action_class,
         )
         receipt = _sign_action(
             request,

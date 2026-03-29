@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Provide policy-gated desktop control primitives for "Jarvis on PC" workflows:
+Provide policy-gated desktop control primitives for "Amaryllis on PC" workflows:
 
 - notifications
 - clipboard read/write

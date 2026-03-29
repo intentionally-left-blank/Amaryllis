@@ -162,7 +162,7 @@ def _run_smoke_round(
     notify_started = time.perf_counter()
     notify_result = adapter.execute(
         DesktopActionRequest.from_arguments(
-            {"action": "notify", "title": "Jarvis", "message": f"smoke-{round_number}"}
+            {"action": "notify", "title": "Amaryllis", "message": f"smoke-{round_number}"}
         )
     )
     _record_check(

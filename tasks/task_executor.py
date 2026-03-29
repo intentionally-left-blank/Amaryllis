@@ -39,6 +39,11 @@ SIMULATION_RISK_ORDER: dict[str, int] = {
     "critical": 4,
     "unknown": 5,
 }
+RUN_SOURCE_TO_ACTION_CLASS: dict[str, str] = {
+    "user": "autonomous_agent",
+    "automation": "autonomous_automation",
+    "supervisor": "autonomous_supervisor",
+}
 
 
 class TaskGuardrailError(RuntimeError):
@@ -110,7 +115,8 @@ class TaskExecutor:
         run_deadline_monotonic: float | None = None,
         resume_state: dict[str, Any] | None = None,
         run_budget: dict[str, Any] | None = None,
-        ) -> dict[str, Any]:
+        run_source: str | None = None,
+    ) -> dict[str, Any]:
         return execute_task_run(
             self,
             agent=agent,
@@ -121,6 +127,7 @@ class TaskExecutor:
             run_deadline_monotonic=run_deadline_monotonic,
             resume_state=resume_state,
             run_budget=run_budget,
+            run_source=run_source,
             step_prepare_context=STEP_PREPARE_CONTEXT,
             step_reasoning=STEP_REASONING,
             step_persist=STEP_PERSIST,
@@ -397,6 +404,18 @@ class TaskExecutor:
         return value
 
     @staticmethod
+    def _normalize_run_source(raw: str | None) -> str:
+        normalized = str(raw or "").strip().lower()
+        if normalized not in RUN_SOURCE_TO_ACTION_CLASS:
+            return "user"
+        return normalized
+
+    @staticmethod
+    def _tool_action_class_for_run_source(run_source: str | None) -> str:
+        normalized_source = TaskExecutor._normalize_run_source(run_source)
+        return RUN_SOURCE_TO_ACTION_CLASS.get(normalized_source, "autonomous_agent")
+
+    @staticmethod
     def _max_risk_level(levels: list[str]) -> str:
         normalized = ["low"]
         for item in levels:
@@ -526,8 +545,10 @@ class TaskExecutor:
         started: float | None = None,
         run_deadline_monotonic: float | None = None,
         run_budget: dict[str, Any] | None = None,
+        run_source: str | None = None,
     ) -> tuple[str, str, str, int, int, int, int]:
         allowed_tools = [name for name in agent.tools if self.tool_registry.get(name) is not None]
+        tool_action_class = self._tool_action_class_for_run_source(run_source)
 
         reasoning_messages = list(messages)
         if allowed_tools:
@@ -835,7 +856,9 @@ class TaskExecutor:
                     name=tool_name,
                     arguments=arguments,
                     user_id=user_id,
+                    agent_id=agent.id,
                     session_id=session_id,
+                    action_class=tool_action_class,
                 )
                 event["status"] = "succeeded"
                 event["result"] = tool_result.get("result")

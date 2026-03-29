@@ -1,4 +1,4 @@
-# Jarvis Phase 3 Backlog
+# Amaryllis Phase 3 Backlog
 
 ## Objective
 Open, extensible local cognitive platform with bounded autonomous missions (L4), runtime lifecycle productization, and public-quality benchmark signals.

@@ -308,7 +308,7 @@ Reference:
 - `docs/linux-runtime-installer.md`
 - `docs/linux-release-channels.md`
 - `docs/runtime-lifecycle-contract.md`
-- `docs/jarvis-phase3-backlog.md`
+- `docs/amaryllis-phase3-backlog.md`
 
 ## Run
 
@@ -1339,7 +1339,7 @@ curl -X POST http://localhost:8000/automations/create \
     "message": "Analyze file changes and summarize",
     "schedule_type": "watch_fs",
     "schedule": {
-      "path": "/Users/yourname/Documents/inbox",
+      "path": "<absolute-path>/Documents/inbox",
       "poll_sec": 10,
       "recursive": true,
       "glob": "*.md",
@@ -2025,14 +2025,14 @@ python scripts/release/check_runtime_profile_drift.py
 scripts/release/rollback_local.sh <tag-or-commit>
 ```
 
-## Jarvis Roadmap (Local Cognitive Platform)
+## Amaryllis Roadmap (Local Cognitive Platform)
 
-- Strategy and phased execution plan: `docs/jarvis-roadmap.md`
-- Phase 0 implementation backlog (with DoD and sprint status): `docs/jarvis-phase0-backlog.md`
-- Phase 1 implementation backlog (Developer Jarvis Alpha): `docs/jarvis-phase1-backlog.md`
-- Phase 2 implementation backlog (Tier-1 Operator Beta): `docs/jarvis-phase2-backlog.md`
-- Phase 3 implementation backlog (Jarvis 1.0 OSS): `docs/jarvis-phase3-backlog.md`
-- Phase 4 implementation backlog (Jarvis Personal Operator): `docs/jarvis-phase4-backlog.md`
+- Strategy and phased execution plan: `docs/amaryllis-roadmap.md`
+- Phase 0 implementation backlog (with DoD and sprint status): `docs/amaryllis-phase0-backlog.md`
+- Phase 1 implementation backlog (Developer Amaryllis Alpha): `docs/amaryllis-phase1-backlog.md`
+- Phase 2 implementation backlog (Tier-1 Operator Beta): `docs/amaryllis-phase2-backlog.md`
+- Phase 3 implementation backlog (Amaryllis 1.0 OSS): `docs/amaryllis-phase3-backlog.md`
+- Phase 4 implementation backlog (Amaryllis Personal Operator): `docs/amaryllis-phase4-backlog.md`
 - ADR-0001 (kernel contract surface v1): `docs/adr-0001-cognitive-kernel-contracts.md`
 - Cognition backend abstraction and runtime switching: `docs/cognition-backends.md`
 - Runtime/SLO profiles and quality budgets: `docs/runtime-profiles.md`

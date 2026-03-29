@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from runtime.autonomy_circuit_breaker import AutonomyCircuitBreaker
 from tools.autonomy_policy import AutonomyPolicy, normalize_autonomy_level
 from tools.autonomy_policy_pack import default_policy_pack_path, load_autonomy_policy_pack
 from tools.policy import ToolIsolationPolicy
@@ -96,6 +97,11 @@ class ToolAutonomyTests(unittest.TestCase):
         self.assertIsInstance(autonomy, dict)
         assert isinstance(autonomy, dict)
         self.assertEqual(autonomy.get("level"), "l4")
+        action_boundary = snapshot.get("action_boundary_policy")
+        self.assertIsInstance(action_boundary, dict)
+        assert isinstance(action_boundary, dict)
+        self.assertIn("user_initiated", list(action_boundary.get("supported_action_classes") or []))
+        self.assertIn("autonomous_agent", list(action_boundary.get("autonomous_action_classes") or []))
 
     def test_custom_policy_pack_can_override_l2_high_risk_behavior(self) -> None:
         base_pack = load_autonomy_policy_pack(default_policy_pack_path())
@@ -141,6 +147,118 @@ class ToolAutonomyTests(unittest.TestCase):
             self.assertIn("permission required for tool 'high_echo'", str(ctx.exception).lower())
             pending = executor.list_permission_prompts(status="pending", limit=10)
             self.assertTrue(any(str(item.get("tool_name")) == "high_echo" for item in pending))
+
+    def test_high_risk_autonomous_action_is_blocked_when_breaker_scope_matches(self) -> None:
+        registry = _build_registry_with_medium_and_high_tools()
+        breaker = AutonomyCircuitBreaker()
+        breaker.arm(actor="svc-runtime", reason="test", scope_type="global")
+        executor = ToolExecutor(
+            registry=registry,
+            policy=ToolIsolationPolicy(profile="balanced"),
+            autonomy_policy=AutonomyPolicy(level="l5"),
+            autonomy_circuit_breaker=breaker,
+            approval_enforcement_mode="prompt_and_allow",
+        )
+
+        with self.assertRaises(ToolExecutionError) as ctx:
+            executor.execute(
+                "high_echo",
+                {"text": "blocked"},
+                user_id="user-1",
+                agent_id="agent-1",
+                action_class="autonomous_agent",
+            )
+
+        self.assertIn("autonomy circuit breaker", str(ctx.exception).lower())
+        self.assertIn("blocked", str(ctx.exception).lower())
+
+    def test_high_risk_autonomous_action_respects_agent_scope_parity(self) -> None:
+        registry = _build_registry_with_medium_and_high_tools()
+        breaker = AutonomyCircuitBreaker()
+        breaker.arm(
+            actor="svc-runtime",
+            reason="agent-scope",
+            scope_type="agent",
+            scope_agent_id="agent-1",
+        )
+        executor = ToolExecutor(
+            registry=registry,
+            policy=ToolIsolationPolicy(profile="balanced"),
+            autonomy_policy=AutonomyPolicy(level="l5"),
+            autonomy_circuit_breaker=breaker,
+            approval_enforcement_mode="prompt_and_allow",
+        )
+        session_id = "tool-autonomy-agent-scope"
+        allowed_arguments = {"text": "allowed"}
+
+        with self.assertRaises(ToolExecutionError):
+            executor.execute(
+                "high_echo",
+                {"text": "blocked"},
+                user_id="user-1",
+                agent_id="agent-1",
+                session_id=session_id,
+                action_class="autonomous_agent",
+            )
+
+        with self.assertRaises(PermissionRequiredError) as permission_ctx:
+            executor.execute(
+                "high_echo",
+                allowed_arguments,
+                user_id="user-1",
+                session_id=session_id,
+                action_class="user_initiated",
+            )
+        prompt_id = permission_ctx.exception.prompt_id
+        executor.approve_permission_prompt(prompt_id)
+
+        allowed = executor.execute(
+            "high_echo",
+            allowed_arguments,
+            user_id="user-1",
+            agent_id="agent-2",
+            session_id=session_id,
+            permission_id=prompt_id,
+            action_class="autonomous_agent",
+        )
+        self.assertEqual(str(allowed.get("tool")), "high_echo")
+        self.assertEqual(str((allowed.get("result") or {}).get("echo")), "allowed")
+
+    def test_high_risk_user_initiated_action_is_not_blocked_by_breaker(self) -> None:
+        registry = _build_registry_with_medium_and_high_tools()
+        breaker = AutonomyCircuitBreaker()
+        breaker.arm(actor="svc-runtime", reason="manual-override", scope_type="global")
+        executor = ToolExecutor(
+            registry=registry,
+            policy=ToolIsolationPolicy(profile="balanced"),
+            autonomy_policy=AutonomyPolicy(level="l5"),
+            autonomy_circuit_breaker=breaker,
+            approval_enforcement_mode="prompt_and_allow",
+        )
+        session_id = "tool-autonomy-user-initiated"
+        manual_arguments = {"text": "manual-ok"}
+
+        with self.assertRaises(PermissionRequiredError) as permission_ctx:
+            executor.execute(
+                "high_echo",
+                manual_arguments,
+                user_id="user-1",
+                session_id=session_id,
+                action_class="user_initiated",
+            )
+        prompt_id = permission_ctx.exception.prompt_id
+        executor.approve_permission_prompt(prompt_id)
+
+        result = executor.execute(
+            "high_echo",
+            manual_arguments,
+            user_id="user-1",
+            session_id=session_id,
+            permission_id=prompt_id,
+            action_class="user_initiated",
+        )
+        self.assertEqual(str(result.get("tool")), "high_echo")
+        self.assertEqual(str((result.get("result") or {}).get("echo")), "manual-ok")
 
 
 if __name__ == "__main__":

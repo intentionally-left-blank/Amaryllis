@@ -1,7 +1,7 @@
-# Jarvis Phase 4 Backlog
+# Amaryllis Phase 4 Backlog
 
 ## Objective
-Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimodal user flow, desktop action surface, and bounded L5-grade autonomy operations.
+Move from OSS platform readiness to daily-driver "Amaryllis on PC": unified multimodal user flow, desktop action surface, and bounded L5-grade autonomy operations.
 
 ## Status Legend
 - `todo`
@@ -143,7 +143,7 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 | P4-H08 | done | adoption KPI funnel and privacy-safe analytics surface |
 
 ## Execution Playbook (Start-Now)
-- Detailed implementation-ready program: `/Users/bogdan/Amaryllis/docs/jarvis-phase4-execution-plan.md`
+- Detailed implementation-ready program: `docs/amaryllis-phase4-execution-plan.md`
 - Sprint order: `P4-S1` (contracts/baselines) -> `P4-S2` (enforcement/gates) -> `P4-S3` (hardening/parity) -> `P4-S4` (safe personalization lane)
 
 ### Critical Path (Implementation Order)
@@ -175,7 +175,7 @@ Move from OSS platform readiness to daily-driver "Jarvis on PC": unified multimo
 - Linux primary gates must be green before macOS staging parity sign-off.
 
 ## Next Checkpoint
-- Deliver first executable "Jarvis on PC" flow:
+- Deliver first executable "Amaryllis on PC" flow:
   - unified session states for text/voice/visual interaction,
   - explicit plan-vs-execute control path,
   - Linux desktop adapter baseline under policy guardrails,

@@ -280,7 +280,7 @@ class DesktopActionAdapterTests(unittest.TestCase):
             run_command=_run,
         )
         request = DesktopActionRequest.from_arguments(
-            {"action": "notify", "title": "Jarvis", "message": "Hi"},
+            {"action": "notify", "title": "Amaryllis", "message": "Hi"},
         )
         result = adapter.execute(request)
         self.assertTrue(result.ok)

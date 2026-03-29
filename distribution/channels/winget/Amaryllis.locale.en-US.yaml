@@ -4,7 +4,7 @@ PackageIdentifier: Amaryllis.Amaryllis
 PackageVersion: {{VERSION}}
 PackageLocale: en-US
 Publisher: Amaryllis OSS
-PublisherUrl: https://github.com/bogdan/Amaryllis
+PublisherUrl: https://github.com/amaryllis-labs/amaryllis
 PackageName: Amaryllis
 ShortDescription: Local-first agent runtime and desktop AI workspace.
 Moniker: amaryllis

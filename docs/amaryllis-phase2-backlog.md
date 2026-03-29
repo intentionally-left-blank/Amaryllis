@@ -1,4 +1,4 @@
-# Jarvis Phase 2 Backlog
+# Amaryllis Phase 2 Backlog
 
 ## Objective
 Reach Tier-1 operator readiness: modular cognitive kernel, deterministic reproducibility chain, and enforceable non-functional quality gates for autonomous operation.

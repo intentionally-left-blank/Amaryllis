@@ -1,4 +1,4 @@
-# Jarvis Local Cognitive Platform Roadmap
+# Amaryllis Local Cognitive Platform Roadmap
 
 ## Mission
 Build a local-first, voice-native, autonomous assistant for developer workflows that can evolve into a general personal cognitive system.
@@ -28,7 +28,7 @@ Build a local-first, voice-native, autonomous assistant for developer workflows 
   - baseline golden-task eval harness.
   - removal of known platform lifecycle risks.
 
-### Phase 1 - Developer Jarvis Alpha (completed)
+### Phase 1 - Developer Amaryllis Alpha (completed)
 - Goal: high-value daily workflows for developers on local runtime.
 - Outcomes:
   - voice push-to-talk + visual execution HUD.
@@ -45,15 +45,15 @@ Build a local-first, voice-native, autonomous assistant for developer workflows 
   - richer OS integrations (calendar/mail/notifications/window-control).
   - L2-L3 autonomy with user-facing trust controls.
 
-### Phase 3 - Jarvis 1.0 OSS (completed)
+### Phase 3 - Amaryllis 1.0 OSS (completed)
 - Goal: open, extensible, local cognitive platform.
 - Outcomes:
   - skills/agents ecosystem and plugin compatibility contracts.
   - L4 bounded autonomous missions.
   - public benchmark + eval dashboards.
 
-### Phase 4 - Jarvis Personal Operator (completed)
-- Goal: deliver an everyday local "Jarvis on PC" experience with safe autonomy and desktop action depth.
+### Phase 4 - Amaryllis Personal Operator (completed)
+- Goal: deliver an everyday local "Amaryllis on PC" experience with safe autonomy and desktop action depth.
 - Outcomes:
   - unified multimodal user flow: intent -> plan -> execute -> explain -> iterate.
   - Linux-first desktop integrations with policy-gated capabilities and rollback hints.
@@ -75,18 +75,19 @@ Build a local-first, voice-native, autonomous assistant for developer workflows 
   - phase backlog and sprint structure for scoped breakers and persistence/restart semantics.
 
 Execution-ready breakdown:
-- `/Users/bogdan/Amaryllis/docs/jarvis-phase5-backlog.md`
+- `docs/amaryllis-phase5-backlog.md`
 
-### Phase 6 - Cross-Domain Autonomy Hardening (current)
+### Phase 6 - Cross-Domain Autonomy Hardening (completed)
 - Goal: make emergency autonomy controls consistent across run-dispatch domains and remove false escalation noise during incident containment.
 - Outcomes:
-- breaker-aware automation dispatch semantics (`run_blocked_autonomy_circuit_breaker`) without scheduler failure escalation drift.
-- cross-domain admission parity for `runs`, `automations`, and `supervisor` breaker scopes.
-- cross-domain operator diagnostics surface (`/service/runs/autonomy-circuit-breaker/domains`) with unified impact counters for `runs/automations/supervisor`.
-- release/nightly contract expansion for cross-domain autonomy hardening, including mission report pack KPI contract enforcement for breaker gate results.
+  - breaker-aware automation dispatch semantics (`run_blocked_autonomy_circuit_breaker`) without scheduler failure escalation drift.
+  - cross-domain admission parity for `runs`, `automations`, and `supervisor` breaker scopes.
+  - cross-domain operator diagnostics surface (`/service/runs/autonomy-circuit-breaker/domains`) with unified impact counters for `runs/automations/supervisor`.
+  - autonomous high-risk tool-action boundary policy (`action_class` contract + breaker enforcement).
+  - release/nightly contract expansion for cross-domain autonomy hardening, including mission report pack KPI contract enforcement for breaker gate results.
 
 Execution-ready breakdown:
-- `/Users/bogdan/Amaryllis/docs/jarvis-phase6-backlog.md`
+- `docs/amaryllis-phase6-backlog.md`
 
 ### Parallel Track - Post-LLM Cognitive R&D
 - Goal: keep backend swappable for next-gen local cognition.
@@ -99,7 +100,7 @@ Execution-ready breakdown:
 Derived from `deep-research-report-2` and integrated into execution priorities.
 
 Execution-ready breakdown:
-- `/Users/bogdan/Amaryllis/docs/jarvis-phase4-execution-plan.md`
+- `docs/amaryllis-phase4-execution-plan.md`
 
 ### 6-12 Month Priorities
 - Treat generation-loop portability as a first-class contract, not an implementation detail.
@@ -118,8 +119,8 @@ Execution-ready breakdown:
 Derived from `deep-research-report-3` (practical track, product/distribution focused) and integrated into Phase 4 mass-adoption lane.
 
 Execution-ready breakdown:
-- `/Users/bogdan/Amaryllis/docs/jarvis-phase4-backlog.md` (Epic H)
-- `/Users/bogdan/Amaryllis/docs/jarvis-phase4-execution-plan.md` (WP-11..WP-16)
+- `docs/amaryllis-phase4-backlog.md` (Epic H)
+- `docs/amaryllis-phase4-execution-plan.md` (WP-11..WP-16)
 
 ### 3-9 Month Priorities
 - Optimize for install-to-first-value experience: hardware autodetect + ready profiles + model packages.

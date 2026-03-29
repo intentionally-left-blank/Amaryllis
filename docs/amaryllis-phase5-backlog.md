@@ -1,4 +1,4 @@
-# Jarvis Phase 5 Backlog
+# Amaryllis Phase 5 Backlog
 
 ## Objective
 
@@ -54,4 +54,4 @@ strict global autonomy controls, stronger service-operability contracts, and blo
 
 - Phase 5 breaker objectives completed (`P5-A01..A03`, `P5-B01..B04`).
 - Breaker incident path promoted to stability soak (nightly trend verification + failure drill cadence gate).
-- Phase 6 started (`P6-A01` completed): automation dispatch is breaker-aware without false failure escalation.
+- Phase 6 completed (`P6-A01..A03`, `P6-B01..B02`): cross-domain dispatch consistency + autonomous high-risk tool-action boundary policy are release/nightly-gated.

@@ -1,6 +1,6 @@
 class Amaryllis < Formula
   desc "Local-first agent runtime and desktop AI workspace"
-  homepage "https://github.com/bogdan/Amaryllis"
+  homepage "https://github.com/amaryllis-labs/amaryllis"
   version "{{VERSION}}"
 
   if Hardware::CPU.arm?

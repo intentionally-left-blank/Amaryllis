@@ -13,6 +13,14 @@ from tools.tool_budget import ToolBudgetExceededError, ToolBudgetGuard
 from tools.tool_registry import ToolRegistry
 
 TOOL_CALL_PATTERN = re.compile(r"\s*<tool_call>\s*(\{.*\})\s*</tool_call>\s*", flags=re.DOTALL)
+SUPPORTED_TOOL_ACTION_CLASSES: tuple[str, ...] = (
+    "user_initiated",
+    "autonomous_agent",
+    "autonomous_model",
+    "autonomous_supervisor",
+    "autonomous_automation",
+)
+AUTONOMOUS_TOOL_ACTION_CLASSES: set[str] = set(SUPPORTED_TOOL_ACTION_CLASSES[1:])
 
 
 class ToolExecutionError(Exception):
@@ -38,6 +46,7 @@ class ToolExecutor:
         budget_guard: ToolBudgetGuard | None = None,
         approval_enforcement_mode: str = "prompt_and_allow",
         autonomy_policy: AutonomyPolicy | None = None,
+        autonomy_circuit_breaker: Any | None = None,
         sandbox_runner: ToolSandboxRunner | None = None,
         telemetry_emitter: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
@@ -47,6 +56,7 @@ class ToolExecutor:
         self.budget_guard = budget_guard or ToolBudgetGuard()
         self.approval_enforcement_mode = approval_enforcement_mode
         self.autonomy_policy = autonomy_policy or AutonomyPolicy(level="l3")
+        self.autonomy_circuit_breaker = autonomy_circuit_breaker
         self.sandbox_runner = sandbox_runner
         self.telemetry_emitter = telemetry_emitter
         self.logger = logging.getLogger("amaryllis.tools.executor")
@@ -58,17 +68,31 @@ class ToolExecutor:
         *,
         request_id: str | None = None,
         user_id: str | None = None,
+        agent_id: str | None = None,
         session_id: str | None = None,
         permission_id: str | None = None,
         permission_ids: list[str] | None = None,
+        action_class: str | None = None,
     ) -> dict[str, Any]:
         tool = self.registry.get(name)
         if tool is None:
             raise ToolExecutionError(f"Unknown tool: {name}")
 
+        normalized_action_class = self.normalize_tool_action_class(action_class)
+        normalized_risk_level = str(getattr(tool, "risk_level", "medium"))
+        self._enforce_autonomous_breaker_boundary(
+            tool_name=name,
+            risk_level=normalized_risk_level,
+            action_class=normalized_action_class,
+            request_id=request_id,
+            user_id=user_id,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+
         autonomy_decision = self.autonomy_policy.evaluate(
             tool_name=name,
-            risk_level=str(getattr(tool, "risk_level", "medium")),
+            risk_level=normalized_risk_level,
         )
         if not autonomy_decision.allow:
             self._emit_telemetry(
@@ -80,7 +104,8 @@ class ToolExecutor:
                     "session_id": session_id,
                     "reason": autonomy_decision.reason,
                     "autonomy_level": self.autonomy_policy.level,
-                    "risk_level": str(getattr(tool, "risk_level", "medium")),
+                    "risk_level": normalized_risk_level,
+                    "action_class": normalized_action_class,
                 },
             )
             raise ToolExecutionError(autonomy_decision.reason or f"Tool '{name}' blocked by autonomy policy")
@@ -161,6 +186,7 @@ class ToolExecutor:
                             "risk_level": tool.risk_level,
                             "approval_mode_tool": tool.approval_mode,
                             "autonomy_level": self.autonomy_policy.level,
+                            "action_class": normalized_action_class,
                         },
                     )
                     raise PermissionRequiredError(
@@ -203,6 +229,7 @@ class ToolExecutor:
                     "high_risk_calls": budget_status.high_risk_calls,
                     "max_high_risk_calls": budget_status.max_high_risk_calls,
                     "window_sec": budget_status.window_sec,
+                    "action_class": normalized_action_class,
                 },
             )
         except ToolBudgetExceededError as exc:
@@ -215,6 +242,7 @@ class ToolExecutor:
                     "user_id": user_id,
                     "session_id": session_id,
                     "reason": str(exc),
+                    "action_class": normalized_action_class,
                 },
             )
             raise ToolBudgetLimitError(str(exc)) from exc
@@ -276,6 +304,12 @@ class ToolExecutor:
         return {
             "approval_enforcement_mode": self.approval_enforcement_mode,
             "autonomy_policy": self.autonomy_policy.describe(),
+            "action_boundary_policy": {
+                "supported_action_classes": list(SUPPORTED_TOOL_ACTION_CLASSES),
+                "autonomous_action_classes": sorted(AUTONOMOUS_TOOL_ACTION_CLASSES),
+                "high_risk_breaker_enforced_for_autonomous": True,
+                "breaker_attached": self.autonomy_circuit_breaker is not None,
+            },
             "isolation_policy": self.policy.describe(),
             "sandbox": {
                 "enabled": self.sandbox_runner is not None,
@@ -322,6 +356,82 @@ class ToolExecutor:
         second = int(autonomy_ttl) if isinstance(autonomy_ttl, int) and autonomy_ttl > 0 else 0
         merged = max(first, second)
         return merged if merged > 0 else None
+
+    @staticmethod
+    def normalize_tool_action_class(value: str | None) -> str:
+        normalized = str(value or "").strip().lower()
+        if normalized not in SUPPORTED_TOOL_ACTION_CLASSES:
+            return "user_initiated"
+        return normalized
+
+    @staticmethod
+    def _is_high_risk_level(value: str | None) -> bool:
+        normalized = str(value or "").strip().lower()
+        return normalized in {"high", "critical"}
+
+    def _enforce_autonomous_breaker_boundary(
+        self,
+        *,
+        tool_name: str,
+        risk_level: str,
+        action_class: str,
+        request_id: str | None,
+        user_id: str | None,
+        agent_id: str | None,
+        session_id: str | None,
+    ) -> None:
+        if not self._is_high_risk_level(risk_level):
+            return
+        if action_class not in AUTONOMOUS_TOOL_ACTION_CLASSES:
+            return
+        breaker = self.autonomy_circuit_breaker
+        if breaker is None or not hasattr(breaker, "evaluate_run_creation"):
+            return
+
+        try:
+            decision = breaker.evaluate_run_creation(
+                user_id=user_id,
+                agent_id=agent_id,
+            )
+        except Exception:
+            return
+        if not isinstance(decision, dict) or not bool(decision.get("blocked")):
+            return
+
+        matched_scopes = decision.get("matched_scopes") if isinstance(decision.get("matched_scopes"), list) else []
+        scope_labels: list[str] = []
+        for item in matched_scopes:
+            if not isinstance(item, dict):
+                continue
+            scope_type = str(item.get("scope_type") or "").strip().lower()
+            if scope_type == "global":
+                scope_labels.append("global")
+            elif scope_type == "user":
+                scope_labels.append(f"user:{str(item.get('scope_user_id') or '').strip() or '*'}")
+            elif scope_type == "agent":
+                scope_labels.append(f"agent:{str(item.get('scope_agent_id') or '').strip() or '*'}")
+        scope_summary = ", ".join(sorted(set(scope_labels))) or "unknown"
+        reason = (
+            "Autonomous high-risk tool action is blocked by autonomy circuit breaker "
+            f"(action_class={action_class}; scope={scope_summary})."
+        )
+
+        self._emit_telemetry(
+            "tool_action_blocked_autonomy_circuit_breaker",
+            {
+                "tool": tool_name,
+                "risk_level": str(risk_level or "").strip().lower() or "medium",
+                "action_class": action_class,
+                "request_id": request_id,
+                "user_id": user_id,
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "scope_summary": scope_summary,
+                "matched_scope_count": int(decision.get("matched_scope_count") or len(matched_scopes)),
+                "active_scope_count": int(decision.get("active_scope_count") or 0),
+            },
+        )
+        raise ToolExecutionError(reason)
 
     @staticmethod
     def parse_tool_call(text: str) -> dict[str, Any] | None:

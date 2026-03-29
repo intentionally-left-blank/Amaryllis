@@ -5,13 +5,13 @@
     "status": "pass",
     "checks_total": 39,
     "checks_failed": 0,
-    "supervisor_doc": "/Users/bogdan/Amaryllis/docs/supervisor-task-graph-contract.md"
+    "supervisor_doc": "docs/supervisor-task-graph-contract.md"
   },
   "checks": [
     {
       "name": "supervisor_doc_exists",
       "ok": true,
-      "detail": "/Users/bogdan/Amaryllis/docs/supervisor-task-graph-contract.md"
+      "detail": "docs/supervisor-task-graph-contract.md"
     },
     {
       "name": "supervisor_doc_endpoints",

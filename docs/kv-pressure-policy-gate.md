@@ -8,7 +8,7 @@
 - validate QoS policy transition under pressure (`quality` -> `power_save`) without silent degradation.
 
 ## Script
-- `/Users/bogdan/Amaryllis/scripts/release/kv_pressure_policy_gate.py`
+- `scripts/release/kv_pressure_policy_gate.py`
 
 ## What It Checks
 1. QoS starts from expected mode (`quality` by default).

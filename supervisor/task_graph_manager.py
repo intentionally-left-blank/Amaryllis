@@ -484,6 +484,7 @@ class SupervisorTaskGraphManager:
                     session_id=graph.get("default_session_id"),
                     max_attempts=node.get("max_attempts"),
                     budget=node.get("budget"),
+                    run_source="supervisor",
                 )
                 if not isinstance(run, dict):
                     raise ValueError("agent_manager.create_run returned invalid payload")

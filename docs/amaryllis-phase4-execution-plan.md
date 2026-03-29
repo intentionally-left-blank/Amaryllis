@@ -1,4 +1,4 @@
-# Jarvis Phase 4 Execution Plan (Implementation Ready)
+# Amaryllis Phase 4 Execution Plan (Implementation Ready)
 
 ## Objective
 Turn Phase 4 backlog into a start-now execution program with clear sequencing, dependencies, ownership boundaries, and blocking acceptance gates.
@@ -11,8 +11,8 @@ Turn Phase 4 backlog into a start-now execution program with clear sequencing, d
 
 ## Scope Baseline
 This execution plan operationalizes Phase 4 tasks in:
-- `/Users/bogdan/Amaryllis/docs/jarvis-phase4-backlog.md`
-- `/Users/bogdan/Amaryllis/docs/jarvis-roadmap.md`
+- `docs/amaryllis-phase4-backlog.md`
+- `docs/amaryllis-roadmap.md`
 
 Research integration focus:
 - generation-loop portability across CPU/GPU/NPU

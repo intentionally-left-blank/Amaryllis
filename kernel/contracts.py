@@ -30,6 +30,7 @@ class ExecutorContract(Protocol):
         run_deadline_monotonic: float | None = None,
         resume_state: dict[str, Any] | None = None,
         run_budget: dict[str, Any] | None = None,
+        run_source: str | None = None,
     ) -> dict[str, Any]:
         ...
 

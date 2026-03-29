@@ -337,6 +337,42 @@ class _LeaseChaosTaskExecutor:
         }
 
 
+class _RunSourceAwareTaskExecutor:
+    def __init__(self) -> None:
+        self.call_count = 0
+        self.last_run_source: str | None = None
+
+    def execute(
+        self,
+        agent: Agent,
+        user_id: str,
+        session_id: str | None,
+        user_message: str,
+        checkpoint: Any = None,  # noqa: ARG002
+        run_deadline_monotonic: float | None = None,  # noqa: ARG002
+        resume_state: dict[str, Any] | None = None,  # noqa: ARG002
+        run_budget: dict[str, Any] | None = None,  # noqa: ARG002
+        run_source: str | None = None,
+    ) -> dict[str, Any]:
+        self.call_count += 1
+        self.last_run_source = run_source
+        return {
+            "agent_id": agent.id,
+            "user_id": user_id,
+            "session_id": session_id,
+            "response": f"ok:{user_message}",
+            "metrics": {
+                "model_calls": 1,
+                "tool_calls": 0,
+                "tool_errors": 0,
+                "estimated_tokens": 40,
+                "attempt_count": 1,
+                "duration_ms": 10.0,
+                "total_attempt_duration_ms": 10.0,
+            },
+        }
+
+
 class AgentRunManagerTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="amaryllis-tests-runs-")
@@ -401,6 +437,41 @@ class AgentRunManagerTests(unittest.TestCase):
                 session_id=None,
                 user_message="cross-user run",
             )
+
+    def test_run_source_is_persisted_and_forwarded_to_executor(self) -> None:
+        self.manager.stop()
+        source_executor = _RunSourceAwareTaskExecutor()
+        self.manager = AgentRunManager(
+            database=self.database,
+            task_executor=source_executor,  # type: ignore[arg-type]
+            worker_count=1,
+            default_max_attempts=1,
+        )
+        self.manager.start()
+        run = self.manager.create_run(
+            agent=self.agent,
+            user_id="user-1",
+            session_id="session-run-source",
+            user_message="source propagation",
+            run_source="automation",
+        )
+
+        final = self._wait_for_status(run["id"], {"succeeded"}, timeout_sec=6.0)
+        self.assertIsNotNone(final)
+        assert final is not None
+        self.assertEqual(str(final.get("run_source")), "automation")
+        self.assertEqual(str(source_executor.last_run_source), "automation")
+        queued = next(
+            (
+                item
+                for item in list(final.get("checkpoints") or [])
+                if isinstance(item, dict) and str(item.get("stage")) == "queued"
+            ),
+            None,
+        )
+        self.assertIsNotNone(queued)
+        assert isinstance(queued, dict)
+        self.assertEqual(str(queued.get("run_source")), "automation")
 
     def test_run_retries_then_succeeds(self) -> None:
         self.executor.fail_first = True

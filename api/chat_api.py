@@ -435,6 +435,7 @@ def _chat_with_tool_loop(
                 user_id=payload.user_id,
                 session_id=payload.session_id,
                 permission_ids=permission_ids,
+                action_class="autonomous_model",
             )
             event["status"] = "succeeded"
             event["result"] = tool_result.get("result")

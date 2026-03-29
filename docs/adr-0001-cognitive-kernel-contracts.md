@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-03-20
-- Related backlog: `P2-A01` in `docs/jarvis-phase2-backlog.md`
+- Related backlog: `P2-A01` in `docs/amaryllis-phase2-backlog.md`
 
 ## Context
 

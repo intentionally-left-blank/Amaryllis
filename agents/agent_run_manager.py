@@ -106,6 +106,7 @@ REPLAY_PRESET_STAGE_FILTERS: dict[str, tuple[str, ...]] = {
 BUDGET_GUARDRAIL_PAUSE_STOP_REASON = "budget_guardrail_paused"
 BUDGET_GUARDRAIL_KILL_SWITCH_STOP_REASON = "budget_guardrail_kill_switch"
 BUDGET_GUARDRAIL_KILL_SWITCH_THRESHOLD = 2
+SUPPORTED_RUN_SOURCES: set[str] = {"user", "automation", "supervisor"}
 
 
 class AgentRunManager:
@@ -251,11 +252,13 @@ class AgentRunManager:
         user_message: str,
         max_attempts: int | None = None,
         budget: dict[str, Any] | None = None,
+        run_source: str | None = None,
     ) -> dict[str, Any]:
         owner = str(agent.user_id or "").strip()
         actor = str(user_id or "").strip()
         if not owner or not actor or owner != actor:
             raise ValueError(f"Agent ownership mismatch for agent: {agent.id}")
+        normalized_run_source = self._normalize_run_source(run_source)
         if self.autonomy_circuit_breaker is not None:
             decision_raw = self.autonomy_circuit_breaker.evaluate_run_creation(
                 user_id=user_id,
@@ -329,6 +332,7 @@ class AgentRunManager:
                     "stage": "queued",
                     "message": "Run queued for execution.",
                     "budget": effective_budget,
+                    "run_source": normalized_run_source,
                 },
             )
             self._ensure_core_issue_records(run_id=run_id)
@@ -343,10 +347,12 @@ class AgentRunManager:
                 "session_id": session_id,
                 "max_attempts": attempts_limit,
                 "budget": effective_budget,
+                "run_source": normalized_run_source,
             },
         )
         run = self.database.get_agent_run(run_id)
         assert run is not None
+        run["run_source"] = normalized_run_source
         return run
 
     def list_runs(
@@ -356,15 +362,22 @@ class AgentRunManager:
         status: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        return self.database.list_agent_runs(
+        runs = self.database.list_agent_runs(
             user_id=user_id,
             agent_id=agent_id,
             status=status,
             limit=limit,
         )
+        for item in runs:
+            if isinstance(item, dict):
+                item["run_source"] = self._resolve_run_source(item)
+        return runs
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
-        return self.database.get_agent_run(run_id, include_issues=True, include_artifacts=True)
+        run = self.database.get_agent_run(run_id, include_issues=True, include_artifacts=True)
+        if isinstance(run, dict):
+            run["run_source"] = self._resolve_run_source(run)
+        return run
 
     def list_run_issues(self, run_id: str, limit: int = 200) -> list[dict[str, Any]]:
         return self.database.list_agent_run_issues(run_id=run_id, limit=max(1, min(int(limit), 1000)))
@@ -751,6 +764,7 @@ class AgentRunManager:
             "agent_id": run.get("agent_id"),
             "user_id": run.get("user_id"),
             "session_id": run.get("session_id"),
+            "run_source": self._resolve_run_source(run),
             "status": run.get("status"),
             "stop_reason": run.get("stop_reason"),
             "failure_class": run.get("failure_class"),
@@ -2514,107 +2528,40 @@ class AgentRunManager:
             )
             checkpoint(payload)
 
+        run_source = self._resolve_run_source(run)
+        execute_kwargs: dict[str, Any] = {
+            "agent": agent,
+            "user_id": str(run["user_id"]),
+            "session_id": run.get("session_id"),
+            "user_message": str(run["input_message"]),
+            "checkpoint": guarded_checkpoint,
+            "run_deadline_monotonic": attempt_deadline,
+            "resume_state": resume_state,
+            "run_budget": budget,
+            "run_source": run_source,
+        }
+        optional_keys = (
+            "run_source",
+            "run_budget",
+            "resume_state",
+            "run_deadline_monotonic",
+        )
         result: dict[str, Any]
         try:
-            result = self.task_executor.execute(
-                agent=agent,
-                user_id=str(run["user_id"]),
-                session_id=run.get("session_id"),
-                user_message=str(run["input_message"]),
-                checkpoint=guarded_checkpoint,
-                run_deadline_monotonic=attempt_deadline,
-                resume_state=resume_state,
-                run_budget=budget,
-            )
-        except TypeError as exc:
-            # Backward compatibility for custom executors used in tests/tools.
-            message = str(exc)
-            if "run_budget" in message and "resume_state" in message and "run_deadline_monotonic" in message:
-                result = self.task_executor.execute(
-                    agent=agent,
-                    user_id=str(run["user_id"]),
-                    session_id=run.get("session_id"),
-                    user_message=str(run["input_message"]),
-                    checkpoint=guarded_checkpoint,
-                )
-            elif "run_budget" in message and "resume_state" in message:
-                result = self.task_executor.execute(
-                    agent=agent,
-                    user_id=str(run["user_id"]),
-                    session_id=run.get("session_id"),
-                    user_message=str(run["input_message"]),
-                    checkpoint=guarded_checkpoint,
-                    run_deadline_monotonic=attempt_deadline,
-                )
-            elif "run_budget" in message and "run_deadline_monotonic" in message:
-                result = self.task_executor.execute(
-                    agent=agent,
-                    user_id=str(run["user_id"]),
-                    session_id=run.get("session_id"),
-                    user_message=str(run["input_message"]),
-                    checkpoint=guarded_checkpoint,
-                    resume_state=resume_state,
-                )
-            elif "run_budget" in message:
-                result = self.task_executor.execute(
-                    agent=agent,
-                    user_id=str(run["user_id"]),
-                    session_id=run.get("session_id"),
-                    user_message=str(run["input_message"]),
-                    checkpoint=guarded_checkpoint,
-                    run_deadline_monotonic=attempt_deadline,
-                    resume_state=resume_state,
-                )
-            elif "resume_state" in message and "run_deadline_monotonic" in message:
-                result = self.task_executor.execute(
-                    agent=agent,
-                    user_id=str(run["user_id"]),
-                    session_id=run.get("session_id"),
-                    user_message=str(run["input_message"]),
-                    checkpoint=guarded_checkpoint,
-                )
-            elif "resume_state" in message:
+            while True:
                 try:
-                    result = self.task_executor.execute(
-                        agent=agent,
-                        user_id=str(run["user_id"]),
-                        session_id=run.get("session_id"),
-                        user_message=str(run["input_message"]),
-                        checkpoint=guarded_checkpoint,
-                        run_deadline_monotonic=attempt_deadline,
-                    )
-                except TypeError as nested_exc:
-                    if "run_deadline_monotonic" not in str(nested_exc):
+                    result = self.task_executor.execute(**execute_kwargs)
+                    break
+                except TypeError as exc:
+                    # Backward compatibility for custom executors used in tests/tools.
+                    message = str(exc)
+                    removed = False
+                    for key in optional_keys:
+                        if key in execute_kwargs and key in message:
+                            execute_kwargs.pop(key, None)
+                            removed = True
+                    if not removed:
                         raise
-                    result = self.task_executor.execute(
-                        agent=agent,
-                        user_id=str(run["user_id"]),
-                        session_id=run.get("session_id"),
-                        user_message=str(run["input_message"]),
-                        checkpoint=guarded_checkpoint,
-                    )
-            elif "run_deadline_monotonic" in message:
-                try:
-                    result = self.task_executor.execute(
-                        agent=agent,
-                        user_id=str(run["user_id"]),
-                        session_id=run.get("session_id"),
-                        user_message=str(run["input_message"]),
-                        checkpoint=guarded_checkpoint,
-                        resume_state=resume_state,
-                    )
-                except TypeError as nested_exc:
-                    if "resume_state" not in str(nested_exc):
-                        raise
-                    result = self.task_executor.execute(
-                        agent=agent,
-                        user_id=str(run["user_id"]),
-                        session_id=run.get("session_id"),
-                        user_message=str(run["input_message"]),
-                        checkpoint=guarded_checkpoint,
-                    )
-            else:
-                raise
         finally:
             self._stop_run_lease_heartbeat(heartbeat)
 
@@ -2765,6 +2712,29 @@ class AgentRunManager:
             }:
                 count += 1
         return count
+
+    @staticmethod
+    def _normalize_run_source(raw: str | None) -> str:
+        normalized = str(raw or "").strip().lower()
+        if normalized not in SUPPORTED_RUN_SOURCES:
+            return "user"
+        return normalized
+
+    def _resolve_run_source(self, run: dict[str, Any] | None) -> str:
+        payload = run if isinstance(run, dict) else {}
+        direct = str(payload.get("run_source") or "").strip()
+        if direct:
+            return self._normalize_run_source(direct)
+
+        checkpoints = payload.get("checkpoints")
+        if isinstance(checkpoints, list):
+            for item in checkpoints:
+                if not isinstance(item, dict):
+                    continue
+                candidate = str(item.get("run_source") or "").strip()
+                if candidate:
+                    return self._normalize_run_source(candidate)
+        return "user"
 
     def _normalize_run_budget(self, budget: dict[str, Any] | None) -> dict[str, Any]:
         raw = budget if isinstance(budget, dict) else {}

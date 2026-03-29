@@ -1,4 +1,4 @@
-# Jarvis Phase 0 Backlog
+# Amaryllis Phase 0 Backlog
 
 ## Objective
 Harden architecture, delivery reproducibility, and quality gates to support future full-autonomy work.

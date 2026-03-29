@@ -21,17 +21,26 @@ class KernelExecutorAdapter:
         run_deadline_monotonic: float | None = None,
         resume_state: dict[str, Any] | None = None,
         run_budget: dict[str, Any] | None = None,
+        run_source: str | None = None,
     ) -> dict[str, Any]:
-        return self._delegate.execute(
-            agent=agent,
-            user_id=user_id,
-            session_id=session_id,
-            user_message=user_message,
-            checkpoint=checkpoint,
-            run_deadline_monotonic=run_deadline_monotonic,
-            resume_state=resume_state,
-            run_budget=run_budget,
-        )
+        execute_kwargs: dict[str, Any] = {
+            "agent": agent,
+            "user_id": user_id,
+            "session_id": session_id,
+            "user_message": user_message,
+            "checkpoint": checkpoint,
+            "run_deadline_monotonic": run_deadline_monotonic,
+            "resume_state": resume_state,
+            "run_budget": run_budget,
+            "run_source": run_source,
+        }
+        try:
+            return self._delegate.execute(**execute_kwargs)
+        except TypeError as exc:
+            if "run_source" not in str(exc):
+                raise
+            execute_kwargs.pop("run_source", None)
+            return self._delegate.execute(**execute_kwargs)
 
     def simulate_run(
         self,

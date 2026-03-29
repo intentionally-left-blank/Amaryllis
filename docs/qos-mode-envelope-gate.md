@@ -6,7 +6,7 @@
 It validates that all public QoS modes (`quality`, `balanced`, `power_save`) keep journey KPIs within envelope and expose consistent runtime QoS contract fields.
 
 ## Script
-- `/Users/bogdan/Amaryllis/scripts/release/qos_mode_envelope_gate.py`
+- `scripts/release/qos_mode_envelope_gate.py`
 
 ## What It Validates
 1. Runs `user_journey_benchmark.py` per mode with strict KPI thresholds.

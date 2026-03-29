@@ -17,6 +17,7 @@ def execute_task_run(
     run_deadline_monotonic: float | None = None,
     resume_state: dict[str, Any] | None = None,
     run_budget: dict[str, Any] | None = None,
+    run_source: str | None = None,
     step_prepare_context: str,
     step_reasoning: str,
     step_persist: str,
@@ -333,6 +334,7 @@ def execute_task_run(
                 started=started,
                 run_deadline_monotonic=run_deadline_monotonic,
                 run_budget=run_budget_limits,
+                run_source=run_source,
             )
         except Exception as exc:
             executor._set_issue_status(

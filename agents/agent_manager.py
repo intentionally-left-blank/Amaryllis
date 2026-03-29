@@ -73,6 +73,7 @@ class AgentManager:
         session_id: str | None,
         max_attempts: int | None = None,
         budget: dict[str, Any] | None = None,
+        run_source: str | None = None,
     ) -> dict[str, Any]:
         if self.run_manager is None:
             raise ValueError("Run manager is not configured")
@@ -89,6 +90,7 @@ class AgentManager:
             user_message=user_message,
             max_attempts=max_attempts,
             budget=budget,
+            run_source=run_source,
         )
 
     def simulate_run(

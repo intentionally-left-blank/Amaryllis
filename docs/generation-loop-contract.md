@@ -33,7 +33,7 @@ Each provider includes:
 This endpoint is the source of truth for Phase 4 portability checks (`P4-E01`).
 
 ## Conformance Gate
-- Script: `/Users/bogdan/Amaryllis/scripts/release/generation_loop_conformance_gate.py`
+- Script: `scripts/release/generation_loop_conformance_gate.py`
 - Example:
   - `python scripts/release/generation_loop_conformance_gate.py --min-providers 1 --max-warning-providers 2`
 - Detailed gate reference:
@@ -43,7 +43,7 @@ This endpoint is the source of truth for Phase 4 portability checks (`P4-E01`).
   - nightly: `artifacts/nightly-generation-loop-conformance-gate-report.json`
 
 ## KV Pressure Policy Gate
-- Script: `/Users/bogdan/Amaryllis/scripts/release/kv_pressure_policy_gate.py`
+- Script: `scripts/release/kv_pressure_policy_gate.py`
 - Example:
   - `python scripts/release/kv_pressure_policy_gate.py --min-pressure-events 1 --min-critical-events 1`
 - Detailed gate reference:

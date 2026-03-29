@@ -1,7 +1,7 @@
-# Jarvis Phase 1 Backlog
+# Amaryllis Phase 1 Backlog
 
 ## Objective
-Deliver Developer Jarvis Alpha with reliable async missions, actionable diagnostics, and first-class local workflow ergonomics.
+Deliver Developer Amaryllis Alpha with reliable async missions, actionable diagnostics, and first-class local workflow ergonomics.
 
 ## Status Legend
 - `todo`

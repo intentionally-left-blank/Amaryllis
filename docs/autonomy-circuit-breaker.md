@@ -51,6 +51,23 @@ When breaker is armed:
   `run_blocked_autonomy_circuit_breaker` event instead of failure escalation (`consecutive_failures` is not incremented).
 - supervisor node dispatch (`POST /supervisor/graphs/{graph_id}/launch|tick`) is paused per node when blocked by scope;
   node stays `planned` with timeline event `node_run_blocked_autonomy_circuit_breaker` until breaker is disarmed.
+- autonomous high-risk tool actions are blocked by breaker scope boundary policy.
+
+Tool-action boundary policy:
+- explicit `action_class` contract is used by runtime tool execution:
+  - `user_initiated`
+  - `autonomous_agent`
+  - `autonomous_model`
+  - `autonomous_supervisor`
+  - `autonomous_automation`
+- run-driven tool calls map action class by dispatch source:
+  - `run_source=user` -> `autonomous_agent`
+  - `run_source=automation` -> `autonomous_automation`
+  - `run_source=supervisor` -> `autonomous_supervisor`
+- breaker interaction rule:
+  - `high`/`critical` risk + autonomous `action_class` => breaker scope check (`global|user|agent`) is mandatory.
+  - if matched scope is armed, runtime blocks tool action with circuit-breaker error.
+  - `user_initiated` actions do not use this autonomous boundary rule.
 
 Scope behavior:
 - `global`: blocks execute-mode run creation for all users/agents.

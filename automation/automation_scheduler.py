@@ -642,6 +642,7 @@ class AutomationScheduler:
                     user_id=user_id,
                     session_id=automation.get("session_id"),
                     user_message=run_message,
+                    run_source="automation",
                 )
                 run_id = str(run["id"])
             except AutonomyCircuitBreakerBlockedError as exc:

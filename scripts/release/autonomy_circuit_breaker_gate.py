@@ -151,6 +151,13 @@ def main() -> int:
             "/service/runs/autonomy-circuit-breaker/domains" in text,
             "cross-domain diagnostics endpoint documented",
         )
+        add_check(
+            "doc_tool_action_boundary_policy",
+            "action_class" in text.lower()
+            and "autonomous" in text.lower()
+            and "high-risk" in text.lower(),
+            "tool-action boundary policy documented",
+        )
     else:
         add_check("doc_exists", False, f"missing: {doc_path}")
 
@@ -186,9 +193,11 @@ def main() -> int:
     try:
         from fastapi.testclient import TestClient  # noqa: PLC0415
         from runtime.server import create_app  # noqa: PLC0415
+        from tools.tool_executor import PermissionRequiredError  # noqa: PLC0415
 
         app = create_app()
         with TestClient(app) as client:
+            services = app.state.services
             status_before = client.get(
                 "/service/runs/autonomy-circuit-breaker",
                 headers=_auth(service_token),
@@ -251,6 +260,72 @@ def main() -> int:
             agent2_id = str(create_payload_user2.get("id") or "").strip()
             add_check("runtime_create_agent_user2_id", bool(agent2_id), f"agent_id={agent2_id}")
 
+            tool_boundary_session_id = "gate-breaker-tool-boundary"
+            tool_boundary_request_id = "gate-breaker-tool-boundary-request"
+            tool_boundary_args = {"code": "print('tool-boundary-disarmed-ok')", "timeout": 2}
+            try:
+                services.tool_executor.execute(
+                    name="python_exec",
+                    arguments=tool_boundary_args,
+                    request_id=tool_boundary_request_id,
+                    user_id="gate-user",
+                    agent_id=agent_id,
+                    session_id=tool_boundary_session_id,
+                    action_class="user_initiated",
+                )
+                add_check(
+                    "runtime_tool_boundary_permission_prompt_created",
+                    False,
+                    "expected permission prompt for python_exec high-risk call",
+                )
+                add_check(
+                    "runtime_tool_boundary_disarmed_allows_autonomous_high_risk",
+                    False,
+                    "permission prompt was not created for baseline flow",
+                )
+            except PermissionRequiredError as exc:
+                prompt_id = str(getattr(exc, "prompt_id", "") or "").strip()
+                add_check(
+                    "runtime_tool_boundary_permission_prompt_created",
+                    bool(prompt_id),
+                    f"prompt_id={prompt_id}",
+                )
+                approved_prompt = services.tool_executor.approve_permission_prompt(prompt_id)
+                add_check(
+                    "runtime_tool_boundary_permission_prompt_approved",
+                    str(approved_prompt.get("status") or "").strip().lower() == "approved",
+                    f"status={approved_prompt.get('status')}",
+                )
+                disarmed_result = services.tool_executor.execute(
+                    name="python_exec",
+                    arguments=tool_boundary_args,
+                    request_id=tool_boundary_request_id,
+                    user_id="gate-user",
+                    agent_id=agent_id,
+                    session_id=tool_boundary_session_id,
+                    permission_id=prompt_id,
+                    action_class="autonomous_agent",
+                )
+                disarmed_payload = disarmed_result.get("result") if isinstance(disarmed_result, dict) else {}
+                disarmed_stdout = str((disarmed_payload or {}).get("stdout") or "")
+                add_check(
+                    "runtime_tool_boundary_disarmed_allows_autonomous_high_risk",
+                    int((disarmed_payload or {}).get("returncode", -1)) == 0
+                    and "tool-boundary-disarmed-ok" in disarmed_stdout,
+                    f"returncode={(disarmed_payload or {}).get('returncode')}",
+                )
+            except Exception as exc:
+                add_check(
+                    "runtime_tool_boundary_permission_prompt_created",
+                    False,
+                    f"unexpected_error={exc}",
+                )
+                add_check(
+                    "runtime_tool_boundary_disarmed_allows_autonomous_high_risk",
+                    False,
+                    f"unexpected_error={exc}",
+                )
+
             arm = client.post(
                 "/service/runs/autonomy-circuit-breaker",
                 headers=_auth(service_token),
@@ -293,6 +368,28 @@ def main() -> int:
                 and str((armed_guidance or {}).get("status") or "") in {"action_required", "monitoring"},
                 "armed status includes actionable recovery guidance",
             )
+            try:
+                services.tool_executor.execute(
+                    name="python_exec",
+                    arguments={"code": "print('tool-boundary-armed')", "timeout": 2},
+                    request_id="gate-breaker-tool-boundary-armed-request",
+                    user_id="gate-user",
+                    agent_id=agent_id,
+                    session_id=tool_boundary_session_id,
+                    action_class="autonomous_agent",
+                )
+                add_check(
+                    "runtime_tool_boundary_armed_blocks_autonomous_high_risk",
+                    False,
+                    "autonomous high-risk tool executed while breaker armed",
+                )
+            except Exception as exc:
+                message = str(exc)
+                add_check(
+                    "runtime_tool_boundary_armed_blocks_autonomous_high_risk",
+                    "autonomy circuit breaker" in message.lower() and "blocked" in message.lower(),
+                    message,
+                )
 
             run_blocked = client.post(
                 f"/agents/{agent_id}/runs",

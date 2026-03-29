@@ -677,6 +677,7 @@ class SecurityHTTPAuthzTests(unittest.TestCase):
         self.assertEqual(str(high_risk_action.get("actor")), "user-1")
         self.assertEqual(str(high_risk_action.get("session_id")), session_id)
         self.assertEqual(str(high_risk_action.get("permission_id")), prompt_id)
+        self.assertEqual(str(high_risk_action.get("action_class")), "user_initiated")
         self.assertIn("rollback", str(high_risk_action.get("rollback_hint", "")).lower())
 
         audit = self.client.get(
@@ -704,9 +705,116 @@ class SecurityHTTPAuthzTests(unittest.TestCase):
         self.assertEqual(str(failed_details.get("actor")), "user-1")
         self.assertEqual(str(succeeded_details.get("actor")), "user-1")
         self.assertEqual(str(succeeded_details.get("permission_id")), prompt_id)
+        self.assertEqual(str(failed_details.get("action_class")), "user_initiated")
+        self.assertEqual(str(succeeded_details.get("action_class")), "user_initiated")
         self.assertIn("rollback", str(failed_details.get("rollback_hint", "")).lower())
         self.assertIn("rollback", str(succeeded_details.get("rollback_hint", "")).lower())
         self.assertTrue(str(failed_details.get("error", "")).strip())
+
+    def test_chat_autonomous_high_risk_tool_is_blocked_when_breaker_is_armed(self) -> None:
+        services = self.server_module.app.state.services
+        previous_level = str(services.tool_executor.autonomy_policy.level)
+        services.tool_executor.autonomy_policy.level = "l5"
+        session_id = f"security-chat-breaker-{uuid4().hex[:8]}"
+
+        self.client.post(
+            "/service/runs/autonomy-circuit-breaker",
+            headers=self._auth("service-token"),
+            json={
+                "action": "disarm",
+                "scope_type": "global",
+                "reason": "chat-breaker-pre-cleanup",
+            },
+        )
+
+        try:
+            arm = self.client.post(
+                "/service/runs/autonomy-circuit-breaker",
+                headers=self._auth("service-token"),
+                json={
+                    "action": "arm",
+                    "scope_type": "global",
+                    "reason": "chat-breaker-test",
+                    "apply_kill_switch": False,
+                },
+            )
+            self.assertEqual(arm.status_code, 200)
+
+            scripted_responses = [
+                {
+                    "content": '<tool_call>{"name":"dangerous_echo","arguments":{"echo":"breaker-check"}}</tool_call>',
+                    "provider": "deterministic",
+                    "model": "deterministic-v1",
+                },
+                {
+                    "content": "Tool loop completed.",
+                    "provider": "deterministic",
+                    "model": "deterministic-v1",
+                },
+            ]
+            response_index = {"value": 0}
+
+            def _chat_stub(**kwargs):  # type: ignore[no-untyped-def]
+                _ = kwargs
+                idx = int(response_index["value"])
+                response_index["value"] = idx + 1
+                if idx < len(scripted_responses):
+                    return dict(scripted_responses[idx])
+                return dict(scripted_responses[-1])
+
+            with patch.object(services.model_manager, "chat", side_effect=_chat_stub):
+                response = self.client.post(
+                    "/v1/chat/completions",
+                    headers=self._auth("user-token"),
+                    json={
+                        "user_id": "user-1",
+                        "session_id": session_id,
+                        "messages": [{"role": "user", "content": "Run dangerous echo tool"}],
+                        "stream": False,
+                        "tools": [
+                            {
+                                "type": "function",
+                                "function": {
+                                    "name": "dangerous_echo",
+                                    "description": "High-risk echo tool",
+                                    "parameters": {
+                                        "type": "object",
+                                        "properties": {"echo": {"type": "string"}},
+                                        "required": ["echo"],
+                                    },
+                                },
+                            }
+                        ],
+                    },
+                )
+
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            tool_events = payload.get("tool_events", [])
+            self.assertIsInstance(tool_events, list)
+            blocked_event = next(
+                (
+                    item
+                    for item in tool_events
+                    if isinstance(item, dict) and str(item.get("tool")) == "dangerous_echo"
+                ),
+                None,
+            )
+            self.assertIsNotNone(blocked_event)
+            assert isinstance(blocked_event, dict)
+            self.assertEqual(str(blocked_event.get("status")), "failed")
+            self.assertIn("autonomy circuit breaker", str(blocked_event.get("error", "")).lower())
+        finally:
+            services.tool_executor.autonomy_policy.level = previous_level
+            self.client.post(
+                "/service/runs/autonomy-circuit-breaker",
+                headers=self._auth("service-token"),
+                json={
+                    "action": "disarm",
+                    "scope_type": "global",
+                    "reason": "chat-breaker-test-cleanup",
+                },
+            )
 
     def test_terminal_action_receipts_are_persisted_and_scoped(self) -> None:
         session_id = "security-http-authz-terminal-receipt-session"

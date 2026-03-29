@@ -10,7 +10,7 @@ It validates that:
 - grounded generation telemetry exports provenance coverage signals.
 
 ## Script
-- `/Users/bogdan/Amaryllis/scripts/release/provenance_coverage_gate.py`
+- `scripts/release/provenance_coverage_gate.py`
 
 ## What It Checks
 1. Seeds user memory with deterministic facts.

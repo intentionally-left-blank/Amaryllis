@@ -5,7 +5,7 @@
     {
       "name": "doc_exists",
       "ok": true,
-      "detail": "/Users/bogdan/Amaryllis/docs/autonomy-circuit-breaker.md"
+      "detail": "docs/autonomy-circuit-breaker.md"
     },
     {
       "name": "doc_status_endpoint",

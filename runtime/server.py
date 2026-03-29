@@ -469,6 +469,10 @@ def create_services() -> ServiceContainer:
         discovered = mcp_registry.register_remote_tools(tool_registry)
         logger.info("mcp_tools_discovered count=%s", discovered)
 
+    autonomy_circuit_breaker = AutonomyCircuitBreaker(
+        state_path=config.autonomy_circuit_breaker_state_path,
+    )
+
     tool_permission_manager = ToolPermissionManager()
     tool_budget_guard = ToolBudgetGuard(
         window_sec=config.tool_budget_window_sec,
@@ -494,6 +498,7 @@ def create_services() -> ServiceContainer:
             level=config.autonomy_level,
             policy_pack_path=config.autonomy_policy_pack_path,
         ),
+        autonomy_circuit_breaker=autonomy_circuit_breaker,
         sandbox_runner=(
             ToolSandboxRunner(
                 config=ToolSandboxConfig(
@@ -549,9 +554,6 @@ def create_services() -> ServiceContainer:
         step_replan_max_attempts=config.task_step_replan_max_attempts,
     )
     kernel_executor = KernelExecutorAdapter(task_executor)
-    autonomy_circuit_breaker = AutonomyCircuitBreaker(
-        state_path=config.autonomy_circuit_breaker_state_path,
-    )
 
     agent_run_manager = AgentRunManager(
         database=database,

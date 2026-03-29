@@ -510,6 +510,132 @@ class TaskExecutorTests(unittest.TestCase):
         self.assertEqual(call_counter["count"], 1)
         self.assertTrue(any(item.get("stage") == "tool_call_reused" for item in second_checkpoints))
 
+    def test_run_source_automation_maps_tool_action_class(self) -> None:
+        registry = ToolRegistry()
+        registry.register(
+            name="echo_tool",
+            description="Echo text",
+            input_schema={
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+                "additionalProperties": False,
+            },
+            handler=lambda args: {"echo": args.get("text")},
+        )
+        model_manager = _FakeModelManager(
+            responses=[
+                {
+                    "content": '<tool_call>{"name":"echo_tool","arguments":{"text":"hello"}}</tool_call>',
+                    "provider": "fake",
+                    "model": "fake-model",
+                },
+                {
+                    "content": "Tool call done.",
+                    "provider": "fake",
+                    "model": "fake-model",
+                },
+            ]
+        )
+        memory_manager = _FakeMemoryManager()
+        executor = TaskExecutor(
+            model_manager=model_manager,  # type: ignore[arg-type]
+            memory_manager=memory_manager,  # type: ignore[arg-type]
+            tool_registry=registry,
+            tool_executor=ToolExecutor(registry),
+            meta_controller=MetaController(),
+            planner=Planner(),
+            max_model_calls=4,
+            verifier_enabled=False,
+        )
+        agent = Agent.create(
+            name="Automation Source Agent",
+            system_prompt="Use tools when needed.",
+            model="fake-model",
+            tools=["echo_tool"],
+            user_id="user-1",
+        )
+
+        with patch.object(
+            executor.tool_executor,
+            "execute",
+            return_value={"tool": "echo_tool", "result": {"echo": "hello"}},
+        ) as execute_mock:
+            result = executor.execute(
+                agent=agent,
+                user_id="user-1",
+                session_id="session-run-source-automation",
+                user_message="Call tool once",
+                run_source="automation",
+            )
+
+        self.assertEqual(result["response"], "Tool call done.")
+        execute_kwargs = execute_mock.call_args.kwargs
+        self.assertEqual(str(execute_kwargs.get("action_class")), "autonomous_automation")
+
+    def test_run_source_supervisor_maps_tool_action_class(self) -> None:
+        registry = ToolRegistry()
+        registry.register(
+            name="echo_tool",
+            description="Echo text",
+            input_schema={
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+                "additionalProperties": False,
+            },
+            handler=lambda args: {"echo": args.get("text")},
+        )
+        model_manager = _FakeModelManager(
+            responses=[
+                {
+                    "content": '<tool_call>{"name":"echo_tool","arguments":{"text":"hello"}}</tool_call>',
+                    "provider": "fake",
+                    "model": "fake-model",
+                },
+                {
+                    "content": "Tool call done.",
+                    "provider": "fake",
+                    "model": "fake-model",
+                },
+            ]
+        )
+        memory_manager = _FakeMemoryManager()
+        executor = TaskExecutor(
+            model_manager=model_manager,  # type: ignore[arg-type]
+            memory_manager=memory_manager,  # type: ignore[arg-type]
+            tool_registry=registry,
+            tool_executor=ToolExecutor(registry),
+            meta_controller=MetaController(),
+            planner=Planner(),
+            max_model_calls=4,
+            verifier_enabled=False,
+        )
+        agent = Agent.create(
+            name="Supervisor Source Agent",
+            system_prompt="Use tools when needed.",
+            model="fake-model",
+            tools=["echo_tool"],
+            user_id="user-1",
+        )
+
+        with patch.object(
+            executor.tool_executor,
+            "execute",
+            return_value={"tool": "echo_tool", "result": {"echo": "hello"}},
+        ) as execute_mock:
+            result = executor.execute(
+                agent=agent,
+                user_id="user-1",
+                session_id="session-run-source-supervisor",
+                user_message="Call tool once",
+                run_source="supervisor",
+            )
+
+        self.assertEqual(result["response"], "Tool call done.")
+        execute_kwargs = execute_mock.call_args.kwargs
+        self.assertEqual(str(execute_kwargs.get("action_class")), "autonomous_supervisor")
+
     def test_plan_issues_execute_in_parallel_when_independent(self) -> None:
         model_manager = _FakeModelManager(
             responses=[
