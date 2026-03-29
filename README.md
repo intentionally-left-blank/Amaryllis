@@ -44,6 +44,22 @@ flowchart LR
 
 ## Quick Start (Backend, 10-15 min)
 
+### 0) One-line install (optional)
+
+From GitHub:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/apothecary-94/Amaryllis/main/scripts/install_macos.sh | bash
+```
+
+Linux runtime path:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/apothecary-94/Amaryllis/main/scripts/install_linux.sh | bash
+```
+
+If you work from a fork, replace `apothecary-94/Amaryllis` with your owner/repo.
+
 ### 1) Install dependencies
 
 ```bash

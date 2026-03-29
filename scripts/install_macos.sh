@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="${AMARYLLIS_REPO_URL:-https://github.com/intentionally-left-blank/Amaryllis.git}"
+REPO_URL="${AMARYLLIS_REPO_URL:-https://github.com/apothecary-94/Amaryllis.git}"
 BRANCH="${AMARYLLIS_BRANCH:-main}"
 APP_NAME="Amaryllis.app"
 BUNDLE_ID="org.amaryllis.app"
