@@ -29,17 +29,105 @@ It gives you one local node that can:
 
 ```mermaid
 flowchart LR
-    U["User / SDK / Desktop App"] --> API["FastAPI Runtime"]
-    API --> AG["Agents + Run Manager"]
-    API --> AU["Automation Scheduler"]
-    API --> SU["Supervisor Task Graph"]
-    AG --> EX["Task Executor / Planner"]
-    EX --> TL["Tools + Policies + MCP"]
-    EX --> MM["Memory Layer"]
-    EX --> MD["Model Manager"]
-    MD --> LP["Local Providers (MLX/Ollama)"]
-    MD --> RP["Remote Providers (OpenAI/Anthropic/OpenRouter)"]
-    API --> DB["SQLite + Vector Store"]
+    subgraph CL["Clients"]
+        DSK["macOS App (SwiftUI)"]
+        SDK["SDK / CLI / HTTP Clients"]
+    end
+
+    subgraph API["Runtime API (FastAPI)"]
+        CHAT["/v1/chat/completions"]
+        AGENT["/agents/*"]
+        RUNS["/agents/{agent_id}/runs/*"]
+        AUTO["/automations/*"]
+        SUP["/supervisor/graphs/*"]
+        MODEL["/models/*"]
+        SVC["/service/*"]
+    end
+
+    subgraph CORE["Core Orchestration"]
+        AUTH["Auth + Owner Scope Guard"]
+        RUNMGR["AgentRunManager (queue/workers/lease/CAS)"]
+        EXEC["Task Executor + Planner + Step Registry"]
+        AUTOSCH["AutomationScheduler"]
+        SUPMGR["SupervisorTaskGraphManager (DAG)"]
+        FLOW["Flow/Voice Session Managers"]
+    end
+
+    subgraph SAFE["Policy & Safety"]
+        TOOLPOL["Tool Policy + Permission Manager"]
+        BREAKER["Autonomy Circuit Breaker"]
+        PLUGPOL["Plugin Compat + Capability Policy"]
+    end
+
+    subgraph MODELPLANE["Model Plane"]
+        MODELMGR["ModelManager + Routing"]
+        LOCAL["Local Providers: MLX / Ollama"]
+        REMOTE["Remote Providers: OpenAI / Anthropic / OpenRouter"]
+    end
+
+    subgraph DATA["Data Plane"]
+        SQL["SQLite (runs/agents/automations/supervisor)"]
+        MEM["Memory Layer (working/episodic/semantic/profile)"]
+        VEC["Vector Store (FAISS)"]
+        OBS["Telemetry + SLO Metrics"]
+    end
+
+    subgraph OPS["Ops & Release"]
+        GATES["Release/Security/Nightly Gates"]
+        REPORTS["Quality Artifacts + Dashboards"]
+    end
+
+    DSK --> CHAT
+    DSK --> AGENT
+    DSK --> AUTO
+    DSK --> SUP
+    DSK --> FLOW
+
+    SDK --> CHAT
+    SDK --> AGENT
+    SDK --> RUNS
+    SDK --> AUTO
+    SDK --> SUP
+    SDK --> MODEL
+    SDK --> SVC
+
+    CHAT --> AUTH
+    AGENT --> AUTH
+    RUNS --> AUTH
+    AUTO --> AUTH
+    SUP --> AUTH
+    MODEL --> AUTH
+    SVC --> AUTH
+
+    AUTH --> RUNMGR
+    AUTH --> AUTOSCH
+    AUTH --> SUPMGR
+    AUTH --> MODELMGR
+
+    RUNMGR --> EXEC
+    EXEC --> TOOLPOL
+    EXEC --> MEM
+    EXEC --> MODELMGR
+
+    TOOLPOL --> BREAKER
+    TOOLPOL --> PLUGPOL
+
+    AUTOSCH --> RUNMGR
+    SUPMGR --> RUNMGR
+
+    MODELMGR --> LOCAL
+    MODELMGR --> REMOTE
+
+    RUNMGR --> SQL
+    AUTOSCH --> SQL
+    SUPMGR --> SQL
+    MEM --> SQL
+    MEM --> VEC
+    SVC --> OBS
+
+    OBS --> REPORTS
+    GATES --> REPORTS
+    SQL --> REPORTS
 ```
 
 ## Quick Start (Backend, 10-15 min)
