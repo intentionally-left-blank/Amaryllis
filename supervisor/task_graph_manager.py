@@ -476,16 +476,31 @@ class SupervisorTaskGraphManager:
             ):
                 continue
 
+            run_kwargs = {
+                "agent_id": str(node.get("agent_id") or ""),
+                "user_message": str(node.get("message") or ""),
+                "user_id": str(graph.get("user_id") or ""),
+                "session_id": graph.get("default_session_id"),
+                "max_attempts": node.get("max_attempts"),
+                "budget": node.get("budget"),
+            }
             try:
-                run = self._agent_manager.create_run(
-                    agent_id=str(node.get("agent_id") or ""),
-                    user_message=str(node.get("message") or ""),
-                    user_id=str(graph.get("user_id") or ""),
-                    session_id=graph.get("default_session_id"),
-                    max_attempts=node.get("max_attempts"),
-                    budget=node.get("budget"),
-                    run_source="supervisor",
-                )
+                try:
+                    run = self._agent_manager.create_run(
+                        **run_kwargs,
+                        run_source="supervisor",
+                    )
+                except TypeError as exc:
+                    # Backward compatibility for test doubles / legacy adapters
+                    # that do not yet accept run_source.
+                    message = str(exc)
+                    if (
+                        "run_source" in message
+                        and "unexpected keyword argument" in message
+                    ):
+                        run = self._agent_manager.create_run(**run_kwargs)
+                    else:
+                        raise
                 if not isinstance(run, dict):
                     raise ValueError("agent_manager.create_run returned invalid payload")
                 run_id = str(run.get("id") or "").strip()

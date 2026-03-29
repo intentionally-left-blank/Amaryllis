@@ -1,0 +1,194 @@
+{
+  "generated_at": "2026-03-29T06:34:40.685262+00:00",
+  "suite": "long_context_reliability_gate_v1",
+  "dataset": {
+    "path": "/Users/bogdan/Amaryllis/eval/datasets/quality/long_context_reliability_cases.json",
+    "cases_total": 3
+  },
+  "config": {
+    "iterations": 1,
+    "thresholds": {
+      "min_run_success_rate_pct": 100.0,
+      "min_relevance_score_pct": 95.0,
+      "min_stability_score_pct": 100.0,
+      "max_p95_latency_ms": 4000.0,
+      "max_relevance_regression_pct": 2.0,
+      "max_stability_regression_pct": 1.0,
+      "max_latency_regression_pct": 40.0
+    },
+    "baseline_path": "/Users/bogdan/Amaryllis/eval/baselines/quality/long_context_reliability_baseline.json"
+  },
+  "cases": [
+    {
+      "case_id": "lc_policy_001",
+      "title": "Policy Chain Priorities",
+      "expected_keywords": [
+        "determinism",
+        "rollback",
+        "reproducibility"
+      ],
+      "context_chars": 895,
+      "attempts": [
+        {
+          "attempt": 1,
+          "status_code": 200,
+          "ok": true,
+          "latency_ms": 3.501,
+          "relevance_pct": 100.0,
+          "output_preview": "Long-context answer: determinism, rollback, reproducibility"
+        }
+      ],
+      "summary": {
+        "attempts_total": 1,
+        "attempts_succeeded": 1,
+        "relevance_score_pct": 100.0,
+        "stability_score_pct": 100.0
+      }
+    },
+    {
+      "case_id": "lc_safety_002",
+      "title": "Safety Runtime Envelope",
+      "expected_keywords": [
+        "provenance",
+        "sandbox",
+        "privacy"
+      ],
+      "context_chars": 604,
+      "attempts": [
+        {
+          "attempt": 1,
+          "status_code": 200,
+          "ok": true,
+          "latency_ms": 1.639,
+          "relevance_pct": 100.0,
+          "output_preview": "Long-context answer: provenance, sandbox, privacy"
+        }
+      ],
+      "summary": {
+        "attempts_total": 1,
+        "attempts_succeeded": 1,
+        "relevance_score_pct": 100.0,
+        "stability_score_pct": 100.0
+      }
+    },
+    {
+      "case_id": "lc_ops_003",
+      "title": "Operational KPI Loop",
+      "expected_keywords": [
+        "benchmarks",
+        "alerts",
+        "trends"
+      ],
+      "context_chars": 607,
+      "attempts": [
+        {
+          "attempt": 1,
+          "status_code": 200,
+          "ok": true,
+          "latency_ms": 1.405,
+          "relevance_pct": 100.0,
+          "output_preview": "Long-context answer: benchmarks, alerts, trends"
+        }
+      ],
+      "summary": {
+        "attempts_total": 1,
+        "attempts_succeeded": 1,
+        "relevance_score_pct": 100.0,
+        "stability_score_pct": 100.0
+      }
+    }
+  ],
+  "checks": [
+    {
+      "id": "long_context.run_success_rate_pct",
+      "source": "long_context_reliability",
+      "value": 100.0,
+      "threshold": 100.0,
+      "comparator": "gte",
+      "unit": "pct",
+      "passed": true
+    },
+    {
+      "id": "long_context.relevance_score_pct",
+      "source": "long_context_reliability",
+      "value": 100.0,
+      "threshold": 95.0,
+      "comparator": "gte",
+      "unit": "pct",
+      "passed": true
+    },
+    {
+      "id": "long_context.stability_score_pct",
+      "source": "long_context_reliability",
+      "value": 100.0,
+      "threshold": 100.0,
+      "comparator": "gte",
+      "unit": "pct",
+      "passed": true
+    },
+    {
+      "id": "long_context.p95_latency_ms",
+      "source": "long_context_reliability",
+      "value": 3.501208,
+      "threshold": 4000.0,
+      "comparator": "lte",
+      "unit": "ms",
+      "passed": true
+    },
+    {
+      "id": "long_context.relevance_regression_pct",
+      "source": "long_context_reliability",
+      "value": 0.0,
+      "threshold": 2.0,
+      "comparator": "lte",
+      "unit": "pct",
+      "passed": true
+    },
+    {
+      "id": "long_context.stability_regression_pct",
+      "source": "long_context_reliability",
+      "value": 0.0,
+      "threshold": 1.0,
+      "comparator": "lte",
+      "unit": "pct",
+      "passed": true
+    },
+    {
+      "id": "long_context.p95_latency_regression_pct",
+      "source": "long_context_reliability",
+      "value": 0.0,
+      "threshold": 40.0,
+      "comparator": "lte",
+      "unit": "pct",
+      "passed": true
+    }
+  ],
+  "summary": {
+    "status": "pass",
+    "cases_total": 3,
+    "iterations": 1,
+    "runs_total": 3,
+    "runs_succeeded": 3,
+    "runs_failed": 0,
+    "run_success_rate_pct": 100.0,
+    "relevance_score_pct": 100.0,
+    "stability_score_pct": 100.0,
+    "p95_latency_ms": 3.501,
+    "checks_total": 7,
+    "checks_passed": 7,
+    "checks_failed": 0
+  },
+  "trend_deltas": {
+    "baseline_loaded": true,
+    "baseline_path": "/Users/bogdan/Amaryllis/eval/baselines/quality/long_context_reliability_baseline.json",
+    "metrics": {
+      "run_success_rate_pct_delta": 0.0,
+      "relevance_score_pct_delta": 0.0,
+      "stability_score_pct_delta": 0.0,
+      "p95_latency_ms_delta": -2996.4988,
+      "relevance_regression_pct": 0.0,
+      "stability_regression_pct": 0.0,
+      "p95_latency_regression_pct": 0.0
+    }
+  }
+}

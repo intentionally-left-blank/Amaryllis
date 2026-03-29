@@ -1,0 +1,197 @@
+{
+  "generated_at": "2026-03-29T06:34:19.849793+00:00",
+  "suite": "adoption_kpi_trend_gate_v1",
+  "snapshot": {
+    "path": "/private/var/folders/dw/4n01p5c160l69m62ktqknb9w0000gn/T/amaryllis-adoption-trend-gate-y8ounjka/adoption-kpi-snapshot.json",
+    "suite": "adoption_kpi_snapshot_v1",
+    "generated_at": ""
+  },
+  "baseline": {
+    "path": "/private/var/folders/dw/4n01p5c160l69m62ktqknb9w0000gn/T/amaryllis-adoption-trend-gate-y8ounjka/adoption-kpi-baseline.json",
+    "suite": "adoption_kpi_snapshot_baseline_v1",
+    "generated_at": ""
+  },
+  "config": {
+    "thresholds": {
+      "max_activation_success_regression_pct": 1.0,
+      "max_activation_blocked_rate_increase_pct": 0.0,
+      "max_install_success_regression_pct": 1.0,
+      "max_retention_proxy_regression_pct": 1.0,
+      "max_feature_adoption_regression_pct": 2.0,
+      "max_api_quickstart_pass_rate_regression_pct": 1.0,
+      "max_channel_coverage_regression_pct": 1.0
+    }
+  },
+  "comparisons": [
+    {
+      "metric_id": "user_journey.activation_success_rate_pct",
+      "comparator": "gte",
+      "unit": "pct",
+      "current": 100.0,
+      "baseline": 100.0,
+      "delta": 0.0,
+      "directional_delta": 0.0,
+      "regression_pct": 0.0,
+      "direction": "unchanged"
+    },
+    {
+      "metric_id": "user_journey.activation_blocked_rate_pct",
+      "comparator": "lte",
+      "unit": "pct",
+      "current": 0.0,
+      "baseline": 0.0,
+      "delta": 0.0,
+      "directional_delta": 0.0,
+      "regression_pct": 0.0,
+      "direction": "unchanged"
+    },
+    {
+      "metric_id": "user_journey.install_success_rate_pct",
+      "comparator": "gte",
+      "unit": "pct",
+      "current": 100.0,
+      "baseline": 100.0,
+      "delta": 0.0,
+      "directional_delta": 0.0,
+      "regression_pct": 0.0,
+      "direction": "unchanged"
+    },
+    {
+      "metric_id": "user_journey.retention_proxy_success_rate_pct",
+      "comparator": "gte",
+      "unit": "pct",
+      "current": 100.0,
+      "baseline": 100.0,
+      "delta": 0.0,
+      "directional_delta": 0.0,
+      "regression_pct": 0.0,
+      "direction": "unchanged"
+    },
+    {
+      "metric_id": "user_journey.feature_adoption_rate_pct",
+      "comparator": "gte",
+      "unit": "pct",
+      "current": 100.0,
+      "baseline": 100.0,
+      "delta": 0.0,
+      "directional_delta": 0.0,
+      "regression_pct": 0.0,
+      "direction": "unchanged"
+    },
+    {
+      "metric_id": "api_quickstart_compat.pass_rate_pct",
+      "comparator": "gte",
+      "unit": "pct",
+      "current": 100.0,
+      "baseline": 100.0,
+      "delta": 0.0,
+      "directional_delta": 0.0,
+      "regression_pct": 0.0,
+      "direction": "unchanged"
+    },
+    {
+      "metric_id": "distribution_channel_manifest.coverage_pct",
+      "comparator": "gte",
+      "unit": "pct",
+      "current": 100.0,
+      "baseline": 100.0,
+      "delta": 0.0,
+      "directional_delta": 0.0,
+      "regression_pct": 0.0,
+      "direction": "unchanged"
+    }
+  ],
+  "checks": [
+    {
+      "id": "snapshot.required_metrics_present",
+      "source": "snapshot",
+      "value": 1.0,
+      "threshold": 1.0,
+      "comparator": "gte",
+      "unit": "bool",
+      "passed": true
+    },
+    {
+      "id": "baseline.required_metrics_present",
+      "source": "baseline",
+      "value": 1.0,
+      "threshold": 1.0,
+      "comparator": "gte",
+      "unit": "bool",
+      "passed": true
+    },
+    {
+      "id": "trend.user_journey.activation_success_rate_pct.regression_pct",
+      "source": "adoption_kpi_trend",
+      "value": 0.0,
+      "threshold": 1.0,
+      "comparator": "lte",
+      "unit": "pct",
+      "passed": true
+    },
+    {
+      "id": "trend.user_journey.activation_blocked_rate_pct.regression_pct",
+      "source": "adoption_kpi_trend",
+      "value": 0.0,
+      "threshold": 0.0,
+      "comparator": "lte",
+      "unit": "pct",
+      "passed": true
+    },
+    {
+      "id": "trend.user_journey.install_success_rate_pct.regression_pct",
+      "source": "adoption_kpi_trend",
+      "value": 0.0,
+      "threshold": 1.0,
+      "comparator": "lte",
+      "unit": "pct",
+      "passed": true
+    },
+    {
+      "id": "trend.user_journey.retention_proxy_success_rate_pct.regression_pct",
+      "source": "adoption_kpi_trend",
+      "value": 0.0,
+      "threshold": 1.0,
+      "comparator": "lte",
+      "unit": "pct",
+      "passed": true
+    },
+    {
+      "id": "trend.user_journey.feature_adoption_rate_pct.regression_pct",
+      "source": "adoption_kpi_trend",
+      "value": 0.0,
+      "threshold": 2.0,
+      "comparator": "lte",
+      "unit": "pct",
+      "passed": true
+    },
+    {
+      "id": "trend.api_quickstart_compat.pass_rate_pct.regression_pct",
+      "source": "adoption_kpi_trend",
+      "value": 0.0,
+      "threshold": 1.0,
+      "comparator": "lte",
+      "unit": "pct",
+      "passed": true
+    },
+    {
+      "id": "trend.distribution_channel_manifest.coverage_pct.regression_pct",
+      "source": "adoption_kpi_trend",
+      "value": 0.0,
+      "threshold": 1.0,
+      "comparator": "lte",
+      "unit": "pct",
+      "passed": true
+    }
+  ],
+  "summary": {
+    "status": "pass",
+    "checks_total": 9,
+    "checks_passed": 9,
+    "checks_failed": 0,
+    "compared_metrics": 7,
+    "improved": 0,
+    "regressed": 0,
+    "unchanged": 7
+  }
+}
