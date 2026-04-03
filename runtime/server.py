@@ -41,6 +41,7 @@ from memory.memory_manager import MemoryManager
 from memory.semantic_memory import SemanticMemory
 from memory.user_memory import UserMemory
 from memory.working_memory import WorkingMemory
+from news.pipeline import NewsIngestionPipeline
 from models.cognition_backends import (
     DeterministicCognitionBackend,
     ModelManagerCognitionBackend,
@@ -127,6 +128,7 @@ class ServiceContainer:
     provider_session_manager: ProviderSessionManager
     entitlement_resolver: EntitlementResolver
     source_connectors: SourceConnectorRegistry
+    news_pipeline: NewsIngestionPipeline
 
 
 class RunKillSwitchRequest(BaseModel):
@@ -441,6 +443,7 @@ def create_services() -> ServiceContainer:
     provider_session_manager = ProviderSessionManager(database=database)
     entitlement_resolver = EntitlementResolver(config=config, database=database)
     source_connectors = SourceConnectorRegistry()
+    news_pipeline = NewsIngestionPipeline(source_registry=source_connectors)
 
     episodic = EpisodicMemory(database)
     semantic = SemanticMemory(database, vector_store)
@@ -688,6 +691,7 @@ def create_services() -> ServiceContainer:
         provider_session_manager=provider_session_manager,
         entitlement_resolver=entitlement_resolver,
         source_connectors=source_connectors,
+        news_pipeline=news_pipeline,
     )
 
 

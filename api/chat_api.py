@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import json
 import math
 import os
+import re
 import time
 from typing import Any
 from uuid import uuid4
@@ -25,6 +26,40 @@ def _request_id(request: Request) -> str:
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+_AGENT_NAME_QUOTED_PATTERN = re.compile(r"[\"'«“](?P<name>[^\"'»”]{2,60})[\"'»”]")
+_AGENT_FOCUS_PATTERN = re.compile(
+    r"(?:для|по|for|about)\s+(?P<focus>[a-zA-Z0-9а-яА-ЯёЁ _/+#-]{2,120})",
+    flags=re.IGNORECASE,
+)
+
+
+def _sign_action(
+    request: Request,
+    *,
+    action: str,
+    payload: dict[str, Any],
+    actor: str | None = None,
+    target_type: str | None = None,
+    target_id: str | None = None,
+    status: str = "succeeded",
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    services = request.app.state.services
+    try:
+        return services.security_manager.signed_action(
+            action=action,
+            payload=payload,
+            request_id=_request_id(request),
+            actor=actor,
+            target_type=target_type,
+            target_id=target_id,
+            status=status,
+            details=details,
+        )
+    except Exception:
+        return {}
 
 
 class ChatMessage(BaseModel):
@@ -77,6 +112,270 @@ def _last_user_query(messages: list[dict[str, Any]]) -> str:
         if content:
             return content
     return ""
+
+
+def _looks_like_agent_quickstart_request(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    if not normalized:
+        return False
+    if "как создать" in normalized or "how to create" in normalized:
+        return False
+    has_agent = "агент" in normalized or "agent" in normalized
+    has_create = any(
+        token in normalized
+        for token in (
+            "создай",
+            "создать",
+            "сделай",
+            "сделать",
+            "create",
+            "build",
+            "make",
+        )
+    )
+    return has_agent and has_create
+
+
+def _clean_focus_text(text: str) -> str:
+    normalized = str(text or "").strip(" ,.;:!?")
+    if not normalized:
+        return ""
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized[:120]
+
+
+def _infer_agent_spec_from_request(request_text: str) -> dict[str, Any]:
+    raw = str(request_text or "").strip()
+    lowered = raw.lower()
+
+    name_match = _AGENT_NAME_QUOTED_PATTERN.search(raw)
+    requested_name = _clean_focus_text(name_match.group("name")) if name_match is not None else ""
+
+    focus_match = _AGENT_FOCUS_PATTERN.search(raw)
+    requested_focus = _clean_focus_text(focus_match.group("focus")) if focus_match is not None else ""
+
+    if not requested_focus:
+        if any(token in lowered for token in ("news", "новост", "twitter", "reddit", "x.com")):
+            requested_focus = "AI news and internet updates"
+        elif any(token in lowered for token in ("code", "код", "python", "typescript", "git", "program")):
+            requested_focus = "software engineering tasks"
+        else:
+            requested_focus = "general productivity"
+
+    is_news = any(token in lowered for token in ("news", "новост", "reddit", "twitter", "x.com"))
+    is_coding = any(token in lowered for token in ("code", "код", "python", "typescript", "git", "program"))
+
+    if requested_name:
+        name = requested_name
+    elif is_news:
+        name = "News Scout"
+    elif is_coding:
+        name = "Code Copilot"
+    else:
+        name = "Custom Assistant"
+
+    if is_news:
+        system_prompt = (
+            f"You are {name}. You are a specialized news agent for {requested_focus}. "
+            "Track updates, summarize key developments, deduplicate overlap, and always include source links."
+        )
+        tools = ["web_search"]
+    elif is_coding:
+        system_prompt = (
+            f"You are {name}. You are a specialized coding assistant for {requested_focus}. "
+            "Propose implementation plans, write concise code, and include practical verification steps."
+        )
+        tools = ["web_search"]
+    else:
+        system_prompt = (
+            f"You are {name}. You are a specialized assistant for {requested_focus}. "
+            "Provide actionable and structured help, asking clarifying questions only when necessary."
+        )
+        tools = []
+
+    return {
+        "name": name,
+        "focus": requested_focus,
+        "system_prompt": system_prompt,
+        "tools": tools,
+    }
+
+
+def _build_quickstart_chat_completion(
+    *,
+    request: Request,
+    payload: ChatCompletionsRequest,
+    content: str,
+    agent_record: dict[str, Any],
+    action_receipt: dict[str, Any],
+) -> dict[str, Any]:
+    completion_id = f"chatcmpl-{uuid4().hex}"
+    created = int(time.time())
+    return {
+        "id": completion_id,
+        "object": "chat.completion",
+        "created": created,
+        "model": "amaryllis-system",
+        "provider": "amaryllis",
+        "request_id": _request_id(request),
+        "routing": {"mode": "quickstart", "source": "chat_intent"},
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": content,
+                },
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        },
+        "provenance": {
+            "version": "provenance_v1",
+            "strategy": "quickstart_agent_create",
+            "grounded": True,
+            "query": _last_user_query(_normalize_messages(payload.messages)),
+            "coverage_pct": 100.0,
+            "sources": [],
+        },
+        "tool_events": [],
+        "quick_action": {
+            "type": "agent_created",
+            "agent": agent_record,
+            "action_receipt": action_receipt,
+        },
+    }
+
+
+def _build_quickstart_stream_response(
+    *,
+    request: Request,
+    content: str,
+) -> StreamingResponse:
+    completion_id = f"chatcmpl-{uuid4().hex}"
+    created = int(time.time())
+    request_id = _request_id(request)
+
+    def event_stream():
+        first_chunk = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": "amaryllis-system",
+            "provider": "amaryllis",
+            "request_id": request_id,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"role": "assistant"},
+                    "finish_reason": None,
+                }
+            ],
+        }
+        yield f"data: {json.dumps(first_chunk, ensure_ascii=False)}\n\n"
+        payload_chunk = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": "amaryllis-system",
+            "provider": "amaryllis",
+            "request_id": request_id,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"content": content},
+                    "finish_reason": None,
+                }
+            ],
+        }
+        yield f"data: {json.dumps(payload_chunk, ensure_ascii=False)}\n\n"
+        done_chunk = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": "amaryllis-system",
+            "provider": "amaryllis",
+            "request_id": request_id,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "stop",
+                }
+            ],
+        }
+        yield f"data: {json.dumps(done_chunk, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+def _maybe_handle_chat_agent_quickstart(
+    *,
+    request: Request,
+    payload: ChatCompletionsRequest,
+    normalized_messages: list[dict[str, Any]],
+    actor_user_id: str | None,
+) -> dict[str, Any] | None:
+    if not payload.user_id:
+        return None
+    query = _last_user_query(normalized_messages)
+    if not _looks_like_agent_quickstart_request(query):
+        return None
+
+    services = request.app.state.services
+    spec = _infer_agent_spec_from_request(query)
+    try:
+        agent = services.agent_manager.create_agent(
+            name=str(spec.get("name") or "Custom Assistant"),
+            system_prompt=str(spec.get("system_prompt") or "You are a helpful assistant."),
+            model=payload.model,
+            tools=spec.get("tools") if isinstance(spec.get("tools"), list) else [],
+            user_id=payload.user_id,
+        )
+    except Exception as exc:
+        _sign_action(
+            request,
+            action="chat_agent_quickstart",
+            payload={"request": query, "user_id": payload.user_id},
+            actor=actor_user_id,
+            target_type="agent",
+            status="failed",
+            details={"error": str(exc)},
+        )
+        raise ProviderError(str(exc)) from exc
+
+    receipt = _sign_action(
+        request,
+        action="chat_agent_quickstart",
+        payload={
+            "request": query,
+            "user_id": payload.user_id,
+            "agent_name": agent.name,
+            "focus": str(spec.get("focus") or ""),
+        },
+        actor=actor_user_id,
+        target_type="agent",
+        target_id=agent.id,
+    )
+    content = (
+        f"Готово. Создал агента '{agent.name}' (id: {agent.id}). "
+        f"Фокус: {str(spec.get('focus') or 'general')}. Можешь сразу запускать его задачи."
+    )
+    agent_record = agent.to_record()
+    if payload.stream:
+        return {"stream_response": _build_quickstart_stream_response(request=request, content=content)}
+    return _build_quickstart_chat_completion(
+        request=request,
+        payload=payload,
+        content=content,
+        agent_record=agent_record,
+        action_receipt=receipt,
+    )
 
 
 def _build_provenance_payload(
@@ -506,6 +805,18 @@ def chat_completions(payload: ChatCompletionsRequest, request: Request):
 
     services = request.app.state.services
     normalized_messages = _normalize_messages(payload.messages)
+    quickstart_payload = _maybe_handle_chat_agent_quickstart(
+        request=request,
+        payload=payload,
+        normalized_messages=normalized_messages,
+        actor_user_id=auth.user_id,
+    )
+    if quickstart_payload is not None:
+        stream_response = quickstart_payload.get("stream_response")
+        if isinstance(stream_response, StreamingResponse):
+            return stream_response
+        return quickstart_payload
+
     tool_names = _tool_names_from_request(payload=payload, request=request)
     request_id = _request_id(request)
     provenance = _build_provenance_payload(

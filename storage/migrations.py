@@ -864,6 +864,35 @@ MIGRATIONS: list[Migration] = [
             ON provider_sessions(user_id, provider, status, updated_at);
         """,
     ),
+    Migration(
+        version=21,
+        name="news_items_v1",
+        sql="""
+        CREATE TABLE IF NOT EXISTS news_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            source TEXT NOT NULL,
+            canonical_id TEXT NOT NULL,
+            url TEXT NOT NULL,
+            title TEXT NOT NULL,
+            excerpt TEXT,
+            author TEXT,
+            published_at TEXT NOT NULL,
+            ingested_at TEXT NOT NULL,
+            raw_score REAL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            UNIQUE(user_id, topic, source, canonical_id, published_at)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_news_items_user_topic_time
+            ON news_items(user_id, topic, ingested_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_news_items_source_time
+            ON news_items(source, ingested_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_news_items_user_source_time
+            ON news_items(user_id, source, ingested_at DESC);
+        """,
+    ),
 ]
 
 

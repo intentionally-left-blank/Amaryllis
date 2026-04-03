@@ -86,6 +86,39 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         self.assertIn("grounded", provenance)
         self.assertIn("sources", provenance)
 
+    def test_chat_phrase_can_create_agent_directly(self) -> None:
+        response = self.client.post(
+            "/v1/chat/completions",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "messages": [{"role": "user", "content": "хочу такого то агента сделай пж, для AI новостей"}],
+                "stream": False,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(str(payload.get("provider")), "amaryllis")
+        content = str(((payload.get("choices") or [{}])[0].get("message", {}) or {}).get("content", ""))
+        self.assertIn("Создал агента", content)
+        quick_action = payload.get("quick_action", {})
+        self.assertEqual(str(quick_action.get("type")), "agent_created")
+        agent = quick_action.get("agent", {})
+        created_agent_id = str(agent.get("id") or "")
+        self.assertTrue(created_agent_id)
+
+        listed = self.client.get(
+            "/agents",
+            headers=self._auth("user-token"),
+            params={"user_id": "user-1"},
+        )
+        self.assertEqual(listed.status_code, 200)
+        listed_payload = listed.json()
+        items = listed_payload.get("items", [])
+        self.assertIsInstance(items, list)
+        ids = {str(item.get("id")) for item in items if isinstance(item, dict)}
+        self.assertIn(created_agent_id, ids)
+
     def test_chat_endpoint_returns_grounded_provenance_when_memory_fact_exists(self) -> None:
         services = self.server_module.app.state.services
         services.memory_manager.remember_fact(

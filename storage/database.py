@@ -1429,6 +1429,102 @@ class Database:
             self._commit_locked()
         return int(cursor.rowcount or 0) > 0
 
+    def upsert_news_items(
+        self,
+        *,
+        user_id: str,
+        topic: str,
+        items: list[dict[str, Any]],
+    ) -> int:
+        normalized_user = str(user_id or "").strip()
+        normalized_topic = str(topic or "").strip()
+        if not normalized_user or not normalized_topic or not items:
+            return 0
+        upserted = 0
+        with self._lock:
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                source = str(item.get("source") or "").strip().lower()
+                canonical_id = str(item.get("canonical_id") or "").strip()
+                url = str(item.get("url") or "").strip()
+                title = str(item.get("title") or "").strip()
+                published_at = str(item.get("published_at") or "").strip()
+                ingested_at = str(item.get("ingested_at") or "").strip() or self._utc_now()
+                if not source or not canonical_id or not url or not title or not published_at:
+                    continue
+                metadata_payload = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+                cursor = self._conn.execute(
+                    """
+                    INSERT INTO news_items(
+                        user_id,
+                        topic,
+                        source,
+                        canonical_id,
+                        url,
+                        title,
+                        excerpt,
+                        author,
+                        published_at,
+                        ingested_at,
+                        raw_score,
+                        metadata_json
+                    )
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id, topic, source, canonical_id, published_at) DO UPDATE SET
+                        url=excluded.url,
+                        title=excluded.title,
+                        excerpt=excluded.excerpt,
+                        author=excluded.author,
+                        ingested_at=excluded.ingested_at,
+                        raw_score=excluded.raw_score,
+                        metadata_json=excluded.metadata_json
+                    """,
+                    (
+                        normalized_user,
+                        normalized_topic,
+                        source,
+                        canonical_id,
+                        url,
+                        title,
+                        str(item.get("excerpt") or "").strip() or None,
+                        str(item.get("author") or "").strip() or None,
+                        published_at,
+                        ingested_at,
+                        float(item.get("raw_score")) if item.get("raw_score") is not None else None,
+                        json.dumps(metadata_payload, ensure_ascii=False),
+                    ),
+                )
+                if int(cursor.rowcount or 0) > 0:
+                    upserted += 1
+            self._commit_locked()
+        return upserted
+
+    def list_news_items(
+        self,
+        *,
+        user_id: str,
+        topic: str | None = None,
+        source: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        normalized_user = str(user_id or "").strip()
+        if not normalized_user or limit <= 0:
+            return []
+        query = "SELECT * FROM news_items WHERE user_id = ?"
+        params: list[Any] = [normalized_user]
+        if topic not in (None, ""):
+            query += " AND topic = ?"
+            params.append(str(topic).strip())
+        if source not in (None, ""):
+            query += " AND source = ?"
+            params.append(str(source).strip().lower())
+        query += " ORDER BY ingested_at DESC LIMIT ?"
+        params.append(max(1, int(limit)))
+        with self._lock:
+            rows = self._conn.execute(query, tuple(params)).fetchall()
+        return [self._decode_news_item_row(dict(row)) for row in rows]
+
     def upsert_secret_inventory_items(self, items: list[dict[str, Any]]) -> None:
         if not items:
             return
@@ -3482,6 +3578,32 @@ class Database:
         ):
             value = row.get(key)
             row[key] = str(value) if value not in (None, "") else None
+        return row
+
+    @staticmethod
+    def _decode_news_item_row(row: dict[str, Any]) -> dict[str, Any]:
+        metadata_json = row.pop("metadata_json", "{}")
+        try:
+            parsed = json.loads(metadata_json or "{}")
+            row["metadata"] = parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            row["metadata"] = {}
+        row["user_id"] = str(row.get("user_id") or "").strip()
+        row["topic"] = str(row.get("topic") or "").strip()
+        row["source"] = str(row.get("source") or "").strip().lower()
+        row["canonical_id"] = str(row.get("canonical_id") or "").strip()
+        row["url"] = str(row.get("url") or "").strip()
+        row["title"] = str(row.get("title") or "").strip()
+        for key in ("excerpt", "author", "published_at", "ingested_at"):
+            value = row.get(key)
+            row[key] = str(value) if value not in (None, "") else None
+        if row.get("raw_score") is not None:
+            try:
+                row["raw_score"] = float(row.get("raw_score"))
+            except Exception:
+                row["raw_score"] = None
+        else:
+            row["raw_score"] = None
         return row
 
     @staticmethod

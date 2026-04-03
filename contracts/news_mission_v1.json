@@ -1,7 +1,7 @@
 {
   "contract": "news_mission_v1",
-  "version": "0.1.0-draft",
-  "description": "Contract for autonomous news missions (plan/create/run/digest) with grounded citations.",
+  "version": "0.2.0-draft",
+  "description": "Contract for first-class news agents (create/list) and autonomous news missions (plan/create/ingest/list) with configurable internet scope.",
   "entities": {
     "source_item": {
       "required": [
@@ -14,164 +14,148 @@
       "properties": {
         "source": {
           "type": "string",
-          "enum": [
-            "reddit",
-            "x",
-            "web"
-          ]
+          "enum": ["reddit", "x", "web"]
         },
-        "canonical_id": {
-          "type": "string"
-        },
-        "url": {
-          "type": "string"
-        },
-        "title": {
-          "type": "string"
-        },
-        "excerpt": {
-          "type": "string"
-        },
-        "author": {
-          "type": "string"
-        },
-        "published_at": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "ingested_at": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "raw_score": {
-          "type": "number"
-        },
-        "metadata": {
-          "type": "object",
-          "additionalProperties": true
-        }
+        "canonical_id": {"type": "string"},
+        "url": {"type": "string"},
+        "title": {"type": "string"},
+        "excerpt": {"type": "string"},
+        "author": {"type": "string"},
+        "published_at": {"type": "string", "format": "date-time"},
+        "ingested_at": {"type": "string", "format": "date-time"},
+        "raw_score": {"type": "number"},
+        "metadata": {"type": "object", "additionalProperties": true}
       }
     },
-    "digest_entry": {
-      "required": [
-        "section",
-        "summary",
-        "citations"
-      ],
+    "news_agent": {
+      "required": ["news_agent_id", "name", "managed"],
       "properties": {
-        "section": {
-          "type": "string"
-        },
-        "summary": {
-          "type": "string"
-        },
-        "confidence": {
-          "type": "number",
-          "minimum": 0.0,
-          "maximum": 1.0
-        },
-        "citations": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": [
-              "source",
-              "url",
-              "title"
-            ],
-            "properties": {
-              "source": {
-                "type": "string"
-              },
-              "url": {
-                "type": "string"
-              },
-              "title": {
-                "type": "string"
-              }
-            }
-          }
-        }
+        "news_agent_id": {"type": "string"},
+        "name": {"type": "string"},
+        "user_id": {"type": "string"},
+        "created_at": {"type": "string", "format": "date-time"},
+        "managed": {"type": "boolean"},
+        "is_default": {"type": "boolean"}
+      }
+    },
+    "internet_scope": {
+      "properties": {
+        "queries": {"type": "array", "items": {"type": "string"}},
+        "include_domains": {"type": "array", "items": {"type": "string"}},
+        "exclude_domains": {"type": "array", "items": {"type": "string"}},
+        "seed_urls": {"type": "array", "items": {"type": "string"}},
+        "languages": {"type": "array", "items": {"type": "string"}},
+        "regions": {"type": "array", "items": {"type": "string"}},
+        "max_depth": {"type": "integer", "minimum": 1, "maximum": 5}
       }
     }
   },
   "endpoints": [
     {
       "method": "POST",
-      "path": "/news/missions/plan",
+      "path": "/news/agents/create",
       "request": {
-        "required": [
-          "agent_id",
-          "user_id",
-          "topic"
-        ],
         "properties": {
-          "agent_id": {
-            "type": "string"
-          },
-          "user_id": {
-            "type": "string"
-          },
-          "topic": {
-            "type": "string"
-          },
-          "sources": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "reddit",
-                "x",
-                "web"
-              ]
-            }
-          },
-          "window_hours": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 168
-          },
-          "timezone": {
-            "type": "string"
-          },
-          "schedule_type": {
-            "type": "string"
-          },
-          "schedule": {
-            "type": "object",
-            "additionalProperties": true
-          },
-          "start_immediately": {
-            "type": "boolean"
-          }
+          "user_id": {"type": "string"},
+          "name": {"type": "string"},
+          "focus": {"type": "string"},
+          "model": {"type": "string"},
+          "tools": {"type": "array", "items": {"type": "string"}},
+          "set_default": {"type": "boolean"}
         }
       },
       "response": {
-        "required": [
-          "mission_plan",
-          "apply_hint",
-          "request_id"
-        ],
+        "required": ["news_agent", "request_id"],
         "properties": {
-          "mission_plan": {
-            "type": "object",
-            "additionalProperties": true
-          },
-          "apply_hint": {
-            "type": "object",
-            "properties": {
-              "endpoint": {
-                "type": "string"
-              },
-              "payload": {
-                "type": "object",
-                "additionalProperties": true
-              }
-            }
-          },
-          "request_id": {
-            "type": "string"
-          }
+          "news_agent": {"$ref": "#/entities/news_agent"},
+          "action_receipt": {"type": "object", "additionalProperties": true},
+          "request_id": {"type": "string"}
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/news/agents",
+      "request": {
+        "properties": {
+          "user_id": {"type": "string"}
+        }
+      },
+      "response": {
+        "required": ["items", "count", "request_id"],
+        "properties": {
+          "items": {"type": "array", "items": {"$ref": "#/entities/news_agent"}},
+          "count": {"type": "integer"},
+          "request_id": {"type": "string"}
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/news/agents/quickstart",
+      "request": {
+        "properties": {
+          "user_id": {"type": "string"},
+          "request": {"type": "string"},
+          "topic": {"type": "string"},
+          "focus": {"type": "string"},
+          "sources": {"type": "array", "items": {"type": "string", "enum": ["reddit", "x", "web"]}},
+          "window_hours": {"type": "integer", "minimum": 1, "maximum": 168},
+          "max_items_per_source": {"type": "integer", "minimum": 1, "maximum": 100},
+          "timezone": {"type": "string"},
+          "schedule_type": {"type": "string"},
+          "schedule": {"type": "object", "additionalProperties": true},
+          "interval_sec": {"type": "integer", "minimum": 10, "maximum": 86400},
+          "start_immediately": {"type": "boolean"},
+          "internet_scope": {"$ref": "#/entities/internet_scope"},
+          "source_overrides": {"type": "object", "additionalProperties": true},
+          "session_id": {"type": "string"}
+        }
+      },
+      "response": {
+        "required": ["news_agent", "resolved_topic", "mission_plan", "automation", "request_id"],
+        "properties": {
+          "news_agent": {"$ref": "#/entities/news_agent"},
+          "resolved_topic": {"type": "string"},
+          "mission_plan": {"type": "object", "additionalProperties": true},
+          "automation": {"type": "object", "additionalProperties": true},
+          "assistant_reply": {"type": "string"},
+          "action_receipt": {"type": "object", "additionalProperties": true},
+          "request_id": {"type": "string"}
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/news/missions/plan",
+      "request": {
+        "required": ["topic"],
+        "properties": {
+          "news_agent_id": {"type": "string"},
+          "agent_id": {"type": "string"},
+          "user_id": {"type": "string"},
+          "topic": {"type": "string"},
+          "sources": {"type": "array", "items": {"type": "string", "enum": ["reddit", "x", "web"]}},
+          "window_hours": {"type": "integer", "minimum": 1, "maximum": 168},
+          "max_items_per_source": {"type": "integer", "minimum": 1, "maximum": 100},
+          "timezone": {"type": "string"},
+          "schedule_type": {"type": "string"},
+          "schedule": {"type": "object", "additionalProperties": true},
+          "interval_sec": {"type": "integer", "minimum": 10, "maximum": 86400},
+          "start_immediately": {"type": "boolean"},
+          "internet_scope": {"$ref": "#/entities/internet_scope"},
+          "source_overrides": {"type": "object", "additionalProperties": true}
+        }
+      },
+      "response": {
+        "required": ["news_agent", "mission_plan", "apply_hint", "automation_apply_hint", "request_id"],
+        "properties": {
+          "news_agent": {"$ref": "#/entities/news_agent"},
+          "mission_plan": {"type": "object", "additionalProperties": true},
+          "apply_hint": {"type": "object", "additionalProperties": true},
+          "automation_apply_hint": {"type": "object", "additionalProperties": true},
+          "action_receipt": {"type": "object", "additionalProperties": true},
+          "request_id": {"type": "string"}
         }
       }
     },
@@ -179,121 +163,78 @@
       "method": "POST",
       "path": "/news/missions/create",
       "request": {
-        "required": [
-          "agent_id",
-          "user_id",
-          "topic",
-          "schedule_type",
-          "schedule"
-        ],
+        "required": ["topic"],
         "properties": {
-          "agent_id": {
-            "type": "string"
-          },
-          "user_id": {
-            "type": "string"
-          },
-          "topic": {
-            "type": "string"
-          },
-          "sources": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "window_hours": {
-            "type": "integer"
-          },
-          "timezone": {
-            "type": "string"
-          },
-          "schedule_type": {
-            "type": "string"
-          },
-          "schedule": {
-            "type": "object",
-            "additionalProperties": true
-          }
+          "news_agent_id": {"type": "string"},
+          "agent_id": {"type": "string"},
+          "user_id": {"type": "string"},
+          "session_id": {"type": "string"},
+          "topic": {"type": "string"},
+          "sources": {"type": "array", "items": {"type": "string"}},
+          "window_hours": {"type": "integer", "minimum": 1, "maximum": 168},
+          "max_items_per_source": {"type": "integer", "minimum": 1, "maximum": 100},
+          "timezone": {"type": "string"},
+          "schedule_type": {"type": "string"},
+          "schedule": {"type": "object", "additionalProperties": true},
+          "interval_sec": {"type": "integer", "minimum": 10, "maximum": 86400},
+          "start_immediately": {"type": "boolean"},
+          "internet_scope": {"$ref": "#/entities/internet_scope"},
+          "source_overrides": {"type": "object", "additionalProperties": true}
         }
       },
       "response": {
-        "required": [
-          "automation",
-          "request_id"
-        ],
+        "required": ["news_agent", "mission_plan", "automation", "request_id"],
         "properties": {
-          "automation": {
-            "type": "object",
-            "additionalProperties": true
-          },
-          "request_id": {
-            "type": "string"
-          }
+          "news_agent": {"$ref": "#/entities/news_agent"},
+          "mission_plan": {"type": "object", "additionalProperties": true},
+          "automation": {"type": "object", "additionalProperties": true},
+          "action_receipt": {"type": "object", "additionalProperties": true},
+          "request_id": {"type": "string"}
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/news/ingest/preview",
+      "request": {
+        "required": ["topic"],
+        "properties": {
+          "user_id": {"type": "string"},
+          "topic": {"type": "string"},
+          "sources": {"type": "array", "items": {"type": "string"}},
+          "window_hours": {"type": "integer", "minimum": 1, "maximum": 168},
+          "max_items_per_source": {"type": "integer", "minimum": 1, "maximum": 100},
+          "internet_scope": {"$ref": "#/entities/internet_scope"},
+          "persist": {"type": "boolean"}
+        }
+      },
+      "response": {
+        "required": ["report", "request_id"],
+        "properties": {
+          "report": {"type": "object", "additionalProperties": true},
+          "persisted_count": {"type": "integer"},
+          "action_receipt": {"type": "object", "additionalProperties": true},
+          "request_id": {"type": "string"}
         }
       }
     },
     {
       "method": "GET",
-      "path": "/news/digests",
+      "path": "/news/items",
       "request": {
         "properties": {
-          "user_id": {
-            "type": "string"
-          },
-          "topic": {
-            "type": "string"
-          },
-          "limit": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 100
-          }
+          "user_id": {"type": "string"},
+          "topic": {"type": "string"},
+          "source": {"type": "string", "enum": ["reddit", "x", "web"]},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 1000}
         }
       },
       "response": {
-        "required": [
-          "items",
-          "count",
-          "request_id"
-        ],
+        "required": ["items", "count", "request_id"],
         "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": [
-                "digest_id",
-                "topic",
-                "generated_at",
-                "entries"
-              ],
-              "properties": {
-                "digest_id": {
-                  "type": "string"
-                },
-                "topic": {
-                  "type": "string"
-                },
-                "generated_at": {
-                  "type": "string",
-                  "format": "date-time"
-                },
-                "entries": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/entities/digest_entry"
-                  }
-                }
-              }
-            }
-          },
-          "count": {
-            "type": "integer"
-          },
-          "request_id": {
-            "type": "string"
-          }
+          "items": {"type": "array", "items": {"$ref": "#/entities/source_item"}},
+          "count": {"type": "integer"},
+          "request_id": {"type": "string"}
         }
       }
     }
