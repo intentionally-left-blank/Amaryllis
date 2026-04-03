@@ -89,6 +89,19 @@ Execution-ready breakdown:
 Execution-ready breakdown:
 - `docs/amaryllis-phase6-backlog.md`
 
+### Phase 7 - Autonomous News Missions (planned)
+- Goal: productize autonomous, source-grounded daily intelligence missions (starting with AI news) with secure provider session and entitlement controls.
+- Outcomes:
+  - connector-based source ingestion (`reddit`, `x`, `web`) with normalized schema, dedup, and policy-aware retries.
+  - mission-specific planning and automation lane for daily digest workflows.
+  - grounded digest composer with explicit source citations and confidence markers.
+  - provider session and entitlement contract for user-scoped cloud access with revocation/audit boundaries.
+  - release/nightly blocking gates for news mission E2E reliability and provider-session security posture.
+
+Execution-ready breakdown:
+- `docs/amaryllis-phase7-backlog.md`
+- `contracts/news_mission_v1.json`
+
 ### Parallel Track - Post-LLM Cognitive R&D
 - Goal: keep backend swappable for next-gen local cognition.
 - Outcomes:
