@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
-from agents.agent import Agent
 from runtime.auth import assert_owner, auth_context_from_request, resolve_user_id
 from runtime.errors import AmaryllisError, NotFoundError, ProviderError, ValidationError
 from runtime.news_missions import build_news_mission_plan
@@ -16,6 +15,14 @@ router = APIRouter(tags=["news"])
 NEWS_AGENT_MARKER = "[[amaryllis.news.agent]]"
 NEWS_DEFAULT_AGENT_MEMORY_KEY = "news.default_agent_id"
 NEWS_DEFAULT_AGENT_NAME = "News Scout"
+
+
+class _AgentLike(Protocol):
+    id: str
+    name: str
+    user_id: str
+    created_at: str
+    system_prompt: str
 
 
 def _request_id(request: Request) -> str:
@@ -72,11 +79,11 @@ def _build_news_agent_prompt(focus: str | None = None) -> str:
     return f"{NEWS_AGENT_MARKER}\nFocus domain: general technology and AI news.\n{guidance}"
 
 
-def _is_news_agent(agent: Agent) -> bool:
+def _is_news_agent(agent: _AgentLike) -> bool:
     return NEWS_AGENT_MARKER in str(agent.system_prompt or "")
 
 
-def _news_agent_payload(agent: Agent, *, is_default: bool = False) -> dict[str, Any]:
+def _news_agent_payload(agent: _AgentLike, *, is_default: bool = False) -> dict[str, Any]:
     return {
         "news_agent_id": agent.id,
         "name": agent.name,
@@ -122,7 +129,7 @@ def _resolve_news_agent(
     agent_id: str | None,
     news_agent_id: str | None,
     create_if_missing: bool,
-) -> Agent:
+) -> _AgentLike:
     services = request.app.state.services
     requested = str(news_agent_id or agent_id or "").strip()
     if requested:
