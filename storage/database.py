@@ -1285,6 +1285,150 @@ class Database:
             rows = self._conn.execute(query, tuple(params)).fetchall()
         return [self._decode_auth_token_activity_row(dict(row)) for row in rows]
 
+    def create_provider_session(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        provider: str,
+        credential_ref: str,
+        credential_fingerprint: str | None,
+        scopes: list[str] | tuple[str, ...] | set[str],
+        display_name: str | None,
+        created_at: str,
+        updated_at: str,
+        expires_at: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        normalized_scopes = sorted(
+            {str(scope or "").strip().lower() for scope in scopes if str(scope or "").strip()}
+        )
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO provider_sessions(
+                    id,
+                    user_id,
+                    provider,
+                    display_name,
+                    session_type,
+                    credential_ref,
+                    credential_fingerprint,
+                    scopes_json,
+                    status,
+                    metadata_json,
+                    expires_at,
+                    revoked_at,
+                    revoked_reason,
+                    last_used_at,
+                    created_at,
+                    updated_at
+                )
+                VALUES(?, ?, ?, ?, 'reference', ?, ?, ?, 'active', ?, ?, NULL, NULL, NULL, ?, ?)
+                """,
+                (
+                    str(session_id or "").strip(),
+                    str(user_id or "").strip(),
+                    str(provider or "").strip().lower(),
+                    str(display_name).strip() if display_name not in (None, "") else None,
+                    str(credential_ref or "").strip(),
+                    str(credential_fingerprint).strip() if credential_fingerprint not in (None, "") else None,
+                    json.dumps(normalized_scopes, ensure_ascii=False),
+                    json.dumps(metadata or {}, ensure_ascii=False),
+                    str(expires_at).strip() if expires_at not in (None, "") else None,
+                    str(created_at or self._utc_now()),
+                    str(updated_at or self._utc_now()),
+                ),
+            )
+            self._commit_locked()
+
+    def get_provider_session(self, session_id: str) -> dict[str, Any] | None:
+        normalized = str(session_id or "").strip()
+        if not normalized:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM provider_sessions WHERE id = ?",
+                (normalized,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._decode_provider_session_row(dict(row))
+
+    def list_provider_sessions(
+        self,
+        *,
+        user_id: str | None = None,
+        provider: str | None = None,
+        include_revoked: bool = False,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        query = "SELECT * FROM provider_sessions WHERE 1 = 1"
+        params: list[Any] = []
+        if user_id:
+            query += " AND user_id = ?"
+            params.append(str(user_id).strip())
+        if provider:
+            query += " AND provider = ?"
+            params.append(str(provider).strip().lower())
+        if not include_revoked:
+            query += " AND status != 'revoked'"
+        query += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(max(1, int(limit)))
+        with self._lock:
+            rows = self._conn.execute(query, tuple(params)).fetchall()
+        return [self._decode_provider_session_row(dict(row)) for row in rows]
+
+    def revoke_provider_session(
+        self,
+        *,
+        session_id: str,
+        revoked_reason: str | None = None,
+    ) -> bool:
+        normalized = str(session_id or "").strip()
+        if not normalized:
+            return False
+        now = self._utc_now()
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                UPDATE provider_sessions
+                SET
+                    status = 'revoked',
+                    revoked_at = CASE WHEN revoked_at IS NULL THEN ? ELSE revoked_at END,
+                    revoked_reason = COALESCE(?, revoked_reason),
+                    updated_at = ?
+                WHERE id = ? AND status != 'revoked'
+                """,
+                (
+                    now,
+                    str(revoked_reason).strip() if revoked_reason not in (None, "") else None,
+                    now,
+                    normalized,
+                ),
+            )
+            self._commit_locked()
+        return int(cursor.rowcount or 0) > 0
+
+    def touch_provider_session(self, *, session_id: str) -> bool:
+        normalized = str(session_id or "").strip()
+        if not normalized:
+            return False
+        now = self._utc_now()
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                UPDATE provider_sessions
+                SET last_used_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (now, now, normalized),
+            )
+            self._commit_locked()
+        return int(cursor.rowcount or 0) > 0
+
     def upsert_secret_inventory_items(self, items: list[dict[str, Any]]) -> None:
         if not items:
             return
@@ -3294,6 +3438,50 @@ class Database:
         if severity not in {"info", "warning", "error"}:
             severity = "info"
         row["severity"] = severity
+        return row
+
+    @staticmethod
+    def _decode_provider_session_row(row: dict[str, Any]) -> dict[str, Any]:
+        scopes_json = row.pop("scopes_json", "[]")
+        metadata_json = row.pop("metadata_json", "{}")
+        try:
+            parsed_scopes = json.loads(scopes_json or "[]")
+            row["scopes"] = (
+                [str(item).strip().lower() for item in parsed_scopes if str(item).strip()]
+                if isinstance(parsed_scopes, list)
+                else []
+            )
+        except Exception:
+            row["scopes"] = []
+        try:
+            parsed_meta = json.loads(metadata_json or "{}")
+            row["metadata"] = parsed_meta if isinstance(parsed_meta, dict) else {}
+        except Exception:
+            row["metadata"] = {}
+        row["provider"] = str(row.get("provider") or "").strip().lower()
+        row["status"] = str(row.get("status") or "active").strip().lower() or "active"
+        row["session_type"] = str(row.get("session_type") or "reference").strip().lower() or "reference"
+        credential_ref = str(row.get("credential_ref") or "").strip()
+        if credential_ref:
+            if len(credential_ref) <= 8:
+                row["credential_ref_hint"] = "***"
+            else:
+                row["credential_ref_hint"] = f"{credential_ref[:6]}...{credential_ref[-4:]}"
+        else:
+            row["credential_ref_hint"] = None
+        row.pop("credential_ref", None)
+        for key in (
+            "display_name",
+            "credential_fingerprint",
+            "expires_at",
+            "revoked_at",
+            "revoked_reason",
+            "last_used_at",
+            "created_at",
+            "updated_at",
+        ):
+            value = row.get(key)
+            row[key] = str(value) if value not in (None, "") else None
         return row
 
     @staticmethod

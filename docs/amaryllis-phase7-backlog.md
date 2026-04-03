@@ -36,7 +36,7 @@ daily topic digests (for example AI), grounded by verifiable sources, with stabl
 
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
-| P7-A01 | todo | Add unified source connector contract | `sources/base.py` + typed request/response schema | Runtime can call source connectors through a single contract with normalized item shape |
+| P7-A01 | done | Add unified source connector contract | `sources/base.py` + typed request/response schema | Runtime can call source connectors through a single contract with normalized item shape |
 | P7-A02 | todo | Implement Reddit connector (OAuth + search ingest) | `sources/reddit_connector.py` + policy/rate handling | Reddit items are ingested with canonical ids, timestamps, author, url, and retry policy |
 | P7-A03 | todo | Implement X connector (OAuth/Bearer + search ingest) | `sources/x_connector.py` + policy/rate handling | X items are ingested with the same normalized schema and source metadata |
 | P7-A04 | todo | Upgrade web connector from raw search snippets to fetch+extract path | `sources/web_connector.py` | Web items include URL, title, excerpt, publish hints, and fetch status |
@@ -45,15 +45,15 @@ daily topic digests (for example AI), grounded by verifiable sources, with stabl
 
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
-| P7-B01 | todo | Add provider session store (user-scoped encrypted token refs) | `runtime/provider_sessions.py` + DB tables + APIs | Users can create/list/revoke provider sessions without exposing raw tokens in logs |
-| P7-B02 | todo | Add entitlement resolver contract | `runtime/entitlements.py` + `/auth/providers/*` APIs | Runtime can answer capability checks (`allowed_models`, `rate_tier`, `feature_flags`) per user/provider |
+| P7-B01 | done | Add provider session store (user-scoped encrypted token refs) | `runtime/provider_sessions.py` + DB tables + APIs | Users can create/list/revoke provider sessions without exposing raw tokens in logs |
+| P7-B02 | done | Add entitlement resolver contract | `runtime/entitlements.py` + `/auth/providers/*` APIs | Runtime can answer capability checks (`allowed_models`, `rate_tier`, `feature_flags`) per user/provider |
 | P7-B03 | todo | Wire model routing to entitlement gates | `models/model_manager.py` integration | Remote model calls fail fast with clear entitlement errors when access is missing |
 
 ### Epic C - News Mission Pipeline
 
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
-| P7-C01 | todo | Add news mission planner contract | `/news/missions/plan` API + `contracts/news_mission_v1.json` | Mission plan returns topic, source policy, schedule, budget, and output schema |
+| P7-C01 | done | Add news mission planner contract | `/news/missions/plan` API + `contracts/news_mission_v1.json` | Mission plan returns topic, source policy, schedule, budget, and output schema |
 | P7-C02 | todo | Implement ingest -> normalize -> dedup pipeline | `news/pipeline.py` + storage tables | Same story from multiple sources is merged by canonical key with provenance retained |
 | P7-C03 | todo | Implement grounded digest composer | `news/digest.py` + citation policy | Every digest section has source references and confidence markers |
 | P7-C04 | todo | Add automation template for daily AI digest | `automation/mission_planner.py` template `ai_news_daily` | User can create a daily digest mission in one API call |
@@ -79,11 +79,11 @@ daily topic digests (for example AI), grounded by verifiable sources, with stabl
 
 | ID | Status | Scope |
 |---|---|---|
-| P7-A01 | todo | Connector contract and normalized source item schema |
+| P7-A01 | done | Connector contract and normalized source item schema |
 | P7-A02 | todo | Reddit ingestion connector with retries/rate policy |
-| P7-B01 | todo | Provider session storage and revoke/list APIs |
-| P7-B02 | todo | Entitlement resolver endpoint and model capability checks |
-| P7-C01 | todo | `news_mission_v1` contract + mission plan API |
+| P7-B01 | done | Provider session storage and revoke/list APIs |
+| P7-B02 | done | Entitlement resolver endpoint and model capability checks |
+| P7-C01 | done | `news_mission_v1` contract + mission plan API |
 | P7-C02 | todo | Ingest-normalize-dedup storage pipeline |
 
 Sprint goal:
@@ -143,5 +143,5 @@ Contracts and docs:
 
 ## Next Checkpoint
 
-- Start P7-S0 with `P7-A01`, `P7-B01`, `P7-C01` in parallel.
-- Freeze `news_mission_v1` contract before implementing connector-specific logic.
+- Continue P7-S0 with `P7-A02` and `P7-C02` (first real ingestion + dedup storage path).
+- Start `P7-B03` entitlement enforcement in model routing after `P7-C02` baseline is stable.

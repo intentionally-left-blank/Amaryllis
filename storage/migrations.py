@@ -833,6 +833,37 @@ MIGRATIONS: list[Migration] = [
             ON supervisor_graphs(created_at);
         """,
     ),
+    Migration(
+        version=20,
+        name="provider_sessions_v1",
+        sql="""
+        CREATE TABLE IF NOT EXISTS provider_sessions (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            display_name TEXT,
+            session_type TEXT NOT NULL DEFAULT 'reference',
+            credential_ref TEXT NOT NULL,
+            credential_fingerprint TEXT,
+            scopes_json TEXT NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL DEFAULT 'active',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            expires_at TEXT,
+            revoked_at TEXT,
+            revoked_reason TEXT,
+            last_used_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_provider_sessions_user_updated
+            ON provider_sessions(user_id, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_provider_sessions_provider_status
+            ON provider_sessions(provider, status, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_provider_sessions_user_provider_status
+            ON provider_sessions(user_id, provider, status, updated_at);
+        """,
+    ),
 ]
 
 

@@ -24,7 +24,9 @@ from api.flow_api import router as flow_router
 from api.inbox_api import router as inbox_router
 from api.memory_api import router as memory_router
 from api.model_api import router as model_router
+from api.news_api import router as news_router
 from api.privacy_api import router as privacy_router
+from api.provider_auth_api import router as provider_auth_router
 from api.security_api import router as security_router
 from api.supervisor_api import router as supervisor_router
 from api.tool_api import router as tool_router
@@ -56,11 +58,14 @@ from runtime.autonomy_circuit_breaker import (
     SUPPORTED_CIRCUIT_BREAKER_SCOPE_TYPES,
 )
 from runtime.config import AppConfig
+from runtime.entitlements import EntitlementResolver
 from runtime.errors import AmaryllisError, InternalError, PermissionDeniedError, ProviderError, ValidationError
 from runtime.observability import ObservabilityManager, ObservabilityTelemetry, SLOTargets
+from runtime.provider_sessions import ProviderSessionManager
 from runtime.qos_governor import QoSGovernor, QoSThresholds, SUPPORTED_THERMAL_STATES
 from runtime.security import LocalIdentityManager, SecurityManager
 from runtime.telemetry import LocalTelemetry
+from sources.registry import SourceConnectorRegistry
 from storage.database import Database
 from storage.vector_store import VectorStore
 from supervisor.task_graph_manager import SupervisorTaskGraphManager
@@ -119,6 +124,9 @@ class ServiceContainer:
     compliance_manager: ComplianceManager
     auth_manager: AuthManager
     autonomy_circuit_breaker: AutonomyCircuitBreaker
+    provider_session_manager: ProviderSessionManager
+    entitlement_resolver: EntitlementResolver
+    source_connectors: SourceConnectorRegistry
 
 
 class RunKillSwitchRequest(BaseModel):
@@ -430,6 +438,9 @@ def create_services() -> ServiceContainer:
         database=database,
         security_manager=security_manager,
     )
+    provider_session_manager = ProviderSessionManager(database=database)
+    entitlement_resolver = EntitlementResolver(config=config, database=database)
+    source_connectors = SourceConnectorRegistry()
 
     episodic = EpisodicMemory(database)
     semantic = SemanticMemory(database, vector_store)
@@ -674,6 +685,9 @@ def create_services() -> ServiceContainer:
         compliance_manager=compliance_manager,
         auth_manager=auth_manager,
         autonomy_circuit_breaker=autonomy_circuit_breaker,
+        provider_session_manager=provider_session_manager,
+        entitlement_resolver=entitlement_resolver,
+        source_connectors=source_connectors,
     )
 
 
@@ -1120,7 +1134,9 @@ def create_app() -> FastAPI:
     app.include_router(flow_router)
     app.include_router(inbox_router)
     app.include_router(memory_router)
+    app.include_router(news_router)
     app.include_router(privacy_router)
+    app.include_router(provider_auth_router)
     app.include_router(supervisor_router)
     app.include_router(tool_router)
     app.include_router(voice_router)
@@ -1132,7 +1148,9 @@ def create_app() -> FastAPI:
     app.include_router(flow_router, prefix="/v1")
     app.include_router(inbox_router, prefix="/v1")
     app.include_router(memory_router, prefix="/v1")
+    app.include_router(news_router, prefix="/v1")
     app.include_router(privacy_router, prefix="/v1")
+    app.include_router(provider_auth_router, prefix="/v1")
     app.include_router(supervisor_router, prefix="/v1")
     app.include_router(tool_router, prefix="/v1")
     app.include_router(voice_router, prefix="/v1")
