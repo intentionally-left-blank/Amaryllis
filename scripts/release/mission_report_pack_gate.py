@@ -93,6 +93,8 @@ def _required_kpis(scope: str) -> set[str]:
             "nightly_adoption_trend_gate_passed",
             "journey_success_rate_pct",
             "journey_plan_to_execute_conversion_rate_pct",
+            "news_citation_coverage_rate",
+            "news_mission_success_rate_pct",
         }
     return {
         "mission_success_rate_pct",
@@ -104,6 +106,8 @@ def _required_kpis(scope: str) -> set[str]:
         "autonomy_breaker_gate_passed",
         "autonomy_breaker_domains_contract_passed",
         "adoption_trend_gate_passed",
+        "news_citation_coverage_rate",
+        "news_mission_success_rate_pct",
     }
 
 

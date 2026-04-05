@@ -145,3 +145,4 @@ Contracts and docs:
 
 - Publish and execute Phase 7 release cut checklist: `docs/phase7-release-cut-checklist.md`.
 - Complete DoD sign-off after one green full release pipeline run with attached artifacts.
+- Archive `artifacts/phase7-signoff-summary.json` + `artifacts/phase7-signoff-summary.md` as release evidence.

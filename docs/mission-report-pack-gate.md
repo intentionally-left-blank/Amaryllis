@@ -16,12 +16,14 @@ The gate enforces:
 
 Release scope requires autonomy breaker gate KPIs
 (`autonomy_breaker_gate_passed`, `autonomy_breaker_domains_contract_passed`) in addition to
-mission/recovery/quality/distribution/user-flow/adoption KPIs.
+mission/recovery/quality/distribution/user-flow/adoption KPIs and Phase 7 news KPIs
+(`news_citation_coverage_rate`, `news_mission_success_rate_pct`).
 
 Nightly scope requires breaker soak + autonomy breaker gate KPI presence
 (`nightly_breaker_soak_gate_passed`, `nightly_autonomy_breaker_gate_passed`,
 `nightly_autonomy_breaker_domains_contract_passed`) in addition to nightly reliability/burn/adoption
-and user-flow KPIs.
+and user-flow KPIs plus Phase 7 news KPIs
+(`news_citation_coverage_rate`, `news_mission_success_rate_pct`).
 
 This turns the mission KPI pack into a formal blocking contract instead of a best-effort export.
 

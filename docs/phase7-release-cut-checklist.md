@@ -25,6 +25,14 @@ python3 scripts/release/phase7_release_cut_gate.py \
   --mission-report artifacts/mission-success-recovery-report.json \
   --mission-pack-gate-report artifacts/mission-report-pack-gate-report.json \
   --output artifacts/phase7-release-cut-gate-report.json
+
+python3 scripts/release/build_phase7_signoff_summary.py \
+  --phase7-gate-report artifacts/phase7-release-cut-gate-report.json \
+  --news-report artifacts/news-mission-gate-report.json \
+  --provider-report artifacts/provider-session-policy-check-report.json \
+  --mission-report artifacts/mission-success-recovery-report.json \
+  --output artifacts/phase7-signoff-summary.json \
+  --markdown-output artifacts/phase7-signoff-summary.md
 ```
 
 ## KPI Exit Targets
@@ -38,6 +46,7 @@ Validate in:
 - `artifacts/news-mission-gate-report.json`
 - `artifacts/mission-success-recovery-report.json`
 - `artifacts/provider-session-policy-check-report.json`
+- `artifacts/phase7-signoff-summary.json`
 
 ## Contract and API Checks
 

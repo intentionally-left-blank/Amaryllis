@@ -89,7 +89,7 @@ Execution-ready breakdown:
 Execution-ready breakdown:
 - `docs/amaryllis-phase6-backlog.md`
 
-### Phase 7 - Autonomous News Missions (planned)
+### Phase 7 - Autonomous News Missions (in_progress: implementation complete, release sign-off pending)
 - Goal: productize autonomous, source-grounded daily intelligence missions (starting with AI news) with secure provider session and entitlement controls.
 - Outcomes:
   - connector-based source ingestion (`reddit`, `x`, `web`) with normalized schema, dedup, and policy-aware retries.

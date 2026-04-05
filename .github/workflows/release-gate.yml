@@ -154,6 +154,7 @@ jobs:
             tests.test_mission_success_recovery_report_pack \
             tests.test_mission_report_pack_gate \
             tests.test_phase7_release_cut_gate \
+            tests.test_phase7_signoff_summary \
             tests.test_distribution_resilience_report \
             tests.test_distribution_channel_manifest_gate \
             tests.test_render_distribution_channel_manifests \
@@ -1137,6 +1138,25 @@ jobs:
         with:
           name: phase7-release-cut-gate-report
           path: artifacts/phase7-release-cut-gate-report.json
+          if-no-files-found: error
+
+      - name: Build Phase 7 sign-off summary
+        run: |
+          python scripts/release/build_phase7_signoff_summary.py \
+            --phase7-gate-report "artifacts/phase7-release-cut-gate-report.json" \
+            --news-report "artifacts/news-mission/news-mission-gate-report.json" \
+            --provider-report "artifacts/provider-session-policy-check-report.json" \
+            --mission-report "artifacts/mission-success-recovery-report.json" \
+            --output "artifacts/phase7-signoff-summary.json" \
+            --markdown-output "artifacts/phase7-signoff-summary.md"
+
+      - name: Upload Phase 7 sign-off summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase7-signoff-summary
+          path: |
+            artifacts/phase7-signoff-summary.json
+            artifacts/phase7-signoff-summary.md
           if-no-files-found: error
 
   disaster-recovery-gate:
