@@ -104,6 +104,7 @@ jobs:
             tests.test_news_storage \
             tests.test_news_digest \
             tests.test_news_digest_replay_snapshot \
+            tests.test_news_outbound \
             tests.test_web_connector \
             tests.test_news_mission_api \
             tests.test_news_mission_gate \
@@ -152,6 +153,7 @@ jobs:
             tests.test_publish_mission_success_recovery_snapshot \
             tests.test_mission_success_recovery_report_pack \
             tests.test_mission_report_pack_gate \
+            tests.test_phase7_release_cut_gate \
             tests.test_distribution_resilience_report \
             tests.test_distribution_channel_manifest_gate \
             tests.test_render_distribution_channel_manifests \
@@ -613,6 +615,12 @@ jobs:
           name: api-quickstart-compat-report
           path: artifacts/api-quickstart
 
+      - name: Download news mission gate report
+        uses: actions/download-artifact@v4
+        with:
+          name: news-mission-gate-report
+          path: artifacts/news-mission
+
       - name: Run macOS desktop parity smoke (staging, non-blocking)
         continue-on-error: true
         run: |
@@ -827,6 +835,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11.11"
+
+      - name: Install dependencies for KPI/sign-off checks
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.lock
 
       - name: Download mission queue load report
         uses: actions/download-artifact@v4
@@ -1070,12 +1083,17 @@ jobs:
             --adoption-kpi-trend-report "artifacts/adoption-kpi-trend-gate-report.json" \
             --breaker-gate-report "artifacts/autonomy-circuit-breaker/autonomy-circuit-breaker-gate-report.json" \
             --breaker-soak-report "artifacts/autonomy-circuit-breaker-soak/autonomy-circuit-breaker-soak-gate-report.json" \
-            --news-mission-report "artifacts/news-mission-gate-report.json" \
+            --news-mission-report "artifacts/news-mission/news-mission-gate-report.json" \
             --distribution-resilience-report "artifacts/distribution/distribution-resilience-report.json" \
             --user-journey-report "artifacts/user-journey/user-journey-benchmark-report.json" \
             ${MACOS_DESKTOP_PARITY_ARG} \
             --scope "release" \
             --output "artifacts/mission-success-recovery-report.json"
+
+      - name: Run provider session policy check (blocking)
+        run: |
+          python scripts/security/provider_session_policy_check.py \
+            --output "artifacts/provider-session-policy-check-report.json"
 
       - name: Run mission report pack gate (blocking)
         run: |
@@ -1096,6 +1114,29 @@ jobs:
         with:
           name: mission-success-recovery-report
           path: artifacts/mission-success-recovery-report.json
+          if-no-files-found: error
+
+      - name: Run Phase 7 release cut gate (blocking)
+        run: |
+          python scripts/release/phase7_release_cut_gate.py \
+            --news-report "artifacts/news-mission/news-mission-gate-report.json" \
+            --provider-report "artifacts/provider-session-policy-check-report.json" \
+            --mission-report "artifacts/mission-success-recovery-report.json" \
+            --mission-pack-gate-report "artifacts/mission-report-pack-gate-report.json" \
+            --output "artifacts/phase7-release-cut-gate-report.json"
+
+      - name: Upload provider session policy check report
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-session-policy-check-report
+          path: artifacts/provider-session-policy-check-report.json
+          if-no-files-found: error
+
+      - name: Upload Phase 7 release cut gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase7-release-cut-gate-report
+          path: artifacts/phase7-release-cut-gate-report.json
           if-no-files-found: error
 
   disaster-recovery-gate:

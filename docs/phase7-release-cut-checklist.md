@@ -19,6 +19,12 @@ python3 scripts/release/news_mission_gate.py --min-citation-coverage 0.95 --min-
 python3 scripts/security/provider_session_policy_check.py --output artifacts/provider-session-policy-check-report.json
 python3 scripts/release/check_eval_replay_determinism.py
 python3 scripts/release/check_import_boundaries.py
+python3 scripts/release/phase7_release_cut_gate.py \
+  --news-report artifacts/news-mission-gate-report.json \
+  --provider-report artifacts/provider-session-policy-check-report.json \
+  --mission-report artifacts/mission-success-recovery-report.json \
+  --mission-pack-gate-report artifacts/mission-report-pack-gate-report.json \
+  --output artifacts/phase7-release-cut-gate-report.json
 ```
 
 ## KPI Exit Targets

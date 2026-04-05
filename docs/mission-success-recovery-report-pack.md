@@ -86,6 +86,7 @@ Optional news mission source flag:
 - Release workflow (`release-gate.yml`) exports:
   - `artifacts/mission-success-recovery-report.json`
   - `artifacts/mission-report-pack-gate-report.json`
+  - `artifacts/phase7-release-cut-gate-report.json` (Phase 7 DoD sign-off aggregator)
 - Nightly workflow (`nightly-reliability.yml`) exports:
   - `artifacts/nightly-mission-success-recovery-report.json`
   - `artifacts/nightly-mission-report-pack-gate-report.json`
