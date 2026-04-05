@@ -398,6 +398,129 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         after_count = int(after.json().get("count", 0))
         self.assertEqual(after_count, before_count)
 
+    def test_agents_factory_contract_endpoint_is_available(self) -> None:
+        response = self.client.get(
+            "/v1/agents/factory/contract",
+            headers=self._auth("user-token"),
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(str(payload.get("contract_version")), "agent_factory_v1")
+        self.assertTrue(bool((payload.get("capabilities") or {}).get("structured_overrides", False)))
+        self.assertTrue(bool((payload.get("capabilities") or {}).get("explainable_planning", False)))
+        entrypoints = payload.get("entrypoints", [])
+        self.assertIsInstance(entrypoints, list)
+        signature = {
+            (str(item.get("method") or "").upper(), str(item.get("path") or ""))
+            for item in entrypoints
+            if isinstance(item, dict)
+        }
+        self.assertIn(("POST", "/agents/quickstart/plan"), signature)
+        self.assertIn(("POST", "/agents/quickstart"), signature)
+
+    def test_quickstart_plan_infers_domain_allowlist_source_policy(self) -> None:
+        planned = self.client.post(
+            "/v1/agents/quickstart/plan",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "request": (
+                    "создай новостного агента для AI с сайтов "
+                    "https://openai.com/blog и huggingface.co каждый день в 07:45"
+                ),
+            },
+        )
+        self.assertEqual(planned.status_code, 200)
+        payload = planned.json()
+        quickstart_plan = payload.get("quickstart_plan", {})
+        self.assertEqual(str(quickstart_plan.get("kind")), "news")
+        source_policy = quickstart_plan.get("source_policy", {})
+        self.assertIsInstance(source_policy, dict)
+        self.assertEqual(str(source_policy.get("mode")), "allowlist")
+        domains = source_policy.get("domains", [])
+        self.assertIsInstance(domains, list)
+        self.assertIn("openai.com", domains)
+        self.assertIn("huggingface.co", domains)
+        sources = quickstart_plan.get("sources", [])
+        self.assertIn("web", sources)
+        automation = quickstart_plan.get("automation", {})
+        self.assertEqual(str(automation.get("schedule_type")), "weekly")
+        self.assertEqual(int((automation.get("schedule") or {}).get("hour", -1)), 7)
+        self.assertEqual(int((automation.get("schedule") or {}).get("minute", -1)), 45)
+        inference_reason = quickstart_plan.get("inference_reason", {})
+        self.assertIsInstance(inference_reason, dict)
+        self.assertEqual(str(inference_reason.get("resolved_kind")), "news")
+
+    def test_quickstart_plan_accepts_structured_overrides(self) -> None:
+        planned = self.client.post(
+            "/v1/agents/quickstart/plan",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "request": "создай агента для AI новостей каждый день в 09:30",
+                "overrides": {
+                    "kind": "coding",
+                    "name": "Build Pilot",
+                    "focus": "python tooling",
+                    "source_policy": {
+                        "mode": "allowlist",
+                        "domains": ["pypi.org", "github.com"],
+                    },
+                    "automation": {
+                        "enabled": True,
+                        "schedule_type": "hourly",
+                        "schedule": {"interval_hours": 6, "minute": 10},
+                    },
+                },
+            },
+        )
+        self.assertEqual(planned.status_code, 200)
+        payload = planned.json()
+        quickstart_plan = payload.get("quickstart_plan", {})
+        self.assertEqual(str(quickstart_plan.get("kind")), "coding")
+        self.assertEqual(str(quickstart_plan.get("name")), "Build Pilot")
+        self.assertEqual(str(quickstart_plan.get("focus")), "python tooling")
+        source_policy = quickstart_plan.get("source_policy", {})
+        self.assertEqual(str(source_policy.get("mode")), "allowlist")
+        self.assertIn("pypi.org", source_policy.get("domains", []))
+        self.assertIn("github.com", source_policy.get("domains", []))
+        self.assertIn("web_search", quickstart_plan.get("tools", []))
+        automation = quickstart_plan.get("automation", {})
+        self.assertEqual(str(automation.get("schedule_type")), "hourly")
+        self.assertEqual(int((automation.get("schedule") or {}).get("interval_hours", -1)), 6)
+        self.assertEqual(int((automation.get("schedule") or {}).get("minute", -1)), 10)
+        inference_reason = quickstart_plan.get("inference_reason", {})
+        self.assertIsInstance(inference_reason, dict)
+        self.assertIn("kind", inference_reason.get("overrides_applied", []))
+
+    def test_agents_quickstart_idempotency_key_rejects_override_change(self) -> None:
+        first = self.client.post(
+            "/v1/agents/quickstart",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "idempotency_key": "runtime-test-news-ai-overrides-idem-1",
+                "request": "создай агента для AI новостей",
+                "overrides": {"name": "Scout A"},
+            },
+        )
+        self.assertEqual(first.status_code, 200)
+
+        second = self.client.post(
+            "/v1/agents/quickstart",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "idempotency_key": "runtime-test-news-ai-overrides-idem-1",
+                "request": "создай агента для AI новостей",
+                "overrides": {"name": "Scout B"},
+            },
+        )
+        self.assertEqual(second.status_code, 400)
+        error = second.json().get("error", {})
+        self.assertEqual(str(error.get("type")), "validation_error")
+        self.assertIn("Idempotency key", str(error.get("message", "")))
+
     def test_chat_endpoint_returns_grounded_provenance_when_memory_fact_exists(self) -> None:
         services = self.server_module.app.state.services
         services.memory_manager.remember_fact(

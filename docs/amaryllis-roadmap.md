@@ -102,6 +102,20 @@ Execution-ready breakdown:
 - `docs/amaryllis-phase7-backlog.md`
 - `contracts/news_mission_v1.json`
 
+### Phase 8 - Agent Factory (in_progress)
+- Goal: make "create me this kind of agent" a first-class product surface with predictable plan/apply contracts and domain-scoped internet controls.
+- Outcomes:
+  - dedicated factory parsing/orchestration module decoupled from API layer (`agents/factory.py`).
+  - explicit factory contract endpoint and machine-readable schema (`/agents/factory/contract`, `contracts/agent_factory_v1.json`).
+  - universal plan/apply flow with `source_policy` semantics (`open_web`, `channels`, `allowlist`).
+  - chat-intent parity with API quickstart behavior and idempotent retries.
+  - coverage for domain-allowlist planning and factory contract availability in runtime integration tests.
+
+Execution-ready breakdown:
+- `docs/amaryllis-phase8-backlog.md`
+- `docs/agent-factory.md`
+- `contracts/agent_factory_v1.json`
+
 ### Parallel Track - Post-LLM Cognitive R&D
 - Goal: keep backend swappable for next-gen local cognition.
 - Outcomes:

@@ -14,6 +14,12 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from agents.factory import (
+    automation_schedule_summary as factory_automation_schedule_summary,
+    build_quickstart_agent_created_content as factory_build_quickstart_agent_created_content,
+    infer_agent_spec_from_request as factory_infer_agent_spec_from_request,
+    looks_like_agent_quickstart_request as factory_looks_like_agent_quickstart_request,
+)
 from runtime.auth import auth_context_from_request, resolve_user_id
 from runtime.errors import ProviderError, ValidationError
 from tools.tool_executor import PermissionRequiredError
@@ -249,25 +255,7 @@ def _last_user_query(messages: list[dict[str, Any]]) -> str:
 
 
 def _looks_like_agent_quickstart_request(text: str) -> bool:
-    normalized = str(text or "").strip().lower()
-    if not normalized:
-        return False
-    if "как создать" in normalized or "how to create" in normalized:
-        return False
-    has_agent = "агент" in normalized or "agent" in normalized
-    has_create = any(
-        token in normalized
-        for token in (
-            "создай",
-            "создать",
-            "сделай",
-            "сделать",
-            "create",
-            "build",
-            "make",
-        )
-    )
-    return has_agent and has_create
+    return factory_looks_like_agent_quickstart_request(text)
 
 
 def _clean_focus_text(text: str) -> str:
@@ -413,38 +401,7 @@ def _infer_schedule_spec(lowered_text: str) -> dict[str, Any] | None:
 
 
 def _automation_schedule_summary(automation: dict[str, Any]) -> str:
-    schedule_type = str(automation.get("schedule_type") or "")
-    schedule = automation.get("schedule")
-    if not isinstance(schedule, dict):
-        schedule = {}
-    if schedule_type == "hourly":
-        try:
-            hours = int(schedule.get("interval_hours", 1))
-        except Exception:
-            hours = 1
-        try:
-            minute = int(schedule.get("minute", 0))
-        except Exception:
-            minute = 0
-        return f"каждые {hours}ч в :{minute:02d} UTC"
-    if schedule_type == "weekly":
-        byday = schedule.get("byday")
-        if isinstance(byday, list):
-            days = ",".join(str(item) for item in byday if str(item).strip())
-        else:
-            days = "MO"
-        try:
-            hour = int(schedule.get("hour", 9))
-        except Exception:
-            hour = 9
-        try:
-            minute = int(schedule.get("minute", 0))
-        except Exception:
-            minute = 0
-        return f"по расписанию {days} {hour:02d}:{minute:02d} UTC"
-    if schedule_type:
-        return f"schedule_type={schedule_type}"
-    return "расписание активно"
+    return factory_automation_schedule_summary(automation)
 
 
 def _build_automation_message(
@@ -468,84 +425,7 @@ def _build_automation_message(
 
 
 def _infer_agent_spec_from_request(request_text: str) -> dict[str, Any]:
-    raw = str(request_text or "").strip()
-    lowered = raw.lower()
-
-    name_match = _AGENT_NAME_QUOTED_PATTERN.search(raw)
-    requested_name = _clean_focus_text(name_match.group("name")) if name_match is not None else ""
-
-    focus_match = _AGENT_FOCUS_PATTERN.search(raw)
-    requested_focus = _clean_focus_text(focus_match.group("focus")) if focus_match is not None else ""
-    requested_focus = _strip_focus_tail(requested_focus)
-    source_targets = _infer_source_targets(lowered)
-
-    if not requested_focus:
-        if any(token in lowered for token in ("news", "новост", "twitter", "reddit", "x.com")):
-            requested_focus = "AI news and internet updates"
-        elif any(token in lowered for token in ("code", "код", "python", "typescript", "git", "program")):
-            requested_focus = "software engineering tasks"
-        else:
-            requested_focus = "general productivity"
-
-    is_news = any(token in lowered for token in ("news", "новост", "reddit", "twitter", "x.com")) or bool(source_targets)
-    is_coding = any(token in lowered for token in ("code", "код", "python", "typescript", "git", "program"))
-
-    if requested_name:
-        name = requested_name
-    elif is_news:
-        name = "News Scout"
-    elif is_coding:
-        name = "Code Copilot"
-    else:
-        name = "Custom Assistant"
-
-    source_hint = ""
-    if source_targets:
-        source_hint = f"Primary source channels: {', '.join(source_targets)}. "
-
-    if is_news:
-        system_prompt = (
-            f"You are {name}. You are a specialized news agent for {requested_focus}. "
-            f"{source_hint}"
-            "Track updates, summarize key developments, deduplicate overlap, and always include source links."
-        )
-        tools = ["web_search"]
-    elif is_coding:
-        system_prompt = (
-            f"You are {name}. You are a specialized coding assistant for {requested_focus}. "
-            "Propose implementation plans, write concise code, and include practical verification steps."
-        )
-        tools = ["web_search"] if "web" in source_targets else []
-    else:
-        system_prompt = (
-            f"You are {name}. You are a specialized assistant for {requested_focus}. "
-            f"{source_hint}"
-            "Provide actionable and structured help, asking clarifying questions only when necessary."
-        )
-        tools = ["web_search"] if "web" in source_targets else []
-
-    schedule_spec = _infer_schedule_spec(lowered)
-    automation_spec: dict[str, Any] | None = None
-    if schedule_spec is not None:
-        automation_spec = {
-            **schedule_spec,
-            "message": _build_automation_message(
-                name=name,
-                focus=requested_focus,
-                source_targets=source_targets,
-                is_news=is_news,
-            ),
-        }
-
-    return {
-        "name": name,
-        "focus": requested_focus,
-        "system_prompt": system_prompt,
-        "tools": tools,
-        "source_targets": source_targets,
-        "kind": "news" if is_news else ("coding" if is_coding else "general"),
-        "automation": automation_spec,
-    }
+    return factory_infer_agent_spec_from_request(request_text)
 
 
 def _build_quickstart_agent_created_content(
@@ -556,14 +436,13 @@ def _build_quickstart_agent_created_content(
     automation: dict[str, Any] | None,
     automation_error: str | None,
 ) -> str:
-    content = f"Готово. Создал агента '{agent_name}' (id: {agent_id}). Фокус: {focus or 'general'}."
-    if isinstance(automation, dict):
-        content += f" Запустил автоматический режим ({_automation_schedule_summary(automation)})."
-    elif automation_error:
-        content += f" Агент создан, но расписание включить не удалось: {automation_error}."
-    else:
-        content += " Можешь сразу запускать его задачи."
-    return content
+    return factory_build_quickstart_agent_created_content(
+        agent_id=agent_id,
+        agent_name=agent_name,
+        focus=focus,
+        automation=automation,
+        automation_error=automation_error,
+    )
 
 
 def _build_quickstart_chat_completion(
@@ -772,6 +651,11 @@ def _maybe_handle_chat_agent_quickstart(
                                 if isinstance(cached_spec.get("source_targets"), list)
                                 else []
                             ),
+                            "source_policy": (
+                                cached_spec.get("source_policy")
+                                if isinstance(cached_spec.get("source_policy"), dict)
+                                else {}
+                            ),
                             "automation_enabled": isinstance(cached_automation, dict),
                             "idempotency_key": idempotency_key,
                             "idempotency_replayed": True,
@@ -856,6 +740,7 @@ def _maybe_handle_chat_agent_quickstart(
             "focus": str(spec.get("focus") or ""),
             "kind": str(spec.get("kind") or "general"),
             "sources": spec.get("source_targets") if isinstance(spec.get("source_targets"), list) else [],
+            "source_policy": spec.get("source_policy") if isinstance(spec.get("source_policy"), dict) else {},
             "automation_enabled": automation_record is not None,
             "automation_error": automation_error,
             "idempotency_key": idempotency_key or None,

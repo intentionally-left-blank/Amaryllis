@@ -1,0 +1,209 @@
+{
+  "contract": "agent_factory_v1",
+  "version": "0.1.0",
+  "description": "Contract for natural-language agent factory (plan/apply/chat shortcut) with deterministic idempotency and source policy controls.",
+  "entities": {
+    "quickstart_request": {
+      "required": [
+        "request"
+      ],
+      "properties": {
+        "request": {
+          "type": "string"
+        },
+        "user_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "overrides": {
+          "$ref": "#/entities/quickstart_overrides"
+        }
+      }
+    },
+    "quickstart_overrides": {
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "news",
+            "coding",
+            "general"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "focus": {
+          "type": "string"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source_policy": {
+          "$ref": "#/entities/source_policy"
+        },
+        "automation": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "source_policy": {
+      "required": [
+        "mode",
+        "channels",
+        "domains"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "open_web",
+            "channels",
+            "allowlist"
+          ]
+        },
+        "channels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "domains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "quickstart_spec": {
+      "required": [
+        "name",
+        "focus",
+        "system_prompt",
+        "tools",
+        "source_targets",
+        "source_policy",
+        "kind"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "focus": {
+          "type": "string"
+        },
+        "system_prompt": {
+          "type": "string"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source_targets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source_policy": {
+          "$ref": "#/entities/source_policy"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "news",
+            "coding",
+            "general"
+          ]
+        },
+        "automation": {
+          "type": "object",
+          "nullable": true
+        },
+        "inference_reason": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  },
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/agents/factory/contract",
+      "response": {
+        "contract_version": "agent_factory_v1",
+        "contract_path": "contracts/agent_factory_v1.json"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/agents/quickstart/plan",
+      "request": {
+        "$ref": "#/entities/quickstart_request"
+      },
+      "response": {
+        "quickstart_plan": {
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "focus": {
+              "type": "string"
+            },
+            "tools": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "source_policy": {
+              "$ref": "#/entities/source_policy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/agents/quickstart",
+      "request": {
+        "$ref": "#/entities/quickstart_request"
+      },
+      "response": {
+        "quickstart_spec": {
+          "$ref": "#/entities/quickstart_spec"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/chat/completions",
+      "description": "If request intent contains an agent creation command, runtime may trigger quickstart flow and return quick_action.type=agent_created."
+    }
+  ]
+}

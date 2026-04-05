@@ -83,6 +83,54 @@ curl -X POST http://127.0.0.1:8000/v1/agents/quickstart \
 
 Using the same `idempotency_key` with the same payload is replay-safe: retries return the same created agent instead of creating duplicates.
 
+Inspect factory contract:
+
+```bash
+curl -s http://127.0.0.1:8000/v1/agents/factory/contract \
+  -H "Authorization: Bearer dev-token"
+```
+
+Custom web scope (domain allowlist) is inferred from your natural-language request:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/agents/quickstart/plan \
+  -H "Authorization: Bearer dev-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user-001",
+    "request": "create a daily AI agent from openai.com and huggingface.co at 07:45"
+  }'
+```
+
+`quickstart_plan.source_policy.mode=allowlist` and `quickstart_plan.source_policy.domains`
+show the inferred internet scope before apply.
+
+Optional structured override (advanced):
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/agents/quickstart/plan \
+  -H "Authorization: Bearer dev-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user-001",
+    "request": "create an agent for AI updates",
+    "overrides": {
+      "kind": "coding",
+      "name": "Build Pilot",
+      "focus": "python tooling",
+      "source_policy": {
+        "mode": "allowlist",
+        "domains": ["pypi.org", "github.com"]
+      },
+      "automation": {
+        "enabled": true,
+        "schedule_type": "hourly",
+        "schedule": {"interval_hours": 6, "minute": 10}
+      }
+    }
+  }'
+```
+
 ## 7. Optional: Reddit OAuth for News Ingest
 
 By default Reddit source ingest uses public search JSON.  

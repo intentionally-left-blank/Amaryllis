@@ -251,6 +251,44 @@ curl -X POST http://127.0.0.1:8000/v1/agents/quickstart \
   }'
 ```
 
+Factory contract and capability metadata:
+
+```bash
+curl -s http://127.0.0.1:8000/v1/agents/factory/contract \
+  -H "Authorization: Bearer dev-token"
+```
+
+Domain-scoped quickstart example:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/agents/quickstart/plan \
+  -H "Authorization: Bearer dev-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user-001",
+    "request": "create a daily AI agent from openai.com and huggingface.co at 07:45"
+  }'
+```
+
+Advanced override example:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/agents/quickstart/plan \
+  -H "Authorization: Bearer dev-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user-001",
+    "request": "create an agent for AI updates",
+    "overrides": {
+      "kind": "coding",
+      "name": "Build Pilot",
+      "focus": "python tooling",
+      "source_policy": {"mode": "allowlist", "domains": ["pypi.org", "github.com"]},
+      "automation": {"enabled": true, "schedule_type": "hourly", "schedule": {"interval_hours": 6, "minute": 10}}
+    }
+  }'
+```
+
 ### 3) Plan first, then execute
 
 ```bash

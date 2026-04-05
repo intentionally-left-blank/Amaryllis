@@ -56,6 +56,14 @@
     },
     {
       "method": "get",
+      "path": "/v1/agents/factory/contract",
+      "request_required": [],
+      "response_statuses": [
+        "200"
+      ]
+    },
+    {
+      "method": "get",
       "path": "/v1/agents",
       "request_required": [],
       "response_statuses": [

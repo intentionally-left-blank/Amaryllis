@@ -3,13 +3,17 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from api.chat_api import _automation_schedule_summary, _infer_agent_spec_from_request
+from agents.factory import (
+    apply_agent_spec_overrides as factory_apply_agent_spec_overrides,
+    automation_schedule_summary as factory_automation_schedule_summary,
+    infer_agent_spec_from_request as factory_infer_agent_spec_from_request,
+)
 from runtime.auth import assert_owner, auth_context_from_request, resolve_user_id
 from runtime.errors import AmaryllisError, NotFoundError, ProviderError, ValidationError
 
@@ -94,12 +98,37 @@ class CreateAgentRequest(BaseModel):
     user_id: str | None = None
 
 
+class QuickstartSourcePolicyOverride(BaseModel):
+    mode: Literal["open_web", "channels", "allowlist"] | None = None
+    channels: list[str] | None = None
+    domains: list[str] | None = None
+
+
+class QuickstartAutomationOverride(BaseModel):
+    enabled: bool | None = None
+    schedule_type: Literal["hourly", "weekly"] | None = None
+    schedule: dict[str, Any] | None = None
+    interval_sec: int | None = Field(default=None, ge=1, le=2_678_400)
+    timezone: str | None = None
+    start_immediately: bool | None = None
+
+
+class QuickstartOverrides(BaseModel):
+    kind: Literal["news", "coding", "general"] | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    focus: str | None = Field(default=None, min_length=1, max_length=200)
+    tools: list[str] | None = None
+    source_policy: QuickstartSourcePolicyOverride | None = None
+    automation: QuickstartAutomationOverride | None = None
+
+
 class QuickstartAgentRequest(BaseModel):
     request: str = Field(min_length=1, max_length=1000)
     model: str | None = None
     user_id: str | None = None
     session_id: str | None = None
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
+    overrides: QuickstartOverrides | None = None
 
 
 class AgentChatRequest(BaseModel):
@@ -157,6 +186,11 @@ def _quickstart_payload_fingerprint(
         "request": str(payload.request or "").strip(),
         "model": str(payload.model or "").strip(),
         "session_id": str(payload.session_id or "").strip(),
+        "overrides": (
+            payload.overrides.model_dump(exclude_none=True)
+            if payload.overrides is not None
+            else {}
+        ),
     }
     serialized = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
@@ -196,7 +230,7 @@ def _build_quickstart_assistant_reply(
 ) -> str:
     reply = f"Готово. Создал агента '{agent_name}' (id: {agent_id}). Фокус: {focus or 'general'}."
     if isinstance(automation, dict):
-        reply += f" Запустил автоматический режим ({_automation_schedule_summary(automation)})."
+        reply += f" Запустил автоматический режим ({factory_automation_schedule_summary(automation)})."
     elif automation_error:
         reply += f" Агент создан, но расписание включить не удалось: {automation_error}."
     else:
@@ -255,6 +289,34 @@ def create_agent(payload: CreateAgentRequest, request: Request) -> dict[str, Any
         raise ProviderError(str(exc)) from exc
 
 
+@router.get("/agents/factory/contract")
+def agent_factory_contract(request: Request) -> dict[str, Any]:
+    return {
+        "contract_version": "agent_factory_v1",
+        "contract_path": "contracts/agent_factory_v1.json",
+        "entrypoints": [
+            {"method": "POST", "path": "/agents/quickstart/plan"},
+            {"method": "POST", "path": "/agents/quickstart"},
+            {"method": "POST", "path": "/chat/completions", "shortcut": "chat_intent_quickstart"},
+        ],
+        "capabilities": {
+            "input": "natural_language_request",
+            "agent_kinds": ["news", "coding", "general"],
+            "structured_overrides": True,
+            "explainable_planning": True,
+            "source_policy": {
+                "modes": ["open_web", "channels", "allowlist"],
+                "supports_domain_allowlist": True,
+            },
+            "automation": {
+                "schedules": ["hourly", "weekly"],
+                "idempotent_apply": True,
+            },
+        },
+        "request_id": _request_id(request),
+    }
+
+
 @router.post("/agents/quickstart")
 def quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> dict[str, Any]:
     services = request.app.state.services
@@ -268,7 +330,11 @@ def quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> dict[
         idempotency_key = _normalize_quickstart_idempotency_key(request.headers.get("X-Idempotency-Key"))
     idempotency_payload: dict[str, Any] | None = None
 
-    spec = _infer_agent_spec_from_request(payload.request)
+    spec = factory_infer_agent_spec_from_request(payload.request)
+    spec = factory_apply_agent_spec_overrides(
+        spec=spec,
+        overrides=payload.overrides.model_dump(exclude_none=True) if payload.overrides is not None else None,
+    )
     automation: dict[str, Any] | None = None
     automation_error: str | None = None
     if idempotency_key:
@@ -322,6 +388,11 @@ def quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> dict[
                                 cached_spec.get("source_targets")
                                 if isinstance(cached_spec.get("source_targets"), list)
                                 else []
+                            ),
+                            "source_policy": (
+                                cached_spec.get("source_policy")
+                                if isinstance(cached_spec.get("source_policy"), dict)
+                                else {}
                             ),
                             "automation_enabled": isinstance(cached_automation, dict),
                             "idempotency_key": idempotency_key,
@@ -409,6 +480,7 @@ def quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> dict[
             "kind": str(spec.get("kind") or "general"),
             "focus": str(spec.get("focus") or ""),
             "sources": spec.get("source_targets") if isinstance(spec.get("source_targets"), list) else [],
+            "source_policy": spec.get("source_policy") if isinstance(spec.get("source_policy"), dict) else {},
             "automation_enabled": automation is not None,
             "automation_error": automation_error,
             "idempotency_key": idempotency_key or None,
@@ -463,7 +535,11 @@ def quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> dict[
 def plan_quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> dict[str, Any]:
     auth = auth_context_from_request(request)
     effective_user_id = resolve_user_id(request_user_id=payload.user_id, auth=auth)
-    spec = _infer_agent_spec_from_request(payload.request)
+    spec = factory_infer_agent_spec_from_request(payload.request)
+    spec = factory_apply_agent_spec_overrides(
+        spec=spec,
+        overrides=payload.overrides.model_dump(exclude_none=True) if payload.overrides is not None else None,
+    )
     automation_spec = spec.get("automation")
     automation_plan: dict[str, Any] | None = None
     assistant_reply_preview = (
@@ -482,7 +558,7 @@ def plan_quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> 
             "interval_sec": automation_spec.get("interval_sec"),
             "timezone": str(automation_spec.get("timezone") or "UTC"),
             "start_immediately": bool(automation_spec.get("start_immediately", False)),
-            "summary": _automation_schedule_summary(schedule_preview),
+            "summary": factory_automation_schedule_summary(schedule_preview),
         }
         assistant_reply_preview += " Также будет включено расписание автозапуска."
     else:
@@ -504,6 +580,7 @@ def plan_quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> 
             "kind": str(spec.get("kind") or "general"),
             "focus": str(spec.get("focus") or ""),
             "sources": spec.get("source_targets") if isinstance(spec.get("source_targets"), list) else [],
+            "source_policy": spec.get("source_policy") if isinstance(spec.get("source_policy"), dict) else {},
             "automation_enabled": isinstance(automation_spec, dict),
         },
         actor=auth.user_id,
@@ -516,6 +593,8 @@ def plan_quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> 
             "focus": str(spec.get("focus") or "general"),
             "tools": spec.get("tools") if isinstance(spec.get("tools"), list) else [],
             "sources": spec.get("source_targets") if isinstance(spec.get("source_targets"), list) else [],
+            "source_policy": spec.get("source_policy") if isinstance(spec.get("source_policy"), dict) else {},
+            "inference_reason": spec.get("inference_reason") if isinstance(spec.get("inference_reason"), dict) else {},
             "automation": automation_plan,
             "assistant_reply_preview": assistant_reply_preview,
         },
