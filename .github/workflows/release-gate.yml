@@ -100,6 +100,13 @@ jobs:
             tests.test_mission_planner \
             tests.test_automation_mission_plan_api \
             tests.test_automation_scheduler \
+            tests.test_news_pipeline \
+            tests.test_news_storage \
+            tests.test_news_digest \
+            tests.test_news_digest_replay_snapshot \
+            tests.test_web_connector \
+            tests.test_news_mission_api \
+            tests.test_news_mission_gate \
             tests.test_agent_run_dispatch_mode_api \
             tests.test_agent_run_explain_api \
             tests.test_desktop_action_adapter \
@@ -282,6 +289,20 @@ jobs:
         with:
           name: supervisor-mission-gate-report
           path: artifacts/supervisor-mission-gate-report.json
+          if-no-files-found: error
+
+      - name: Run news mission gate (blocking)
+        run: |
+          python scripts/release/news_mission_gate.py \
+            --min-citation-coverage "${AMARYLLIS_NEWS_GATE_MIN_CITATION_COVERAGE:-0.95}" \
+            --min-sections "${AMARYLLIS_NEWS_GATE_MIN_SECTIONS:-1}" \
+            --output "artifacts/news-mission-gate-report.json"
+
+      - name: Upload news mission gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: news-mission-gate-report
+          path: artifacts/news-mission-gate-report.json
           if-no-files-found: error
 
       - name: Run generation-loop conformance gate (blocking)
@@ -1049,6 +1070,7 @@ jobs:
             --adoption-kpi-trend-report "artifacts/adoption-kpi-trend-gate-report.json" \
             --breaker-gate-report "artifacts/autonomy-circuit-breaker/autonomy-circuit-breaker-gate-report.json" \
             --breaker-soak-report "artifacts/autonomy-circuit-breaker-soak/autonomy-circuit-breaker-soak-gate-report.json" \
+            --news-mission-report "artifacts/news-mission-gate-report.json" \
             --distribution-resilience-report "artifacts/distribution/distribution-resilience-report.json" \
             --user-journey-report "artifacts/user-journey/user-journey-benchmark-report.json" \
             ${MACOS_DESKTOP_PARITY_ARG} \

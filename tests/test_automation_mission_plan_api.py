@@ -132,13 +132,20 @@ class AutomationMissionPlanAPITests(unittest.TestCase):
         self.assertIsInstance(items, list)
         template_ids = {str(item.get("id")) for item in items if isinstance(item, dict)}
         self.assertTrue(
-            {"code_health", "security_audit", "release_guard", "runtime_watchdog"}.issubset(template_ids)
+            {"code_health", "security_audit", "release_guard", "runtime_watchdog", "ai_news_daily"}.issubset(
+                template_ids
+            )
         )
         release_guard = next(
             (item for item in items if isinstance(item, dict) and str(item.get("id")) == "release_guard"),
             {},
         )
         self.assertEqual(str(release_guard.get("mission_policy_profile")), "release")
+        ai_news = next(
+            (item for item in items if isinstance(item, dict) and str(item.get("id")) == "ai_news_daily"),
+            {},
+        )
+        self.assertEqual(str(ai_news.get("cadence_profile")), "daily")
 
     def test_mission_policy_catalog_endpoint(self) -> None:
         listed = self.client.get(
@@ -219,6 +226,41 @@ class AutomationMissionPlanAPITests(unittest.TestCase):
         )
         self.assertEqual(denied.status_code, 403)
         self.assertEqual(str(denied.json().get("error", {}).get("type")), "permission_denied")
+
+    def test_plan_mission_from_ai_news_daily_template(self) -> None:
+        created = self.client.post(
+            "/agents/create",
+            headers=self._auth("user-token"),
+            json={
+                "name": "News Planner Agent",
+                "system_prompt": "news planner",
+                "user_id": "user-1",
+                "tools": ["web_search"],
+            },
+        )
+        self.assertEqual(created.status_code, 200)
+        agent_id = str(created.json().get("id"))
+
+        planned = self.client.post(
+            "/automations/mission/plan",
+            headers=self._auth("user-token"),
+            json={
+                "agent_id": agent_id,
+                "user_id": "user-1",
+                "template_id": "ai_news_daily",
+                "timezone": "UTC",
+            },
+        )
+        self.assertEqual(planned.status_code, 200)
+        payload = planned.json()
+        mission_plan = payload.get("mission_plan", {})
+        self.assertEqual(str(mission_plan.get("schedule_type")), "weekly")
+        schedule = mission_plan.get("schedule", {})
+        self.assertEqual(schedule.get("byday"), ["MO", "TU", "WE", "TH", "FR", "SA", "SU"])
+        message = str(mission_plan.get("message") or "").lower()
+        self.assertIn("daily ai news mission", message)
+        template = payload.get("template", {})
+        self.assertEqual(str(template.get("id")), "ai_news_daily")
 
 
 if __name__ == "__main__":

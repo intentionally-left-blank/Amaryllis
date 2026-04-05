@@ -1,0 +1,78 @@
+{
+  "topic": "AI",
+  "summary": "AI: 2 ключевых обновлений, покрытие ссылками 100%.",
+  "sections": [
+    {
+      "section_id": "story-1",
+      "headline": "AI Story One",
+      "summary": "Story one excerpt",
+      "confidence": "high",
+      "published_at": "2026-04-05T10:00:00+00:00",
+      "canonical_story_key": "https://example.com/story-1",
+      "source_count": 2,
+      "provenance_count": 2,
+      "source_refs": [
+        {
+          "source": "reddit",
+          "url": "https://example.com/story-1",
+          "canonical_id": "t3_story_1",
+          "canonical_story_key": "https://example.com/story-1",
+          "title": "Discussion for Story One",
+          "published_at": "2026-04-05T10:05:00+00:00"
+        },
+        {
+          "source": "web",
+          "url": "https://example.com/story-1",
+          "canonical_id": "web-1",
+          "canonical_story_key": "https://example.com/story-1",
+          "title": "AI Story One",
+          "published_at": "2026-04-05T10:00:00+00:00"
+        }
+      ]
+    },
+    {
+      "section_id": "story-2",
+      "headline": "AI Story Two",
+      "summary": "Story two excerpt",
+      "confidence": "high",
+      "published_at": "2026-04-05T09:00:00+00:00",
+      "canonical_story_key": "https://example.com/story-2",
+      "source_count": 1,
+      "provenance_count": 1,
+      "source_refs": [
+        {
+          "source": "web",
+          "url": "https://example.com/story-2",
+          "canonical_id": "web-2",
+          "canonical_story_key": "https://example.com/story-2",
+          "title": "AI Story Two",
+          "published_at": "2026-04-05T09:00:00+00:00"
+        }
+      ]
+    }
+  ],
+  "top_links": [
+    "https://example.com/story-1",
+    "https://example.com/story-2"
+  ],
+  "citation_policy": {
+    "version": "digest_citation_policy_v1",
+    "requires_source_refs_per_section": true,
+    "min_source_refs_per_section": 1,
+    "confidence_levels": [
+      "low",
+      "medium",
+      "high"
+    ]
+  },
+  "metrics": {
+    "section_count": 2,
+    "sections_with_citations": 2,
+    "citation_coverage_rate": 1.0,
+    "confidence_histogram": {
+      "high": 2,
+      "medium": 0,
+      "low": 0
+    }
+  }
+}

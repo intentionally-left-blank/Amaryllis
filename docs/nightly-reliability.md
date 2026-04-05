@@ -224,6 +224,11 @@ python3 scripts/release/publish_adoption_kpi_snapshot.py \
 Nightly mission report pack gate:
 
 ```bash
+python3 scripts/release/news_mission_gate.py \
+  --min-citation-coverage 0.95 \
+  --min-sections 1 \
+  --output artifacts/nightly-news-mission-gate-report.json
+
 python3 scripts/release/build_mission_success_recovery_report.py \
   --nightly-reliability-report artifacts/nightly-reliability-report.json \
   --nightly-burn-rate-report artifacts/nightly-burn-rate-gate-report.json \
@@ -231,6 +236,7 @@ python3 scripts/release/build_mission_success_recovery_report.py \
   --adoption-kpi-trend-report artifacts/nightly-adoption-kpi-trend-gate-report.json \
   --breaker-gate-report artifacts/nightly-autonomy-circuit-breaker-gate-report.json \
   --breaker-soak-report artifacts/nightly-autonomy-circuit-breaker-soak-gate-report.json \
+  --news-mission-report artifacts/nightly-news-mission-gate-report.json \
   --scope nightly \
   --output artifacts/nightly-mission-success-recovery-report.json
 
@@ -330,6 +336,12 @@ Nightly provenance coverage gate artifact:
 
 ```text
 artifacts/nightly-provenance-coverage-gate-report.json
+```
+
+Nightly news mission gate artifact:
+
+```text
+artifacts/nightly-news-mission-gate-report.json
 ```
 
 Nightly personalization adapter gate artifact:

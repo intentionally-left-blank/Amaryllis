@@ -27,6 +27,7 @@ Release scope:
 - mission queue load gate report
 - fault-injection reliability report
 - release quality dashboard snapshot
+- news mission gate report
 - adoption KPI trend gate report
 - autonomy circuit breaker gate report
 - autonomy circuit breaker stability soak gate report
@@ -37,6 +38,7 @@ Release scope:
 Nightly scope:
 - nightly reliability report
 - nightly burn-rate gate report
+- news mission gate report
 - autonomy circuit breaker gate report
 - autonomy circuit breaker stability soak gate report
 - adoption KPI trend gate report
@@ -75,6 +77,9 @@ Optional breaker soak source flag:
 
 Optional breaker gate source flag:
 - `--breaker-gate-report <path>`
+
+Optional news mission source flag:
+- `--news-mission-report <path>`
 
 ## CI Integration
 

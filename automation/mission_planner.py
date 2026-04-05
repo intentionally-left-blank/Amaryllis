@@ -76,6 +76,28 @@ _MISSION_TEMPLATE_REGISTRY: dict[str, dict[str, Any]] = {
         "mission_policy_profile": "watchdog",
         "risk_tags": ["ops", "watchdog"],
     },
+    "ai_news_daily": {
+        "id": "ai_news_daily",
+        "name": "AI News Daily Digest",
+        "description": "Collect, deduplicate, and summarize daily AI news with source-grounded citations.",
+        "default_message": (
+            "Run daily AI news mission: collect updates from web, reddit, and x for the last 24 hours; "
+            "deduplicate overlapping stories by canonical URL; produce a concise digest with source links "
+            "and confidence markers for each section."
+        ),
+        "cadence_profile": "daily",
+        "start_immediately": False,
+        "max_attempts": 3,
+        "budget": {"max_steps": 20, "max_tool_calls": 36, "timeout_sec": 900},
+        "mission_policy_profile": "balanced",
+        "risk_tags": ["news", "research"],
+        "schedule_type": "weekly",
+        "schedule": {
+            "byday": ["MO", "TU", "WE", "TH", "FR", "SA", "SU"],
+            "hour": 9,
+            "minute": 0,
+        },
+    },
 }
 
 

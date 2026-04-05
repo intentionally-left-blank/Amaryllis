@@ -9,6 +9,7 @@ ProviderErrorClass = Literal[
     "quota",
     "timeout",
     "auth",
+    "entitlement",
     "invalid_request",
     "server",
     "network",
@@ -65,6 +66,22 @@ def classify_provider_error(
             provider=provider,
             operation=operation,
             error_class="budget_limit",
+            raw=raw,
+            status_code=status_code,
+        )
+
+    if _contains_any(
+        lowered,
+        (
+            "entitlement denied",
+            "entitlement check requires user_id",
+            "chat feature is disabled",
+        ),
+    ):
+        return _build(
+            provider=provider,
+            operation=operation,
+            error_class="entitlement",
             raw=raw,
             status_code=status_code,
         )

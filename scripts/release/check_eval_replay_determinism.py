@@ -13,6 +13,8 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from eval.replay_snapshot import canonicalize_replay_snapshot
+from eval.news_digest_snapshot import canonicalize_news_digest_snapshot
+from news.digest import compose_grounded_digest
 
 
 def _parse_args() -> argparse.Namespace:
@@ -47,6 +49,16 @@ def _parse_args() -> argparse.Namespace:
         "--replay-snapshot",
         default="eval/fixtures/replay/sample_replay_snapshot.json",
         help="Expected canonical replay snapshot fixture path.",
+    )
+    parser.add_argument(
+        "--news-digest-input",
+        default="eval/fixtures/replay/news/news_digest_input.json",
+        help="News digest replay input fixture path.",
+    )
+    parser.add_argument(
+        "--news-digest-snapshot",
+        default="eval/fixtures/replay/news/news_digest_snapshot.json",
+        help="Expected canonical snapshot for news digest replay fixture.",
     )
     parser.add_argument(
         "--seed",
@@ -171,6 +183,51 @@ def _run_replay_snapshot_check(
     return failures
 
 
+def _run_news_digest_snapshot_check(
+    *,
+    news_digest_input: Path,
+    news_digest_snapshot: Path,
+    update_fixtures: bool,
+) -> list[str]:
+    failures: list[str] = []
+    if not news_digest_input.exists():
+        return [f"news digest replay input fixture not found: {news_digest_input}"]
+
+    try:
+        payload = _load_json_object(news_digest_input)
+    except Exception as exc:
+        return [f"news digest replay input fixture invalid: {exc}"]
+
+    digest = compose_grounded_digest(
+        topic=str(payload.get("topic") or ""),
+        items=list(payload.get("items") or []),
+        max_sections=int(payload.get("max_sections") or 5),
+    )
+    canonical = canonicalize_news_digest_snapshot(digest)
+
+    if update_fixtures:
+        _write_json(news_digest_snapshot, canonical)
+        return []
+
+    if not news_digest_snapshot.exists():
+        return [f"news digest expected snapshot not found: {news_digest_snapshot}"]
+
+    try:
+        expected = _load_json_object(news_digest_snapshot)
+    except Exception as exc:
+        return [f"news digest expected snapshot invalid: {exc}"]
+
+    if expected != canonical:
+        failures.append("news digest deterministic snapshot drift")
+        failures.append(f"news digest expected: {news_digest_snapshot}")
+        failures.append(
+            "news digest metrics expected="
+            f"{json.dumps(expected.get('metrics', {}), ensure_ascii=False)} "
+            f"actual={json.dumps(canonical.get('metrics', {}), ensure_ascii=False)}"
+        )
+    return failures
+
+
 def main() -> int:
     args = _parse_args()
     repo_root = _resolve_path(ROOT_DIR, args.repo_root)
@@ -183,6 +240,8 @@ def main() -> int:
     golden_snapshot = _resolve_path(repo_root, args.golden_snapshot)
     replay_input = _resolve_path(repo_root, args.replay_input)
     replay_snapshot = _resolve_path(repo_root, args.replay_snapshot)
+    news_digest_input = _resolve_path(repo_root, args.news_digest_input)
+    news_digest_snapshot = _resolve_path(repo_root, args.news_digest_snapshot)
 
     failures: list[str] = []
 
@@ -217,6 +276,13 @@ def main() -> int:
             update_fixtures=bool(args.update_fixtures),
         )
     )
+    failures.extend(
+        _run_news_digest_snapshot_check(
+            news_digest_input=news_digest_input,
+            news_digest_snapshot=news_digest_snapshot,
+            update_fixtures=bool(args.update_fixtures),
+        )
+    )
 
     if failures:
         print("[eval-replay-determinism] FAILED", file=sys.stderr)
@@ -226,7 +292,8 @@ def main() -> int:
 
     print(
         "[eval-replay-determinism] OK "
-        f"seed={int(args.seed)} golden_snapshot={golden_snapshot} replay_snapshot={replay_snapshot}"
+        f"seed={int(args.seed)} golden_snapshot={golden_snapshot} replay_snapshot={replay_snapshot} "
+        f"news_digest_snapshot={news_digest_snapshot}"
     )
     return 0
 

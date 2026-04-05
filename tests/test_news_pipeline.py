@@ -108,15 +108,32 @@ class NewsPipelineTests(unittest.TestCase):
         self.assertEqual(report.get("deduped_count"), 1)
         self.assertEqual(report.get("duplicate_count"), 1)
         self.assertEqual(report.get("per_source_count", {}).get("web"), 2)
+        self.assertEqual(
+            report.get("dedup_policy"),
+            {"strategy": "canonical_url_key_v1", "unique_story_count": 1},
+        )
 
         items = report.get("items", [])
         self.assertEqual(len(items), 1)
         self.assertEqual(str(items[0].get("url")), "https://openai.com/blog/launch?utm_source=test")
+        self.assertEqual(str(items[0].get("canonical_story_key")), "https://openai.com/blog/launch")
         metadata = items[0].get("metadata")
         self.assertIsInstance(metadata, dict)
+        self.assertEqual(str(metadata.get("canonical_story_key")), "https://openai.com/blog/launch")
+        self.assertEqual(
+            metadata.get("dedup_policy"),
+            {
+                "strategy": "canonical_url_key_v1",
+                "key": "https://openai.com/blog/launch",
+            },
+        )
         provenance = metadata.get("provenance")
         self.assertIsInstance(provenance, list)
         self.assertEqual(len(provenance), 2)
+        self.assertEqual(
+            {str(item.get("canonical_story_key")) for item in provenance},
+            {"https://openai.com/blog/launch"},
+        )
         merged_sources = metadata.get("merged_sources")
         self.assertEqual(merged_sources, ["web"])
         self.assertEqual(metadata.get("merged_count"), 2)
@@ -142,12 +159,18 @@ class NewsPipelineTests(unittest.TestCase):
         self.assertEqual(report.get("raw_count"), 2)
         self.assertEqual(report.get("deduped_count"), 1)
         self.assertEqual(report.get("duplicate_count"), 1)
+        self.assertEqual(
+            report.get("dedup_policy"),
+            {"strategy": "canonical_url_key_v1", "unique_story_count": 1},
+        )
         items = report.get("items", [])
         self.assertEqual(len(items), 1)
+        self.assertEqual(str(items[0].get("canonical_story_key")), "https://example.com/story")
         metadata = items[0].get("metadata")
         self.assertIsInstance(metadata, dict)
         self.assertEqual(metadata.get("merged_sources"), ["web", "reddit"])
         self.assertEqual(metadata.get("merged_count"), 2)
+        self.assertEqual(str(metadata.get("canonical_story_key")), "https://example.com/story")
         provenance = metadata.get("provenance")
         self.assertIsInstance(provenance, list)
         self.assertEqual(len(provenance), 2)

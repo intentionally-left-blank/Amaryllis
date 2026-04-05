@@ -5,6 +5,12 @@ from typing import Any, Protocol
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
+from news.digest import compose_grounded_digest
+from news.outbound import (
+    NewsDigestOutboundDispatcher,
+    SUPPORTED_NEWS_OUTBOUND_CHANNELS,
+    normalize_outbound_channel,
+)
 from runtime.auth import assert_owner, auth_context_from_request, resolve_user_id
 from runtime.errors import AmaryllisError, NotFoundError, ProviderError, ValidationError
 from runtime.news_missions import build_news_mission_plan
@@ -77,6 +83,68 @@ def _build_news_agent_prompt(focus: str | None = None) -> str:
     if focus_text:
         return f"{NEWS_AGENT_MARKER}\nFocus domain: {focus_text}.\n{guidance}"
     return f"{NEWS_AGENT_MARKER}\nFocus domain: general technology and AI news.\n{guidance}"
+
+
+def _render_digest_inbox_body(digest: dict[str, Any]) -> str:
+    summary = str(digest.get("summary") or "").strip()
+    lines: list[str] = [summary] if summary else []
+    sections = digest.get("sections")
+    if isinstance(sections, list):
+        for section in sections[:5]:
+            if not isinstance(section, dict):
+                continue
+            headline = str(section.get("headline") or "Update").strip()
+            confidence = str(section.get("confidence") or "unknown").strip().lower()
+            refs = section.get("source_refs")
+            ref_url = ""
+            if isinstance(refs, list):
+                for ref in refs:
+                    if not isinstance(ref, dict):
+                        continue
+                    candidate = str(ref.get("url") or "").strip()
+                    if candidate:
+                        ref_url = candidate
+                        break
+            if ref_url:
+                lines.append(f"- {headline} [{confidence}] {ref_url}")
+            else:
+                lines.append(f"- {headline} [{confidence}]")
+    body = "\n".join(line for line in lines if line).strip()
+    return body or "News digest generated."
+
+
+def _normalize_delivery_topic_scope(topic: str | None) -> str:
+    normalized = str(topic or "").strip()
+    return normalized if normalized else "*"
+
+
+def _normalize_outbound_channel_filter(channels: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    for item in channels or []:
+        channel = normalize_outbound_channel(item)
+        if not channel:
+            raise ValueError(
+                "unsupported outbound channel: "
+                f"{item}. Supported: {', '.join(SUPPORTED_NEWS_OUTBOUND_CHANNELS)}"
+            )
+        if channel in normalized:
+            continue
+        normalized.append(channel)
+    return normalized
+
+
+def _collapse_policy_rows_by_channel(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    collapsed: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        channel = normalize_outbound_channel(row.get("channel"))
+        if not channel or channel in seen:
+            continue
+        seen.add(channel)
+        collapsed.append(row)
+    return collapsed
 
 
 def _is_news_agent(agent: _AgentLike) -> bool:
@@ -222,6 +290,32 @@ class NewsIngestPreviewRequest(BaseModel):
     persist: bool = True
 
 
+class NewsOutboundChannelPolicyRequest(BaseModel):
+    channel: str = Field(min_length=1, max_length=32)
+    enabled: bool = True
+    max_targets: int = Field(default=3, ge=1, le=20)
+    targets: list[str] = Field(default_factory=list, max_length=20)
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
+class NewsDeliveryPolicyUpsertRequest(BaseModel):
+    user_id: str | None = None
+    topic: str | None = Field(default=None, max_length=300)
+    channels: list[NewsOutboundChannelPolicyRequest] = Field(default_factory=list)
+
+
+class NewsDigestComposeRequest(BaseModel):
+    user_id: str | None = None
+    topic: str = Field(min_length=1, max_length=300)
+    source: str | None = None
+    limit: int = Field(default=100, ge=1, le=1000)
+    deliver_to_inbox: bool = True
+    inbox_title: str | None = Field(default=None, max_length=200)
+    deliver_to_outbound: bool = False
+    outbound_channels: list[str] = Field(default_factory=list)
+    outbound_dry_run: bool = True
+
+
 class NewsMissionCreateRequest(NewsMissionPlanRequest):
     session_id: str | None = None
 
@@ -242,6 +336,47 @@ class NewsAgentQuickstartRequest(BaseModel):
     internet_scope: InternetScopeRequest = Field(default_factory=InternetScopeRequest)
     source_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
     session_id: str | None = None
+
+
+def _normalize_delivery_policy_channels_payload(
+    channels: list[NewsOutboundChannelPolicyRequest] | list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for item in channels:
+        raw = item.model_dump(exclude_none=True) if isinstance(item, BaseModel) else item
+        if not isinstance(raw, dict):
+            continue
+        channel = normalize_outbound_channel(raw.get("channel"))
+        if not channel:
+            raise ValueError(
+                "unsupported outbound channel: "
+                f"{raw.get('channel')}. Supported: {', '.join(SUPPORTED_NEWS_OUTBOUND_CHANNELS)}"
+            )
+        targets: list[str] = []
+        raw_targets = raw.get("targets")
+        if isinstance(raw_targets, list):
+            for target_item in raw_targets:
+                target = str(target_item or "").strip()
+                if not target or target in targets:
+                    continue
+                targets.append(target)
+                if len(targets) >= 20:
+                    break
+        max_targets_raw = raw.get("max_targets")
+        try:
+            max_targets = int(max_targets_raw)
+        except Exception:
+            max_targets = 3
+        normalized.append(
+            {
+                "channel": channel,
+                "enabled": bool(raw.get("enabled", True)),
+                "max_targets": max(1, min(max_targets, 20)),
+                "targets": targets,
+                "options": raw.get("options") if isinstance(raw.get("options"), dict) else {},
+            }
+        )
+    return normalized
 
 
 def _infer_topic_from_quickstart(request_text: str, explicit_topic: str | None) -> str:
@@ -278,6 +413,10 @@ def news_contract(request: Request) -> dict[str, Any]:
             {"method": "POST", "path": "/news/missions/plan"},
             {"method": "POST", "path": "/news/missions/create"},
             {"method": "POST", "path": "/news/ingest/preview"},
+            {"method": "POST", "path": "/news/delivery/policies/upsert"},
+            {"method": "GET", "path": "/news/delivery/policies"},
+            {"method": "GET", "path": "/news/delivery/events"},
+            {"method": "POST", "path": "/news/digest/compose"},
             {"method": "GET", "path": "/news/items"},
         ],
         "request_id": _request_id(request),
@@ -609,6 +748,209 @@ def ingest_news_preview(payload: NewsIngestPreviewRequest, request: Request) -> 
     return {
         "report": report,
         "persisted_count": persisted_count,
+        "action_receipt": receipt,
+        "request_id": _request_id(request),
+    }
+
+
+@router.post("/news/delivery/policies/upsert")
+def upsert_news_delivery_policies(payload: NewsDeliveryPolicyUpsertRequest, request: Request) -> dict[str, Any]:
+    services = request.app.state.services
+    auth = auth_context_from_request(request)
+    effective_user_id = resolve_user_id(request_user_id=payload.user_id, auth=auth)
+    try:
+        normalized_channels = _normalize_delivery_policy_channels_payload(payload.channels)
+        if not normalized_channels:
+            raise ValidationError("channels must include at least one valid channel configuration")
+        topic_scope = _normalize_delivery_topic_scope(payload.topic)
+        persisted = services.database.upsert_news_delivery_policies(
+            user_id=effective_user_id,
+            topic=topic_scope,
+            channels=normalized_channels,
+        )
+        items = services.database.list_news_delivery_policies(
+            user_id=effective_user_id,
+            topic=topic_scope,
+            include_global=False,
+        )
+    except Exception as exc:
+        _sign_action(
+            request,
+            action="news_delivery_policy_upsert",
+            payload={**payload.model_dump(), "user_id": effective_user_id},
+            actor=auth.user_id,
+            status="failed",
+            details={"error": str(exc)},
+            target_type="news_delivery_policy",
+        )
+        _raise_news_error(exc)
+
+    receipt = _sign_action(
+        request,
+        action="news_delivery_policy_upsert",
+        payload={**payload.model_dump(), "user_id": effective_user_id, "topic_scope": topic_scope},
+        actor=auth.user_id,
+        target_type="news_delivery_policy",
+        target_id=f"{effective_user_id}:{topic_scope}",
+    )
+    return {
+        "topic_scope": topic_scope,
+        "persisted_count": persisted,
+        "items": items,
+        "count": len(items),
+        "action_receipt": receipt,
+        "request_id": _request_id(request),
+    }
+
+
+@router.get("/news/delivery/policies")
+def list_news_delivery_policies(
+    request: Request,
+    user_id: str | None = Query(default=None),
+    topic: str | None = Query(default=None),
+    include_global: bool = Query(default=True),
+) -> dict[str, Any]:
+    services = request.app.state.services
+    auth = auth_context_from_request(request)
+    effective_user_id = resolve_user_id(request_user_id=user_id, auth=auth)
+    try:
+        topic_filter = str(topic or "").strip() or None
+        items = services.database.list_news_delivery_policies(
+            user_id=effective_user_id,
+            topic=topic_filter,
+            include_global=bool(include_global),
+        )
+    except Exception as exc:
+        _raise_news_error(exc)
+    return {
+        "items": items,
+        "count": len(items),
+        "request_id": _request_id(request),
+    }
+
+
+@router.get("/news/delivery/events")
+def list_news_delivery_events(
+    request: Request,
+    user_id: str | None = Query(default=None),
+    topic: str | None = Query(default=None),
+    channel: str | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=1000),
+) -> dict[str, Any]:
+    services = request.app.state.services
+    auth = auth_context_from_request(request)
+    effective_user_id = resolve_user_id(request_user_id=user_id, auth=auth)
+    try:
+        normalized_channel = str(channel or "").strip().lower() or None
+        if normalized_channel and not normalize_outbound_channel(normalized_channel):
+            raise ValidationError(
+                "unsupported outbound channel: "
+                f"{channel}. Supported: {', '.join(SUPPORTED_NEWS_OUTBOUND_CHANNELS)}"
+            )
+        items = services.database.list_news_delivery_events(
+            user_id=effective_user_id,
+            topic=str(topic or "").strip() or None,
+            channel=normalized_channel,
+            limit=limit,
+        )
+    except Exception as exc:
+        _raise_news_error(exc)
+    return {
+        "items": items,
+        "count": len(items),
+        "request_id": _request_id(request),
+    }
+
+
+@router.post("/news/digest/compose")
+def compose_news_digest(payload: NewsDigestComposeRequest, request: Request) -> dict[str, Any]:
+    services = request.app.state.services
+    auth = auth_context_from_request(request)
+    effective_user_id = resolve_user_id(request_user_id=payload.user_id, auth=auth)
+    try:
+        items = services.database.list_news_items(
+            user_id=effective_user_id,
+            topic=payload.topic,
+            source=payload.source,
+            limit=payload.limit,
+        )
+        digest = compose_grounded_digest(topic=payload.topic, items=items)
+
+        inbox_item = None
+        section_count = int((digest.get("metrics") or {}).get("section_count") or 0)
+        if bool(payload.deliver_to_inbox) and section_count > 0:
+            inbox_title = str(payload.inbox_title or "").strip() or f"News Digest: {payload.topic}"
+            inbox_item = services.database.add_inbox_item(
+                user_id=effective_user_id,
+                category="news",
+                severity="info",
+                title=inbox_title,
+                body=_render_digest_inbox_body(digest),
+                source_type="news_digest",
+                source_id=str(payload.topic or "").strip(),
+                metadata={
+                    "topic": str(payload.topic or "").strip(),
+                    "source": str(payload.source or "").strip().lower() or None,
+                    "item_count": len(items),
+                    "section_count": int((digest.get("metrics") or {}).get("section_count") or 0),
+                    "citation_coverage_rate": float((digest.get("metrics") or {}).get("citation_coverage_rate") or 0),
+                    "top_links": list(digest.get("top_links") or [])[:10],
+                    "digest": digest,
+                },
+                requires_action=False,
+            )
+
+        outbound_delivery = None
+        outbound_event_count = 0
+        if bool(payload.deliver_to_outbound) and section_count > 0:
+            outbound_channels = _normalize_outbound_channel_filter(payload.outbound_channels)
+            policy_rows = services.database.list_news_delivery_policies(
+                user_id=effective_user_id,
+                topic=payload.topic,
+                include_global=True,
+            )
+            collapsed_policy_rows = _collapse_policy_rows_by_channel(policy_rows)
+            dispatcher = NewsDigestOutboundDispatcher()
+            outbound_delivery = dispatcher.dispatch(
+                topic=payload.topic,
+                digest=digest,
+                policy_rows=collapsed_policy_rows,
+                channels=outbound_channels,
+                dry_run=bool(payload.outbound_dry_run),
+            )
+            outbound_events = outbound_delivery.get("events") if isinstance(outbound_delivery, dict) else []
+            if isinstance(outbound_events, list) and outbound_events:
+                outbound_event_count = services.database.add_news_delivery_events(
+                    user_id=effective_user_id,
+                    topic=payload.topic,
+                    events=[item for item in outbound_events if isinstance(item, dict)],
+                )
+    except Exception as exc:
+        _sign_action(
+            request,
+            action="news_digest_compose",
+            payload={**payload.model_dump(), "user_id": effective_user_id},
+            actor=auth.user_id,
+            status="failed",
+            details={"error": str(exc)},
+            target_type="news_digest",
+        )
+        _raise_news_error(exc)
+
+    receipt = _sign_action(
+        request,
+        action="news_digest_compose",
+        payload={**payload.model_dump(), "user_id": effective_user_id},
+        actor=auth.user_id,
+        target_type="news_digest",
+        target_id=str((inbox_item or {}).get("id") or ""),
+    )
+    return {
+        "digest": digest,
+        "item_count": len(items),
+        "inbox_item": inbox_item,
+        "outbound_delivery": outbound_delivery,
+        "outbound_event_count": outbound_event_count,
         "action_receipt": receipt,
         "request_id": _request_id(request),
     }

@@ -1,0 +1,65 @@
+{
+  "topic": "AI",
+  "max_sections": 5,
+  "items": [
+    {
+      "source": "web",
+      "canonical_id": "web-1",
+      "canonical_story_key": "https://example.com/story-1",
+      "url": "https://example.com/story-1",
+      "title": "AI Story One",
+      "excerpt": "Story one excerpt",
+      "published_at": "2026-04-05T10:00:00+00:00",
+      "raw_score": 0.93,
+      "metadata": {
+        "canonical_story_key": "https://example.com/story-1",
+        "merged_sources": ["web", "reddit"],
+        "merged_count": 2,
+        "provenance": [
+          {
+            "source": "web",
+            "canonical_id": "web-1",
+            "canonical_story_key": "https://example.com/story-1",
+            "url": "https://example.com/story-1",
+            "title": "AI Story One",
+            "published_at": "2026-04-05T10:00:00+00:00"
+          },
+          {
+            "source": "reddit",
+            "canonical_id": "t3_story_1",
+            "canonical_story_key": "https://example.com/story-1",
+            "url": "https://example.com/story-1",
+            "title": "Discussion for Story One",
+            "published_at": "2026-04-05T10:05:00+00:00"
+          }
+        ]
+      }
+    },
+    {
+      "source": "web",
+      "canonical_id": "web-2",
+      "canonical_story_key": "https://example.com/story-2",
+      "url": "https://example.com/story-2",
+      "title": "AI Story Two",
+      "excerpt": "Story two excerpt",
+      "published_at": "2026-04-05T09:00:00+00:00",
+      "raw_score": 0.8,
+      "metadata": {
+        "canonical_story_key": "https://example.com/story-2",
+        "merged_sources": ["web"],
+        "merged_count": 1,
+        "provenance": [
+          {
+            "source": "web",
+            "canonical_id": "web-2",
+            "canonical_story_key": "https://example.com/story-2",
+            "url": "https://example.com/story-2",
+            "title": "AI Story Two",
+            "published_at": "2026-04-05T09:00:00+00:00"
+          }
+        ]
+      }
+    }
+  ]
+}
+

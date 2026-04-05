@@ -129,12 +129,27 @@ def _canonical_url_key(url: str) -> str:
     return normalized
 
 
+def _canonical_story_key(item: dict[str, Any]) -> str:
+    explicit = str(item.get("canonical_story_key") or "").strip()
+    if explicit:
+        return explicit
+    metadata = item.get("metadata")
+    if isinstance(metadata, dict):
+        for key in ("canonical_story_key", "story_key", "dedup_key"):
+            value = str(metadata.get(key) or "").strip()
+            if value:
+                return value
+    return _canonical_url_key(str(item.get("url") or ""))
+
+
 def _to_provenance_entry(item: dict[str, Any]) -> dict[str, Any]:
     metadata = item.get("metadata")
     metadata_payload = dict(metadata) if isinstance(metadata, dict) else {}
+    canonical_story_key = _canonical_story_key(item)
     return {
         "source": str(item.get("source") or "").strip().lower(),
         "canonical_id": str(item.get("canonical_id") or "").strip(),
+        "canonical_story_key": canonical_story_key,
         "url": str(item.get("url") or "").strip(),
         "title": str(item.get("title") or "").strip(),
         "published_at": str(item.get("published_at") or "").strip(),
@@ -188,6 +203,14 @@ def _merge_provenance(base: dict[str, Any], incoming: dict[str, Any]) -> None:
         merged_sources.append(incoming_source)
     metadata["merged_sources"] = merged_sources
     metadata["merged_count"] = len(provenance)
+    story_key = _canonical_story_key(base) or _canonical_story_key(incoming)
+    if story_key:
+        base["canonical_story_key"] = story_key
+        metadata["canonical_story_key"] = story_key
+        metadata["dedup_policy"] = {
+            "strategy": "canonical_url_key_v1",
+            "key": story_key,
+        }
 
     if not str(base.get("excerpt") or "").strip():
         excerpt = str(incoming.get("excerpt") or "").strip()
@@ -379,12 +402,13 @@ class NewsIngestionPipeline:
         deduped: list[dict[str, Any]] = []
         deduped_by_key: dict[str, dict[str, Any]] = {}
         for item in collected:
-            key = _canonical_url_key(str(item.get("url") or ""))
+            key = _canonical_story_key(item)
             if not key:
                 continue
             existing = deduped_by_key.get(key)
             if existing is None:
                 payload = dict(item)
+                payload["canonical_story_key"] = key
                 payload_metadata = payload.get("metadata")
                 if not isinstance(payload_metadata, dict):
                     payload_metadata = {}
@@ -393,6 +417,11 @@ class NewsIngestionPipeline:
                 source_name = str(payload.get("source") or "").strip().lower()
                 payload_metadata["merged_sources"] = [source_name] if source_name else []
                 payload_metadata["merged_count"] = 1
+                payload_metadata["canonical_story_key"] = key
+                payload_metadata["dedup_policy"] = {
+                    "strategy": "canonical_url_key_v1",
+                    "key": key,
+                }
                 deduped_by_key[key] = payload
                 deduped.append(payload)
                 continue
@@ -415,6 +444,10 @@ class NewsIngestionPipeline:
             "raw_count": len(collected),
             "deduped_count": len(deduped),
             "duplicate_count": max(0, len(collected) - len(deduped)),
+            "dedup_policy": {
+                "strategy": "canonical_url_key_v1",
+                "unique_story_count": len(deduped_by_key),
+            },
             "items": deduped,
             "generated_at": now,
         }

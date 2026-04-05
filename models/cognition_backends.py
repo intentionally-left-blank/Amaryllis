@@ -192,6 +192,7 @@ class ModelManagerCognitionBackend:
         routing: dict[str, Any] | None = None,
         fallback_targets: list[tuple[str, str]] | None = None,
         session_id: str | None = None,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         return self._manager.chat(
             messages=messages,
@@ -202,6 +203,7 @@ class ModelManagerCognitionBackend:
             routing=routing,
             fallback_targets=fallback_targets,
             session_id=session_id,
+            user_id=user_id,
         )
 
     def stream_chat(
@@ -214,6 +216,7 @@ class ModelManagerCognitionBackend:
         routing: dict[str, Any] | None = None,
         fallback_targets: list[tuple[str, str]] | None = None,
         session_id: str | None = None,
+        user_id: str | None = None,
     ) -> tuple[Iterator[str], str, str, dict[str, Any] | None]:
         return self._manager.stream_chat(
             messages=messages,
@@ -224,6 +227,7 @@ class ModelManagerCognitionBackend:
             routing=routing,
             fallback_targets=fallback_targets,
             session_id=session_id,
+            user_id=user_id,
         )
 
     def download_model(self, model_id: str, provider: str | None = None) -> dict[str, Any]:
@@ -872,8 +876,9 @@ class DeterministicCognitionBackend:
         routing: dict[str, Any] | None = None,
         fallback_targets: list[tuple[str, str]] | None = None,
         session_id: str | None = None,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
-        _ = (temperature, max_tokens, fallback_targets, session_id)
+        _ = (temperature, max_tokens, fallback_targets, session_id, user_id)
         provider_name = str(provider or self.active_provider or "deterministic")
         model_name = str(model or self.active_model or "deterministic-v1")
         prompt = self._last_user_content(messages)
@@ -907,8 +912,9 @@ class DeterministicCognitionBackend:
         routing: dict[str, Any] | None = None,
         fallback_targets: list[tuple[str, str]] | None = None,
         session_id: str | None = None,
+        user_id: str | None = None,
     ) -> tuple[Iterator[str], str, str, dict[str, Any] | None]:
-        _ = (temperature, max_tokens, fallback_targets, session_id)
+        _ = (temperature, max_tokens, fallback_targets, session_id, user_id)
         provider_name = str(provider or self.active_provider or "deterministic")
         model_name = str(model or self.active_model or "deterministic-v1")
         prompt = self._last_user_content(messages)

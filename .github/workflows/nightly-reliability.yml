@@ -271,6 +271,13 @@ jobs:
             --min-grounded-sources "${AMARYLLIS_NIGHTLY_PROVENANCE_GATE_MIN_GROUNDED_SOURCES:-1}" \
             --output "artifacts/nightly-provenance-coverage-gate-report.json"
 
+      - name: Run nightly news mission gate (blocking)
+        run: |
+          python scripts/release/news_mission_gate.py \
+            --min-citation-coverage "${AMARYLLIS_NEWS_GATE_MIN_CITATION_COVERAGE:-0.95}" \
+            --min-sections "${AMARYLLIS_NEWS_GATE_MIN_SECTIONS:-1}" \
+            --output "artifacts/nightly-news-mission-gate-report.json"
+
       - name: Run nightly KV pressure policy gate (blocking)
         run: |
           python scripts/release/kv_pressure_policy_gate.py \
@@ -342,6 +349,7 @@ jobs:
             --adoption-kpi-trend-report "artifacts/nightly-adoption-kpi-trend-gate-report.json" \
             --breaker-gate-report "artifacts/nightly-autonomy-circuit-breaker-gate-report.json" \
             --breaker-soak-report "artifacts/nightly-autonomy-circuit-breaker-soak-gate-report.json" \
+            --news-mission-report "artifacts/nightly-news-mission-gate-report.json" \
             ${MACOS_DESKTOP_PARITY_ARG} \
             --scope "nightly" \
             --output "artifacts/nightly-mission-success-recovery-report.json"
@@ -575,6 +583,14 @@ jobs:
         with:
           name: nightly-provenance-coverage-gate-report
           path: artifacts/nightly-provenance-coverage-gate-report.json
+          if-no-files-found: error
+
+      - name: Upload nightly news mission gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-news-mission-gate-report
+          path: artifacts/nightly-news-mission-gate-report.json
           if-no-files-found: error
 
       - name: Upload nightly KV pressure policy gate report

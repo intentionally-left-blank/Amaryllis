@@ -71,6 +71,11 @@ def _parse_args() -> argparse.Namespace:
         help="Optional adoption KPI trend gate report JSON path.",
     )
     parser.add_argument(
+        "--news-mission-report",
+        default="",
+        help="Optional news mission gate report JSON path.",
+    )
+    parser.add_argument(
         "--scope",
         default="auto",
         choices=("auto", "release", "nightly"),
@@ -192,6 +197,7 @@ def _source_class(source: str) -> str:
         "nightly_reliability": "nightly_reliability",
         "nightly_burn_rate": "nightly_reliability",
         "breaker_soak": "nightly_reliability",
+        "news_mission": "mission_execution",
     }
     return mapping.get(normalized, "other")
 
@@ -220,6 +226,8 @@ def _kpi_class(kpi_key: str) -> str:
         return "nightly_reliability"
     if normalized.startswith("nightly_"):
         return "nightly_reliability"
+    if normalized.startswith("news_"):
+        return "mission_execution"
     return "other"
 
 
@@ -321,6 +329,7 @@ def main() -> int:
         "nightly_burn_rate": _resolve_optional_path(project_root, str(args.nightly_burn_rate_report)),
         "breaker_soak": _resolve_optional_path(project_root, str(args.breaker_soak_report)),
         "breaker_gate": _resolve_optional_path(project_root, str(args.breaker_gate_report)),
+        "news_mission": _resolve_optional_path(project_root, str(args.news_mission_report)),
     }
 
     reports: dict[str, dict[str, Any]] = {}
@@ -909,6 +918,84 @@ def main() -> int:
         if scope == "nightly":
             kpis["nightly_autonomy_breaker_gate_passed"] = bool(gate_passed)
             kpis["nightly_autonomy_breaker_domains_contract_passed"] = bool(domain_contract_ok)
+
+    news_mission = reports.get("news_mission")
+    if isinstance(news_mission, dict):
+        summary = news_mission.get("summary") if isinstance(news_mission.get("summary"), dict) else {}
+        checks_list = news_mission.get("checks") if isinstance(news_mission.get("checks"), list) else []
+        checks_by_name: dict[str, dict[str, Any]] = {}
+        for item in checks_list:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if name:
+                checks_by_name[name] = item
+
+        status = str(summary.get("status") or "").strip().lower()
+        checks_total = max(0.0, _safe_float(summary.get("checks_total")))
+        checks_failed = max(0.0, _safe_float(summary.get("checks_failed")))
+        success_rate = 0.0
+        if checks_total > 0:
+            success_rate = max(0.0, min(100.0, ((checks_total - checks_failed) / checks_total) * 100.0))
+        checks.append(
+            _check(
+                check_id="news_mission.status",
+                source="news_mission",
+                value=1.0 if status == "pass" else 0.0,
+                threshold=1.0,
+                comparator="gte",
+                unit="bool",
+            )
+        )
+
+        citation = checks_by_name.get("digest_citation_coverage")
+        if isinstance(citation, dict):
+            citation_value = _safe_float(citation.get("value"))
+            citation_min = _safe_float(citation.get("min"), default=0.95)
+            checks.append(
+                _check(
+                    check_id="news_mission.citation_coverage_rate",
+                    source="news_mission",
+                    value=citation_value,
+                    threshold=citation_min,
+                    comparator="gte",
+                    unit="ratio",
+                )
+            )
+            kpis["news_citation_coverage_rate"] = round(citation_value, 6)
+
+        sections = checks_by_name.get("digest_section_count")
+        if isinstance(sections, dict):
+            sections_value = _safe_float(sections.get("value"))
+            sections_min = _safe_float(sections.get("min"), default=1.0)
+            checks.append(
+                _check(
+                    check_id="news_mission.section_count",
+                    source="news_mission",
+                    value=sections_value,
+                    threshold=sections_min,
+                    comparator="gte",
+                    unit="count",
+                )
+            )
+            kpis["news_digest_section_count"] = int(max(0.0, sections_value))
+
+        outbound_events = checks_by_name.get("outbound_event_count")
+        if isinstance(outbound_events, dict):
+            outbound_events_value = _safe_float(outbound_events.get("value"))
+            checks.append(
+                _check(
+                    check_id="news_mission.outbound_event_count",
+                    source="news_mission",
+                    value=outbound_events_value,
+                    threshold=0.0,
+                    comparator="gte",
+                    unit="count",
+                )
+            )
+            kpis["news_outbound_event_count"] = int(max(0.0, outbound_events_value))
+
+        kpis["news_mission_success_rate_pct"] = round(success_rate, 4)
 
     passed_checks = sum(1 for item in checks if bool(item.get("passed")))
     failed_checks = len(checks) - passed_checks

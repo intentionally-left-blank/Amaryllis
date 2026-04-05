@@ -88,6 +88,9 @@ class NewsMissionAPITests(unittest.TestCase):
         self.assertIn(("GET", "/news/agents"), endpoints)
         self.assertIn(("POST", "/news/agents/quickstart"), endpoints)
         self.assertIn(("POST", "/news/missions/plan"), endpoints)
+        self.assertIn(("POST", "/news/delivery/policies/upsert"), endpoints)
+        self.assertIn(("GET", "/news/delivery/policies"), endpoints)
+        self.assertIn(("GET", "/news/delivery/events"), endpoints)
 
         planned = self.client.post(
             "/news/missions/plan",
@@ -257,6 +260,207 @@ class NewsMissionAPITests(unittest.TestCase):
         self.assertTrue(str((payload.get("news_agent") or {}).get("news_agent_id") or "").strip())
         self.assertTrue(str((payload.get("automation") or {}).get("id") or "").strip())
         self.assertIn("Готово", str(payload.get("assistant_reply") or ""))
+
+    def test_news_digest_compose_delivers_artifact_to_inbox(self) -> None:
+        services = self.server_module.app.state.services
+        inserted = services.database.upsert_news_items(
+            user_id="user-1",
+            topic="AI digest",
+            items=[
+                {
+                    "source": "web",
+                    "canonical_id": "web-1",
+                    "url": "https://example.com/story",
+                    "title": "AI Story",
+                    "excerpt": "AI story summary",
+                    "published_at": "2026-04-04T00:00:00+00:00",
+                    "ingested_at": "2026-04-04T00:01:00+00:00",
+                    "raw_score": 0.9,
+                    "metadata": {
+                        "merged_sources": ["web", "reddit"],
+                        "merged_count": 2,
+                        "provenance": [
+                            {
+                                "source": "web",
+                                "canonical_id": "web-1",
+                                "canonical_story_key": "https://example.com/story",
+                                "url": "https://example.com/story",
+                                "title": "AI Story",
+                                "published_at": "2026-04-04T00:00:00+00:00",
+                            },
+                            {
+                                "source": "reddit",
+                                "canonical_id": "t3_ai",
+                                "canonical_story_key": "https://example.com/story",
+                                "url": "https://example.com/story",
+                                "title": "AI Story discussion",
+                                "published_at": "2026-04-04T00:05:00+00:00",
+                            },
+                        ],
+                    },
+                }
+            ],
+        )
+        self.assertEqual(inserted, 1)
+
+        composed = self.client.post(
+            "/news/digest/compose",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "topic": "AI digest",
+                "deliver_to_inbox": True,
+            },
+        )
+        self.assertEqual(composed.status_code, 200)
+        payload = composed.json()
+        digest = payload.get("digest", {})
+        self.assertEqual(int((digest.get("metrics") or {}).get("section_count", 0)), 1)
+        self.assertEqual(float((digest.get("metrics") or {}).get("citation_coverage_rate", 0)), 1.0)
+        inbox_item = payload.get("inbox_item", {})
+        self.assertEqual(str(inbox_item.get("category")), "news")
+        self.assertTrue(str(inbox_item.get("id") or "").strip())
+
+        listed = self.client.get(
+            "/inbox",
+            headers=self._auth("user-token"),
+            params={"user_id": "user-1", "category": "news", "limit": 20},
+        )
+        self.assertEqual(listed.status_code, 200)
+        listed_payload = listed.json()
+        ids = {
+            str(item.get("id"))
+            for item in listed_payload.get("items", [])
+            if isinstance(item, dict)
+        }
+        self.assertIn(str(inbox_item.get("id")), ids)
+
+    def test_news_outbound_delivery_policy_and_digest_compose_dry_run(self) -> None:
+        services = self.server_module.app.state.services
+        inserted = services.database.upsert_news_items(
+            user_id="user-1",
+            topic="AI outbound",
+            items=[
+                {
+                    "source": "web",
+                    "canonical_id": "web-outbound-1",
+                    "url": "https://example.com/ai-outbound",
+                    "title": "Outbound Story",
+                    "excerpt": "Outbound summary",
+                    "published_at": "2026-04-04T01:00:00+00:00",
+                    "ingested_at": "2026-04-04T01:01:00+00:00",
+                    "raw_score": 0.88,
+                    "metadata": {
+                        "canonical_story_key": "https://example.com/ai-outbound",
+                        "provenance": [
+                            {
+                                "source": "web",
+                                "canonical_id": "web-outbound-1",
+                                "url": "https://example.com/ai-outbound",
+                                "title": "Outbound Story",
+                                "published_at": "2026-04-04T01:00:00+00:00",
+                            }
+                        ],
+                    },
+                }
+            ],
+        )
+        self.assertEqual(inserted, 1)
+
+        upserted_policy = self.client.post(
+            "/news/delivery/policies/upsert",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "topic": "AI outbound",
+                "channels": [
+                    {
+                        "channel": "webhook",
+                        "enabled": True,
+                        "max_targets": 1,
+                        "targets": [
+                            "https://example.com/hooks/news",
+                            "https://example.com/hooks/news-secondary",
+                        ],
+                    },
+                    {
+                        "channel": "email",
+                        "enabled": True,
+                        "max_targets": 1,
+                        "targets": ["digest@example.com"],
+                    },
+                ],
+            },
+        )
+        self.assertEqual(upserted_policy.status_code, 200)
+        upserted_payload = upserted_policy.json()
+        self.assertEqual(str(upserted_payload.get("topic_scope")), "AI outbound")
+        self.assertEqual(int(upserted_payload.get("count", 0)), 2)
+
+        listed_policy = self.client.get(
+            "/news/delivery/policies",
+            headers=self._auth("user-token"),
+            params={"user_id": "user-1", "topic": "AI outbound", "include_global": False},
+        )
+        self.assertEqual(listed_policy.status_code, 200)
+        listed_policy_payload = listed_policy.json()
+        self.assertEqual(int(listed_policy_payload.get("count", 0)), 2)
+
+        composed = self.client.post(
+            "/news/digest/compose",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "topic": "AI outbound",
+                "deliver_to_inbox": False,
+                "deliver_to_outbound": True,
+                "outbound_dry_run": True,
+            },
+        )
+        self.assertEqual(composed.status_code, 200)
+        payload = composed.json()
+        outbound = payload.get("outbound_delivery", {})
+        summary = outbound.get("summary", {})
+        self.assertEqual(int(summary.get("channels_considered", 0)), 2)
+        self.assertEqual(int(summary.get("attempted_targets", 0)), 2)
+        self.assertEqual(int(summary.get("delivered_targets", 0)), 2)
+        self.assertEqual(int(payload.get("outbound_event_count", 0)), 2)
+
+        events = self.client.get(
+            "/news/delivery/events",
+            headers=self._auth("user-token"),
+            params={"user_id": "user-1", "topic": "AI outbound", "limit": 20},
+        )
+        self.assertEqual(events.status_code, 200)
+        events_payload = events.json()
+        self.assertEqual(int(events_payload.get("count", 0)), 2)
+        statuses = {
+            str(item.get("status"))
+            for item in events_payload.get("items", [])
+            if isinstance(item, dict)
+        }
+        self.assertEqual(statuses, {"delivered_dry_run"})
+
+    def test_news_delivery_policy_cross_tenant_is_blocked(self) -> None:
+        denied_upsert = self.client.post(
+            "/news/delivery/policies/upsert",
+            headers=self._auth("user2-token"),
+            json={
+                "user_id": "user-1",
+                "topic": "AI",
+                "channels": [{"channel": "webhook", "targets": ["https://example.com/hook"]}],
+            },
+        )
+        self.assertEqual(denied_upsert.status_code, 403)
+        self.assertEqual(str(denied_upsert.json().get("error", {}).get("type")), "permission_denied")
+
+        denied_list = self.client.get(
+            "/news/delivery/policies",
+            headers=self._auth("user2-token"),
+            params={"user_id": "user-1"},
+        )
+        self.assertEqual(denied_list.status_code, 403)
+        self.assertEqual(str(denied_list.json().get("error", {}).get("type")), "permission_denied")
 
     def test_news_plan_cross_tenant_is_blocked(self) -> None:
         news_agent_id = self._create_news_agent(token="user-token", user_id="user-1", name="Owner News Agent")

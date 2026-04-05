@@ -1,12 +1,13 @@
 {
   "contract": "news_mission_v1",
-  "version": "0.2.0-draft",
-  "description": "Contract for first-class news agents (create/list) and autonomous news missions (plan/create/ingest/list) with configurable internet scope.",
+  "version": "0.5.0-draft",
+  "description": "Contract for first-class news agents (create/list), autonomous news missions (plan/create/ingest/list), and outbound digest delivery policy controls.",
   "entities": {
     "source_item": {
       "required": [
         "source",
         "canonical_id",
+        "canonical_story_key",
         "url",
         "title",
         "published_at"
@@ -17,6 +18,7 @@
           "enum": ["reddit", "x", "web"]
         },
         "canonical_id": {"type": "string"},
+        "canonical_story_key": {"type": "string"},
         "url": {"type": "string"},
         "title": {"type": "string"},
         "excerpt": {"type": "string"},
@@ -24,7 +26,17 @@
         "published_at": {"type": "string", "format": "date-time"},
         "ingested_at": {"type": "string", "format": "date-time"},
         "raw_score": {"type": "number"},
-        "metadata": {"type": "object", "additionalProperties": true}
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "canonical_story_key": {"type": "string"},
+            "merged_sources": {"type": "array", "items": {"type": "string"}},
+            "merged_count": {"type": "integer"},
+            "provenance": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+            "dedup_policy": {"type": "object", "additionalProperties": true}
+          }
+        }
       }
     },
     "news_agent": {
@@ -47,6 +59,16 @@
         "languages": {"type": "array", "items": {"type": "string"}},
         "regions": {"type": "array", "items": {"type": "string"}},
         "max_depth": {"type": "integer", "minimum": 1, "maximum": 5}
+      }
+    },
+    "outbound_channel_policy": {
+      "required": ["channel"],
+      "properties": {
+        "channel": {"type": "string", "enum": ["webhook", "email", "telegram"]},
+        "enabled": {"type": "boolean"},
+        "max_targets": {"type": "integer", "minimum": 1, "maximum": 20},
+        "targets": {"type": "array", "items": {"type": "string"}},
+        "options": {"type": "object", "additionalProperties": true}
       }
     }
   },
@@ -213,6 +235,97 @@
         "properties": {
           "report": {"type": "object", "additionalProperties": true},
           "persisted_count": {"type": "integer"},
+          "action_receipt": {"type": "object", "additionalProperties": true},
+          "request_id": {"type": "string"}
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/news/delivery/policies/upsert",
+      "request": {
+        "properties": {
+          "user_id": {"type": "string"},
+          "topic": {"type": "string"},
+          "channels": {"type": "array", "items": {"$ref": "#/entities/outbound_channel_policy"}}
+        }
+      },
+      "response": {
+        "required": ["topic_scope", "items", "count", "request_id"],
+        "properties": {
+          "topic_scope": {"type": "string"},
+          "persisted_count": {"type": "integer"},
+          "items": {"type": "array", "items": {"$ref": "#/entities/outbound_channel_policy"}},
+          "count": {"type": "integer"},
+          "action_receipt": {"type": "object", "additionalProperties": true},
+          "request_id": {"type": "string"}
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/news/delivery/policies",
+      "request": {
+        "properties": {
+          "user_id": {"type": "string"},
+          "topic": {"type": "string"},
+          "include_global": {"type": "boolean"}
+        }
+      },
+      "response": {
+        "required": ["items", "count", "request_id"],
+        "properties": {
+          "items": {"type": "array", "items": {"$ref": "#/entities/outbound_channel_policy"}},
+          "count": {"type": "integer"},
+          "request_id": {"type": "string"}
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/news/delivery/events",
+      "request": {
+        "properties": {
+          "user_id": {"type": "string"},
+          "topic": {"type": "string"},
+          "channel": {"type": "string", "enum": ["webhook", "email", "telegram"]},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 1000}
+        }
+      },
+      "response": {
+        "required": ["items", "count", "request_id"],
+        "properties": {
+          "items": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+          "count": {"type": "integer"},
+          "request_id": {"type": "string"}
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/news/digest/compose",
+      "request": {
+        "required": ["topic"],
+        "properties": {
+          "user_id": {"type": "string"},
+          "topic": {"type": "string"},
+          "source": {"type": "string", "enum": ["reddit", "x", "web"]},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 1000},
+          "deliver_to_inbox": {"type": "boolean"},
+          "inbox_title": {"type": "string"},
+          "deliver_to_outbound": {"type": "boolean"},
+          "outbound_channels": {"type": "array", "items": {"type": "string", "enum": ["webhook", "email", "telegram"]}},
+          "outbound_dry_run": {"type": "boolean"}
+        }
+      },
+      "response": {
+        "required": ["digest", "item_count", "request_id"],
+        "properties": {
+          "digest": {"type": "object", "additionalProperties": true},
+          "item_count": {"type": "integer"},
+          "inbox_item": {"type": "object", "additionalProperties": true},
+          "outbound_delivery": {"type": "object", "additionalProperties": true},
+          "outbound_event_count": {"type": "integer"},
           "action_receipt": {"type": "object", "additionalProperties": true},
           "request_id": {"type": "string"}
         }

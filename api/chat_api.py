@@ -1198,6 +1198,7 @@ def _chat_once(
         max_tokens=payload.max_tokens,
         routing=routing,
         session_id=payload.session_id,
+        user_id=payload.user_id,
     )
 
 
@@ -1385,6 +1386,7 @@ def chat_completions(payload: ChatCompletionsRequest, request: Request):
                 max_tokens=payload.max_tokens,
                 routing=route_payload,
                 session_id=payload.session_id,
+                user_id=payload.user_id,
             )
         except Exception as exc:
             raise ProviderError(str(exc)) from exc

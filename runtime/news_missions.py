@@ -6,6 +6,7 @@ from typing import Any
 
 from automation.schedule import compute_next_run_at, normalize_schedule, validate_timezone
 from news.pipeline import build_query_bundle
+from news.outbound import SUPPORTED_NEWS_OUTBOUND_CHANNELS
 from sources.base import SUPPORTED_NEWS_SOURCES, normalize_source_name
 
 
@@ -191,6 +192,7 @@ def build_news_mission_plan(
         "contract_version": "0.1.0-draft",
         "topic": normalized_topic,
         "sources": list(normalized_sources),
+        "supported_outbound_channels": list(SUPPORTED_NEWS_OUTBOUND_CHANNELS),
         "window_hours": normalized_window_hours,
         "max_items_per_source": normalized_max_items,
         "internet_scope": deepcopy(normalized_scope),
@@ -217,6 +219,11 @@ def build_news_mission_plan(
             "internet_scope": deepcopy(normalized_scope),
             "query_bundle": list(query_bundle),
             "source_overrides": deepcopy(normalized_source_overrides),
+            "delivery": {
+                "deliver_to_inbox": True,
+                "deliver_to_outbound": False,
+                "supported_outbound_channels": list(SUPPORTED_NEWS_OUTBOUND_CHANNELS),
+            },
         },
     }
     return {

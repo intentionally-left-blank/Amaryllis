@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
 from typing import Any, Iterator
+from urllib.parse import urlparse, urlunparse
 from uuid import uuid4
 
 from storage.migrations import apply_migrations
@@ -1429,6 +1430,207 @@ class Database:
             self._commit_locked()
         return int(cursor.rowcount or 0) > 0
 
+    @staticmethod
+    def _canonical_news_story_key(url: str) -> str:
+        parsed = urlparse(str(url or "").strip())
+        if not parsed.scheme or not parsed.netloc:
+            return str(url or "").strip()
+        clean_query = "&".join(
+            part
+            for part in str(parsed.query or "").split("&")
+            if part and not part.lower().startswith(("utm_", "ref=", "fbclid=", "gclid="))
+        )
+        return urlunparse(
+            (
+                parsed.scheme.lower(),
+                parsed.netloc.lower(),
+                parsed.path or "/",
+                "",
+                clean_query,
+                "",
+            )
+        )
+
+    @staticmethod
+    def _safe_news_score(value: Any) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    @classmethod
+    def _resolve_news_story_key(cls, *, item: dict[str, Any], metadata: dict[str, Any]) -> str:
+        direct = str(item.get("canonical_story_key") or "").strip()
+        if direct:
+            return direct
+        for key in ("canonical_story_key", "story_key", "dedup_key"):
+            candidate = str(metadata.get(key) or "").strip()
+            if candidate:
+                return candidate
+        return cls._canonical_news_story_key(str(item.get("url") or ""))
+
+    @staticmethod
+    def _normalize_news_metadata_payload(value: Any) -> dict[str, Any]:
+        return dict(value) if isinstance(value, dict) else {}
+
+    @classmethod
+    def _news_provenance_entry_from_item(
+        cls,
+        *,
+        item: dict[str, Any],
+        metadata: dict[str, Any],
+        story_key: str,
+    ) -> dict[str, Any]:
+        return {
+            "source": str(item.get("source") or "").strip().lower(),
+            "canonical_id": str(item.get("canonical_id") or "").strip(),
+            "canonical_story_key": story_key,
+            "url": str(item.get("url") or "").strip(),
+            "title": str(item.get("title") or "").strip(),
+            "published_at": str(item.get("published_at") or "").strip(),
+            "ingested_at": str(item.get("ingested_at") or "").strip(),
+            "raw_score": item.get("raw_score"),
+            "author": item.get("author"),
+            "metadata": {
+                key: payload
+                for key, payload in metadata.items()
+                if key not in {"provenance", "merged_sources", "merged_count", "canonical_story_key", "dedup_policy"}
+            },
+        }
+
+    @classmethod
+    def _news_provenance_entry_from_row(
+        cls,
+        *,
+        row: dict[str, Any],
+        metadata: dict[str, Any],
+        story_key: str,
+    ) -> dict[str, Any]:
+        return {
+            "source": str(row.get("source") or "").strip().lower(),
+            "canonical_id": str(row.get("canonical_id") or "").strip(),
+            "canonical_story_key": story_key,
+            "url": str(row.get("url") or "").strip(),
+            "title": str(row.get("title") or "").strip(),
+            "published_at": str(row.get("published_at") or "").strip(),
+            "ingested_at": str(row.get("ingested_at") or "").strip(),
+            "raw_score": row.get("raw_score"),
+            "author": row.get("author"),
+            "metadata": {
+                key: payload
+                for key, payload in metadata.items()
+                if key not in {"provenance", "merged_sources", "merged_count", "canonical_story_key", "dedup_policy"}
+            },
+        }
+
+    @staticmethod
+    def _news_provenance_signature(entry: dict[str, Any]) -> tuple[str, str, str]:
+        return (
+            str(entry.get("source") or "").strip().lower(),
+            str(entry.get("canonical_id") or "").strip(),
+            str(entry.get("url") or "").strip(),
+        )
+
+    @classmethod
+    def _merge_news_metadata(
+        cls,
+        *,
+        existing_row: dict[str, Any],
+        existing_metadata: dict[str, Any],
+        incoming_item: dict[str, Any],
+        incoming_metadata: dict[str, Any],
+        story_key: str,
+    ) -> dict[str, Any]:
+        merged: dict[str, Any] = dict(existing_metadata)
+        for key, payload in incoming_metadata.items():
+            if key in {"provenance", "merged_sources", "merged_count", "canonical_story_key", "dedup_policy"}:
+                continue
+            existing_value = merged.get(key)
+            if existing_value in (None, "", [], {}) and payload not in (None, "", [], {}):
+                merged[key] = payload
+
+        provenance: list[dict[str, Any]] = []
+        existing_provenance = existing_metadata.get("provenance")
+        if isinstance(existing_provenance, list):
+            provenance.extend(item for item in existing_provenance if isinstance(item, dict))
+        if not provenance:
+            provenance.append(
+                cls._news_provenance_entry_from_row(
+                    row=existing_row,
+                    metadata=existing_metadata,
+                    story_key=story_key,
+                )
+            )
+
+        incoming_provenance_raw = incoming_metadata.get("provenance")
+        if isinstance(incoming_provenance_raw, list):
+            incoming_provenance = [item for item in incoming_provenance_raw if isinstance(item, dict)]
+        else:
+            incoming_provenance = [
+                cls._news_provenance_entry_from_item(
+                    item=incoming_item,
+                    metadata=incoming_metadata,
+                    story_key=story_key,
+                )
+            ]
+
+        known_signatures = {cls._news_provenance_signature(item) for item in provenance}
+        for item in incoming_provenance:
+            entry = dict(item)
+            if not str(entry.get("canonical_story_key") or "").strip():
+                entry["canonical_story_key"] = story_key
+            signature = cls._news_provenance_signature(entry)
+            if signature in known_signatures:
+                continue
+            known_signatures.add(signature)
+            provenance.append(entry)
+
+        merged_sources: list[str] = []
+        existing_sources = existing_metadata.get("merged_sources")
+        if isinstance(existing_sources, list):
+            for item in existing_sources:
+                source = str(item or "").strip().lower()
+                if source and source not in merged_sources:
+                    merged_sources.append(source)
+        for item in provenance:
+            source = str(item.get("source") or "").strip().lower()
+            if source and source not in merged_sources:
+                merged_sources.append(source)
+        existing_source = str(existing_row.get("source") or "").strip().lower()
+        if existing_source and existing_source not in merged_sources:
+            merged_sources.append(existing_source)
+        incoming_source = str(incoming_item.get("source") or "").strip().lower()
+        if incoming_source and incoming_source not in merged_sources:
+            merged_sources.append(incoming_source)
+
+        merged["provenance"] = provenance
+        merged["merged_sources"] = merged_sources
+        merged["merged_count"] = len(provenance)
+        merged["canonical_story_key"] = story_key
+        merged["dedup_policy"] = {
+            "strategy": "canonical_url_key_v1",
+            "key": story_key,
+        }
+        return merged
+
+    @classmethod
+    def _pick_preferred_news_url(cls, *, existing_url: str, incoming_url: str, story_key: str) -> str:
+        normalized_existing = str(existing_url or "").strip()
+        normalized_incoming = str(incoming_url or "").strip()
+        if not normalized_existing:
+            return normalized_incoming
+        if not normalized_incoming:
+            return normalized_existing
+        existing_key = cls._canonical_news_story_key(normalized_existing)
+        incoming_key = cls._canonical_news_story_key(normalized_incoming)
+        if existing_key == incoming_key == story_key:
+            return normalized_incoming if len(normalized_incoming) < len(normalized_existing) else normalized_existing
+        if incoming_key == story_key and existing_key != story_key:
+            return normalized_incoming
+        return normalized_existing
+
     def upsert_news_items(
         self,
         *,
@@ -1453,7 +1655,119 @@ class Database:
                 ingested_at = str(item.get("ingested_at") or "").strip() or self._utc_now()
                 if not source or not canonical_id or not url or not title or not published_at:
                     continue
-                metadata_payload = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+                metadata_payload = self._normalize_news_metadata_payload(item.get("metadata"))
+                story_key = self._resolve_news_story_key(item=item, metadata=metadata_payload)
+                if not story_key:
+                    continue
+                incoming_score = self._safe_news_score(item.get("raw_score"))
+
+                existing_story_row = self._conn.execute(
+                    """
+                    SELECT *
+                    FROM news_items
+                    WHERE user_id = ? AND topic = ? AND canonical_story_key = ?
+                    ORDER BY id ASC
+                    LIMIT 1
+                    """,
+                    (normalized_user, normalized_topic, story_key),
+                ).fetchone()
+
+                if existing_story_row is not None:
+                    existing = dict(existing_story_row)
+                    try:
+                        existing_metadata_payload = json.loads(str(existing.get("metadata_json") or "{}"))
+                        if not isinstance(existing_metadata_payload, dict):
+                            existing_metadata_payload = {}
+                    except Exception:
+                        existing_metadata_payload = {}
+
+                    merged_metadata = self._merge_news_metadata(
+                        existing_row=existing,
+                        existing_metadata=existing_metadata_payload,
+                        incoming_item={**dict(item), "canonical_story_key": story_key},
+                        incoming_metadata=metadata_payload,
+                        story_key=story_key,
+                    )
+
+                    merged_url = self._pick_preferred_news_url(
+                        existing_url=str(existing.get("url") or ""),
+                        incoming_url=url,
+                        story_key=story_key,
+                    )
+                    merged_title = str(existing.get("title") or "").strip() or title
+                    incoming_excerpt = str(item.get("excerpt") or "").strip()
+                    incoming_author = str(item.get("author") or "").strip()
+                    merged_excerpt = str(existing.get("excerpt") or "").strip() or incoming_excerpt
+                    merged_author = str(existing.get("author") or "").strip() or incoming_author
+
+                    existing_score = self._safe_news_score(existing.get("raw_score"))
+                    if existing_score is None:
+                        merged_score = incoming_score
+                    elif incoming_score is None:
+                        merged_score = existing_score
+                    else:
+                        merged_score = max(existing_score, incoming_score)
+
+                    existing_published_at = str(existing.get("published_at") or "").strip()
+                    if existing_published_at and published_at:
+                        merged_published_at = min(existing_published_at, published_at)
+                    else:
+                        merged_published_at = existing_published_at or published_at
+                    merged_ingested_at = max(str(existing.get("ingested_at") or "").strip(), ingested_at)
+
+                    cursor = self._conn.execute(
+                        """
+                        UPDATE news_items
+                        SET
+                            url = ?,
+                            title = ?,
+                            excerpt = ?,
+                            author = ?,
+                            published_at = ?,
+                            ingested_at = ?,
+                            raw_score = ?,
+                            metadata_json = ?,
+                            canonical_story_key = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            merged_url,
+                            merged_title,
+                            merged_excerpt or None,
+                            merged_author or None,
+                            merged_published_at,
+                            merged_ingested_at,
+                            merged_score,
+                            json.dumps(merged_metadata, ensure_ascii=False),
+                            story_key,
+                            int(existing.get("id")),
+                        ),
+                    )
+                    if int(cursor.rowcount or 0) > 0:
+                        upserted += 1
+                    continue
+
+                enriched_metadata = dict(metadata_payload)
+                enriched_metadata["canonical_story_key"] = story_key
+                enriched_metadata["dedup_policy"] = {
+                    "strategy": "canonical_url_key_v1",
+                    "key": story_key,
+                }
+                if not isinstance(enriched_metadata.get("provenance"), list):
+                    enriched_metadata["provenance"] = [
+                        self._news_provenance_entry_from_item(
+                            item={**dict(item), "canonical_story_key": story_key},
+                            metadata=metadata_payload,
+                            story_key=story_key,
+                        )
+                    ]
+                if not isinstance(enriched_metadata.get("merged_sources"), list):
+                    enriched_metadata["merged_sources"] = [source]
+                enriched_metadata["merged_count"] = max(
+                    1,
+                    int(len([entry for entry in enriched_metadata.get("provenance", []) if isinstance(entry, dict)])),
+                )
+
                 cursor = self._conn.execute(
                     """
                     INSERT INTO news_items(
@@ -1461,6 +1775,7 @@ class Database:
                         topic,
                         source,
                         canonical_id,
+                        canonical_story_key,
                         url,
                         title,
                         excerpt,
@@ -1470,8 +1785,9 @@ class Database:
                         raw_score,
                         metadata_json
                     )
-                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(user_id, topic, source, canonical_id, published_at) DO UPDATE SET
+                        canonical_story_key=excluded.canonical_story_key,
                         url=excluded.url,
                         title=excluded.title,
                         excerpt=excluded.excerpt,
@@ -1485,14 +1801,15 @@ class Database:
                         normalized_topic,
                         source,
                         canonical_id,
+                        story_key,
                         url,
                         title,
                         str(item.get("excerpt") or "").strip() or None,
                         str(item.get("author") or "").strip() or None,
                         published_at,
                         ingested_at,
-                        float(item.get("raw_score")) if item.get("raw_score") is not None else None,
-                        json.dumps(metadata_payload, ensure_ascii=False),
+                        incoming_score,
+                        json.dumps(enriched_metadata, ensure_ascii=False),
                     ),
                 )
                 if int(cursor.rowcount or 0) > 0:
@@ -1524,6 +1841,200 @@ class Database:
         with self._lock:
             rows = self._conn.execute(query, tuple(params)).fetchall()
         return [self._decode_news_item_row(dict(row)) for row in rows]
+
+    @staticmethod
+    def _normalize_news_delivery_topic(topic: str | None) -> str:
+        normalized = str(topic or "").strip()
+        return normalized if normalized else "*"
+
+    def upsert_news_delivery_policies(
+        self,
+        *,
+        user_id: str,
+        topic: str | None,
+        channels: list[dict[str, Any]],
+    ) -> int:
+        normalized_user = str(user_id or "").strip()
+        if not normalized_user:
+            return 0
+        normalized_topic = self._normalize_news_delivery_topic(topic)
+        if not channels:
+            return 0
+        now = self._utc_now()
+        persisted = 0
+        with self._lock:
+            for entry in channels:
+                if not isinstance(entry, dict):
+                    continue
+                channel = str(entry.get("channel") or "").strip().lower()
+                if not channel:
+                    continue
+                max_targets_raw = entry.get("max_targets")
+                try:
+                    max_targets = int(max_targets_raw)
+                except Exception:
+                    max_targets = 3
+                max_targets = max(1, min(max_targets, 20))
+                targets: list[str] = []
+                raw_targets = entry.get("targets")
+                if isinstance(raw_targets, list):
+                    for item in raw_targets:
+                        target = str(item or "").strip()
+                        if not target or target in targets:
+                            continue
+                        targets.append(target)
+                        if len(targets) >= 20:
+                            break
+                options_raw = entry.get("options")
+                options = options_raw if isinstance(options_raw, dict) else {}
+                self._conn.execute(
+                    """
+                    INSERT INTO news_delivery_policies(
+                        user_id,
+                        topic,
+                        channel,
+                        is_enabled,
+                        max_targets,
+                        targets_json,
+                        options_json,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id, topic, channel) DO UPDATE SET
+                        is_enabled=excluded.is_enabled,
+                        max_targets=excluded.max_targets,
+                        targets_json=excluded.targets_json,
+                        options_json=excluded.options_json,
+                        updated_at=excluded.updated_at
+                    """,
+                    (
+                        normalized_user,
+                        normalized_topic,
+                        channel,
+                        1 if bool(entry.get("enabled", True)) else 0,
+                        max_targets,
+                        json.dumps(targets, ensure_ascii=False),
+                        json.dumps(options, ensure_ascii=False),
+                        now,
+                        now,
+                    ),
+                )
+                persisted += 1
+            self._commit_locked()
+        return persisted
+
+    def list_news_delivery_policies(
+        self,
+        *,
+        user_id: str,
+        topic: str | None = None,
+        include_global: bool = True,
+    ) -> list[dict[str, Any]]:
+        normalized_user = str(user_id or "").strip()
+        if not normalized_user:
+            return []
+        normalized_topic = str(topic or "").strip()
+        query = "SELECT * FROM news_delivery_policies WHERE user_id = ?"
+        params: list[Any] = [normalized_user]
+        if normalized_topic:
+            if include_global:
+                query += " AND topic IN (?, '*')"
+                params.append(normalized_topic)
+                order_clause = " ORDER BY CASE WHEN topic = ? THEN 0 ELSE 1 END, channel ASC, updated_at DESC"
+                params.append(normalized_topic)
+            else:
+                query += " AND topic = ?"
+                params.append(normalized_topic)
+                order_clause = " ORDER BY channel ASC, updated_at DESC"
+        else:
+            order_clause = " ORDER BY topic ASC, channel ASC, updated_at DESC"
+        query += order_clause
+        with self._lock:
+            rows = self._conn.execute(query, tuple(params)).fetchall()
+        return [self._decode_news_delivery_policy_row(dict(row)) for row in rows]
+
+    def add_news_delivery_events(
+        self,
+        *,
+        user_id: str,
+        topic: str,
+        events: list[dict[str, Any]],
+    ) -> int:
+        normalized_user = str(user_id or "").strip()
+        normalized_topic = str(topic or "").strip()
+        if not normalized_user or not normalized_topic or not events:
+            return 0
+        delivered_at = self._utc_now()
+        inserted = 0
+        with self._lock:
+            for event in events:
+                if not isinstance(event, dict):
+                    continue
+                channel = str(event.get("channel") or "").strip().lower()
+                target = str(event.get("target") or "").strip()
+                status = str(event.get("status") or "").strip().lower() or "unknown"
+                if not channel or not target:
+                    continue
+                detail = str(event.get("detail") or "").strip() or None
+                digest_hash = str(event.get("digest_hash") or "").strip() or None
+                metadata_raw = event.get("metadata")
+                metadata = metadata_raw if isinstance(metadata_raw, dict) else {}
+                self._conn.execute(
+                    """
+                    INSERT INTO news_delivery_events(
+                        user_id,
+                        topic,
+                        channel,
+                        target,
+                        status,
+                        detail,
+                        digest_hash,
+                        metadata_json,
+                        delivered_at
+                    )
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        normalized_user,
+                        normalized_topic,
+                        channel,
+                        target,
+                        status,
+                        detail,
+                        digest_hash,
+                        json.dumps(metadata, ensure_ascii=False),
+                        delivered_at,
+                    ),
+                )
+                inserted += 1
+            self._commit_locked()
+        return inserted
+
+    def list_news_delivery_events(
+        self,
+        *,
+        user_id: str,
+        topic: str | None = None,
+        channel: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        normalized_user = str(user_id or "").strip()
+        if not normalized_user or limit <= 0:
+            return []
+        query = "SELECT * FROM news_delivery_events WHERE user_id = ?"
+        params: list[Any] = [normalized_user]
+        if topic not in (None, ""):
+            query += " AND topic = ?"
+            params.append(str(topic).strip())
+        if channel not in (None, ""):
+            query += " AND channel = ?"
+            params.append(str(channel).strip().lower())
+        query += " ORDER BY delivered_at DESC LIMIT ?"
+        params.append(max(1, int(limit)))
+        with self._lock:
+            rows = self._conn.execute(query, tuple(params)).fetchall()
+        return [self._decode_news_delivery_event_row(dict(row)) for row in rows]
 
     def upsert_secret_inventory_items(self, items: list[dict[str, Any]]) -> None:
         if not items:
@@ -3593,6 +4104,10 @@ class Database:
         row["source"] = str(row.get("source") or "").strip().lower()
         row["canonical_id"] = str(row.get("canonical_id") or "").strip()
         row["url"] = str(row.get("url") or "").strip()
+        canonical_story_key = str(row.get("canonical_story_key") or "").strip()
+        if not canonical_story_key:
+            canonical_story_key = str(row.get("metadata", {}).get("canonical_story_key") or "").strip()
+        row["canonical_story_key"] = canonical_story_key or None
         row["title"] = str(row.get("title") or "").strip()
         for key in ("excerpt", "author", "published_at", "ingested_at"):
             value = row.get(key)
@@ -3604,6 +4119,45 @@ class Database:
                 row["raw_score"] = None
         else:
             row["raw_score"] = None
+        return row
+
+    @staticmethod
+    def _decode_news_delivery_policy_row(row: dict[str, Any]) -> dict[str, Any]:
+        row["topic"] = str(row.get("topic") or "*").strip() or "*"
+        row["channel"] = str(row.get("channel") or "").strip().lower()
+        row["is_enabled"] = bool(int(row.get("is_enabled", 0)))
+        try:
+            row["max_targets"] = max(1, int(row.get("max_targets", 3)))
+        except Exception:
+            row["max_targets"] = 3
+        targets_json = row.pop("targets_json", "[]")
+        options_json = row.pop("options_json", "{}")
+        try:
+            parsed_targets = json.loads(targets_json or "[]")
+            row["targets"] = [str(item).strip() for item in parsed_targets if str(item).strip()] if isinstance(parsed_targets, list) else []
+        except Exception:
+            row["targets"] = []
+        try:
+            parsed_options = json.loads(options_json or "{}")
+            row["options"] = parsed_options if isinstance(parsed_options, dict) else {}
+        except Exception:
+            row["options"] = {}
+        return row
+
+    @staticmethod
+    def _decode_news_delivery_event_row(row: dict[str, Any]) -> dict[str, Any]:
+        row["channel"] = str(row.get("channel") or "").strip().lower()
+        row["target"] = str(row.get("target") or "").strip()
+        row["status"] = str(row.get("status") or "").strip().lower() or "unknown"
+        for key in ("detail", "digest_hash"):
+            value = row.get(key)
+            row[key] = str(value) if value not in (None, "") else None
+        metadata_json = row.pop("metadata_json", "{}")
+        try:
+            parsed = json.loads(metadata_json or "{}")
+            row["metadata"] = parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            row["metadata"] = {}
         return row
 
     @staticmethod

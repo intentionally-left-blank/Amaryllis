@@ -38,6 +38,7 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
             journey = base / "journey.json"
             adoption_trend = base / "adoption-trend.json"
             breaker_gate = base / "breaker-gate.json"
+            news_mission = base / "news-mission.json"
             output = base / "report.json"
 
             self._write_json(
@@ -177,6 +178,22 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
                     ],
                 },
             )
+            self._write_json(
+                news_mission,
+                {
+                    "suite": "news_mission_gate_v1",
+                    "summary": {
+                        "status": "pass",
+                        "checks_total": 20,
+                        "checks_failed": 0,
+                    },
+                    "checks": [
+                        {"name": "digest_citation_coverage", "value": 1.0, "min": 0.95},
+                        {"name": "digest_section_count", "value": 2, "min": 1},
+                        {"name": "outbound_event_count", "value": 2, "expected": 2},
+                    ],
+                },
+            )
 
             proc = self._run(
                 "--mission-queue-report",
@@ -195,6 +212,8 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
                 str(adoption_trend),
                 "--breaker-gate-report",
                 str(breaker_gate),
+                "--news-mission-report",
+                str(news_mission),
                 "--scope",
                 "release",
                 "--output",
@@ -226,6 +245,8 @@ class MissionSuccessRecoveryReportPackTests(unittest.TestCase):
             self.assertEqual(str(class_breakdown.get("adoption_growth", {}).get("status")), "pass")
             self.assertIn("autonomy_breaker_gate_passed", payload.get("kpis", {}))
             self.assertIn("autonomy_breaker_domains_contract_passed", payload.get("kpis", {}))
+            self.assertEqual(float(payload.get("kpis", {}).get("news_citation_coverage_rate", 0.0)), 1.0)
+            self.assertEqual(float(payload.get("kpis", {}).get("news_mission_success_rate_pct", 0.0)), 100.0)
             self.assertIn("distribution_score_pct", class_breakdown.get("distribution", {}).get("kpis", {}))
             self.assertIn(
                 "desktop_staging_error_rate_pct",

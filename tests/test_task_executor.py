@@ -25,12 +25,14 @@ class _FakeModelManager:
         messages: list[dict[str, Any]],
         model: str | None,
         session_id: str | None,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         self.calls.append(
             {
                 "messages": list(messages),
                 "model": model,
                 "session_id": session_id,
+                "user_id": user_id,
             }
         )
         if self._responses:

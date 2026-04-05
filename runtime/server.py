@@ -534,7 +534,11 @@ def create_services() -> ServiceContainer:
     flow_session_manager = UnifiedSessionManager(telemetry_emitter=telemetry.emit)
     stt_adapter = create_stt_adapter_from_env()
 
-    raw_model_manager = ModelManager(config=config, database=database)
+    raw_model_manager = ModelManager(
+        config=config,
+        database=database,
+        entitlement_resolver=entitlement_resolver,
+    )
     backend_mode = str(os.getenv("AMARYLLIS_COGNITION_BACKEND", "model_manager")).strip().lower()
     if backend_mode in {"deterministic", "synthetic"}:
         model_manager = ensure_cognition_backend_contract(DeterministicCognitionBackend())

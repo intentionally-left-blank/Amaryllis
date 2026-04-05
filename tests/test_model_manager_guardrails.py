@@ -52,6 +52,16 @@ class _FakeCloudProvider:
         }
 
 
+class _FakeEntitlementResolver:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self.payload = dict(payload)
+        self.calls: list[dict[str, Any]] = []
+
+    def resolve_provider(self, *, user_id: str, provider: str) -> dict[str, Any]:
+        self.calls.append({"user_id": user_id, "provider": provider})
+        return dict(self.payload)
+
+
 class ModelManagerGuardrailsTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="amaryllis-tests-model-guardrails-")
@@ -119,6 +129,61 @@ class ModelManagerGuardrailsTests(unittest.TestCase):
 
         self.assertIn("budget limit", str(ctx.exception).lower())
         self.assertEqual(fake.calls, 1)
+
+    def test_cloud_entitlement_denied_blocks_provider_call(self) -> None:
+        resolver = _FakeEntitlementResolver(
+            {
+                "provider": "openai",
+                "available": False,
+                "feature_flags": {"chat": False},
+            }
+        )
+        manager = ModelManager(config=self.config, database=self.database, entitlement_resolver=resolver)
+        fake = _FakeCloudProvider()
+        manager.providers = {"openai": fake}
+        manager.active_provider = "openai"
+        manager.active_model = "fake-model"
+
+        with self.assertRaises(RuntimeError) as ctx:
+            manager.chat(
+                messages=[{"role": "user", "content": "hello"}],
+                provider="openai",
+                model="fake-model",
+                max_tokens=16,
+                user_id="user-1",
+            )
+
+        self.assertIn("entitlement", str(ctx.exception).lower())
+        self.assertEqual(fake.calls, 0)
+        self.assertEqual(len(resolver.calls), 1)
+        self.assertEqual(resolver.calls[0]["provider"], "openai")
+        self.assertEqual(resolver.calls[0]["user_id"], "user-1")
+
+    def test_cloud_entitlement_allows_provider_call_when_available(self) -> None:
+        resolver = _FakeEntitlementResolver(
+            {
+                "provider": "openai",
+                "available": True,
+                "feature_flags": {"chat": True},
+            }
+        )
+        manager = ModelManager(config=self.config, database=self.database, entitlement_resolver=resolver)
+        fake = _FakeCloudProvider()
+        manager.providers = {"openai": fake}
+        manager.active_provider = "openai"
+        manager.active_model = "fake-model"
+
+        response = manager.chat(
+            messages=[{"role": "user", "content": "hello"}],
+            provider="openai",
+            model="fake-model",
+            max_tokens=16,
+            user_id="user-1",
+        )
+
+        self.assertEqual(fake.calls, 1)
+        self.assertEqual(str(response.get("provider")), "openai")
+        self.assertEqual(len(resolver.calls), 1)
 
 
 if __name__ == "__main__":

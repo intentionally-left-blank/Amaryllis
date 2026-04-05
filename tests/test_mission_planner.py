@@ -94,7 +94,7 @@ class MissionPlannerTests(unittest.TestCase):
         template_ids = {str(item.get("id")) for item in templates}
         self.assertEqual(
             template_ids,
-            {"code_health", "security_audit", "release_guard", "runtime_watchdog"},
+            {"code_health", "security_audit", "release_guard", "runtime_watchdog", "ai_news_daily"},
         )
 
     def test_apply_template_uses_defaults_when_message_missing(self) -> None:
@@ -126,6 +126,28 @@ class MissionPlannerTests(unittest.TestCase):
         self.assertIsInstance(template, dict)
         assert isinstance(template, dict)
         self.assertEqual(str(template.get("id")), "release_guard")
+
+    def test_apply_ai_news_daily_template(self) -> None:
+        resolved = apply_mission_template(
+            template_id="ai_news_daily",
+            message=None,
+            cadence_profile=None,
+            start_immediately=None,
+            schedule_type=None,
+            schedule=None,
+            interval_sec=None,
+            max_attempts=None,
+            budget=None,
+        )
+        self.assertEqual(str(resolved.get("cadence_profile")), "daily")
+        self.assertEqual(str(resolved.get("schedule_type")), "weekly")
+        schedule = resolved.get("schedule")
+        self.assertIsInstance(schedule, dict)
+        assert isinstance(schedule, dict)
+        self.assertEqual(schedule.get("byday"), ["MO", "TU", "WE", "TH", "FR", "SA", "SU"])
+        message = str(resolved.get("message") or "").lower()
+        self.assertIn("ai news mission", message)
+        self.assertIn("confidence markers", message)
 
     def test_apply_template_rejects_unknown_template(self) -> None:
         with self.assertRaisesRegex(ValueError, "unsupported mission template"):

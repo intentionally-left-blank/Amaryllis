@@ -893,6 +893,62 @@ MIGRATIONS: list[Migration] = [
             ON news_items(user_id, source, ingested_at DESC);
         """,
     ),
+    Migration(
+        version=22,
+        name="news_story_key_v1",
+        sql="""
+        ALTER TABLE news_items ADD COLUMN canonical_story_key TEXT NOT NULL DEFAULT '';
+
+        UPDATE news_items
+        SET canonical_story_key = lower(url)
+        WHERE canonical_story_key = '';
+
+        CREATE INDEX IF NOT EXISTS idx_news_items_user_topic_story_key
+            ON news_items(user_id, topic, canonical_story_key);
+        """,
+    ),
+    Migration(
+        version=23,
+        name="news_delivery_policy_v1",
+        sql="""
+        CREATE TABLE IF NOT EXISTS news_delivery_policies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            topic TEXT NOT NULL DEFAULT '*',
+            channel TEXT NOT NULL,
+            is_enabled INTEGER NOT NULL DEFAULT 1,
+            max_targets INTEGER NOT NULL DEFAULT 3,
+            targets_json TEXT NOT NULL DEFAULT '[]',
+            options_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, topic, channel)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_news_delivery_policies_user_topic_updated
+            ON news_delivery_policies(user_id, topic, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_news_delivery_policies_user_channel_updated
+            ON news_delivery_policies(user_id, channel, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS news_delivery_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            channel TEXT NOT NULL,
+            target TEXT NOT NULL,
+            status TEXT NOT NULL,
+            detail TEXT,
+            digest_hash TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            delivered_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_news_delivery_events_user_topic_time
+            ON news_delivery_events(user_id, topic, delivered_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_news_delivery_events_user_channel_time
+            ON news_delivery_events(user_id, channel, delivered_at DESC);
+        """,
+    ),
 ]
 
 

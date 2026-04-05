@@ -60,6 +60,8 @@ jobs:
             tests.test_security_manager \
             tests.test_security_http_authz \
             tests.test_autonomy_circuit_breaker_api \
+            tests.test_provider_auth_api \
+            tests.test_provider_session_policy_check \
             tests.test_tool_enforcement_modes \
             tests.test_tool_call_parsing_security \
             tests.test_tool_isolation_policy \
@@ -78,6 +80,19 @@ jobs:
       - name: Run compliance baseline gate
         run: |
           python scripts/security/compliance_check.py
+
+      - name: Run provider session security gate
+        run: |
+          python scripts/security/provider_session_policy_check.py \
+            --expected-session-count-after-revoke "${AMARYLLIS_PROVIDER_SESSION_EXPECTED_COUNT_AFTER_REVOKE:-0}" \
+            --output "artifacts/provider-session-policy-check-report.json"
+
+      - name: Upload provider session security gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-session-policy-check-report
+          path: artifacts/provider-session-policy-check-report.json
+          if-no-files-found: error
 
       - name: Run evidence export smoke check
         run: |

@@ -99,9 +99,15 @@ def _parse_bool_env(value: Any) -> bool:
 
 
 class ModelManager:
-    def __init__(self, config: AppConfig, database: Database) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        database: Database,
+        entitlement_resolver: Any | None = None,
+    ) -> None:
         self.config = config
         self.database = database
+        self.entitlement_resolver = entitlement_resolver
         self.logger = logging.getLogger("amaryllis.models.manager")
 
         self.providers: dict[str, ModelProvider] = {
@@ -1505,6 +1511,7 @@ class ModelManager:
         routing: dict[str, Any] | None = None,
         fallback_targets: list[tuple[str, str]] | None = None,
         session_id: str | None = None,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         (provider_name, model_name), targets, route_payload = self._resolve_runtime_targets(
             model=model,
@@ -1524,6 +1531,7 @@ class ModelManager:
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                user_id=user_id,
             )
             self._set_session_pin(
                 session_id=session_id,
@@ -1593,6 +1601,7 @@ class ModelManager:
                     messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    user_id=user_id,
                 )
                 self._set_session_pin(
                     session_id=session_id,
@@ -1658,6 +1667,7 @@ class ModelManager:
         routing: dict[str, Any] | None = None,
         fallback_targets: list[tuple[str, str]] | None = None,
         session_id: str | None = None,
+        user_id: str | None = None,
     ) -> tuple[Iterator[str], str, str, dict[str, Any] | None]:
         (provider_name, model_name), targets, route_payload = self._resolve_runtime_targets(
             model=model,
@@ -1684,6 +1694,7 @@ class ModelManager:
                     messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    user_id=user_id,
                 )
                 primed_iterator, has_content = self._prime_stream_iterator(iterator)
                 if not has_content:
@@ -1941,7 +1952,7 @@ class ModelManager:
             group = 1.0
             if pinned_key is not None and key == pinned_key:
                 group = -1.0
-            elif error_info.error_class in {"rate_limit", "quota", "budget_limit", "auth"}:
+            elif error_info.error_class in {"rate_limit", "quota", "budget_limit", "auth", "entitlement"}:
                 group = 0.0 if target_provider in local_providers else 2.0
             elif error_info.error_class in {"timeout", "server", "network", "unavailable", "circuit_open"}:
                 group = 0.0 if target_provider != primary_provider else 2.0
@@ -3404,6 +3415,7 @@ class ModelManager:
         messages: list[dict[str, Any]],
         temperature: float,
         max_tokens: int,
+        user_id: str | None = None,
     ) -> str:
         provider = self.providers[provider_name]
         return self._call_provider_resilient(
@@ -3415,8 +3427,10 @@ class ModelManager:
                 temperature=temperature,
                 max_tokens=max_tokens,
             ),
-            before_call=lambda: self._enforce_cloud_guardrails(
+            before_call=lambda: self._before_provider_call(
                 provider_name=provider_name,
+                model_name=model_name,
+                user_id=user_id,
                 messages=messages,
                 max_tokens=max_tokens,
             ),
@@ -3429,6 +3443,7 @@ class ModelManager:
         messages: list[dict[str, Any]],
         temperature: float,
         max_tokens: int,
+        user_id: str | None = None,
     ) -> Iterator[str]:
         provider = self.providers[provider_name]
         return self._call_provider_resilient(
@@ -3440,12 +3455,77 @@ class ModelManager:
                 temperature=temperature,
                 max_tokens=max_tokens,
             ),
-            before_call=lambda: self._enforce_cloud_guardrails(
+            before_call=lambda: self._before_provider_call(
                 provider_name=provider_name,
+                model_name=model_name,
+                user_id=user_id,
                 messages=messages,
                 max_tokens=max_tokens,
             ),
         )
+
+    def _before_provider_call(
+        self,
+        *,
+        provider_name: str,
+        model_name: str,
+        user_id: str | None,
+        messages: list[dict[str, Any]],
+        max_tokens: int,
+    ) -> None:
+        self._enforce_provider_entitlement(
+            provider_name=provider_name,
+            model_name=model_name,
+            user_id=user_id,
+        )
+        self._enforce_cloud_guardrails(
+            provider_name=provider_name,
+            messages=messages,
+            max_tokens=max_tokens,
+        )
+
+    def _enforce_provider_entitlement(
+        self,
+        *,
+        provider_name: str,
+        model_name: str,
+        user_id: str | None,
+    ) -> None:
+        if not self._is_cloud_provider(provider_name):
+            return
+        if self.entitlement_resolver is None:
+            return
+
+        normalized_user = str(user_id or "").strip()
+        if not normalized_user:
+            raise RuntimeError(
+                f"Provider entitlement check requires user_id for cloud provider '{provider_name}'."
+            )
+
+        resolver = getattr(self.entitlement_resolver, "resolve_provider", None)
+        if not callable(resolver):
+            raise RuntimeError("Provider entitlement resolver is not available.")
+
+        payload = resolver(user_id=normalized_user, provider=provider_name)
+        if not isinstance(payload, dict):
+            raise RuntimeError("Provider entitlement resolver returned invalid payload.")
+
+        if not bool(payload.get("available", False)):
+            raise RuntimeError(
+                (
+                    f"Provider entitlement denied for '{provider_name}' and user '{normalized_user}'. "
+                    "Create provider session or configure server provider key."
+                )
+            )
+
+        feature_flags = payload.get("feature_flags")
+        if isinstance(feature_flags, dict) and feature_flags.get("chat") is False:
+            raise RuntimeError(
+                (
+                    f"Provider entitlement denied for '{provider_name}' and user '{normalized_user}': "
+                    "chat feature is disabled."
+                )
+            )
 
     def _call_provider_resilient(
         self,

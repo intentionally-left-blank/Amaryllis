@@ -443,6 +443,7 @@ def execute_task_run(
     response_text, provider_used, model_used, model_calls, estimated_tokens = executor._verify_and_repair_response(
         messages=messages,
         agent=agent,
+        user_id=user_id,
         session_id=session_id,
         response_text=response_text,
         provider_used=provider_used,

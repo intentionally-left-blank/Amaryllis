@@ -211,6 +211,7 @@ class CognitionBackendContract(Protocol):
         routing: dict[str, Any] | None = None,
         fallback_targets: list[tuple[str, str]] | None = None,
         session_id: str | None = None,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         ...
 
@@ -224,6 +225,7 @@ class CognitionBackendContract(Protocol):
         routing: dict[str, Any] | None = None,
         fallback_targets: list[tuple[str, str]] | None = None,
         session_id: str | None = None,
+        user_id: str | None = None,
     ) -> tuple[Iterator[str], str, str, dict[str, Any] | None]:
         ...
 

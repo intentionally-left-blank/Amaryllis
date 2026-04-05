@@ -10,7 +10,7 @@ It combines:
 - cadence normalization (`workday/daily/hourly/weekly/watch_fs`),
 - recommendation gate for immediate start based on mission risk.
 
-`GET /automations/mission/templates` returns preset mission templates (`code_health`, `security_audit`, `release_guard`, `runtime_watchdog`) for low-friction planning.
+`GET /automations/mission/templates` returns preset mission templates (`code_health`, `security_audit`, `release_guard`, `runtime_watchdog`, `ai_news_daily`) for low-friction planning.
 
 `GET /automations/mission/policies` returns per-mission SLO policy profiles (`balanced`, `strict`, `watchdog`, `release`).
 
@@ -38,7 +38,7 @@ curl -X POST http://localhost:8000/automations/mission/plan \
 - `timezone` (default `UTC`): planner timezone.
 - `cadence_profile` (optional): one of `hourly`, `daily`, `workday`, `weekly`, `watch_fs`.
 - `start_immediately` (optional): requested immediate scheduling.
-- `template_id` (optional): one of `code_health`, `security_audit`, `release_guard`, `runtime_watchdog`.
+- `template_id` (optional): one of `code_health`, `security_audit`, `release_guard`, `runtime_watchdog`, `ai_news_daily`.
 - `schedule_type`, `schedule`, `interval_sec` (optional): explicit schedule override.
 - `max_attempts`, `budget` (optional): passed to dry-run simulation only.
 - `mission_policy_profile` (optional): one of `balanced`, `strict`, `watchdog`, `release`.
