@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 import json
 import math
 import os
@@ -33,6 +34,84 @@ _AGENT_FOCUS_PATTERN = re.compile(
     r"(?:для|по|for|about)\s+(?P<focus>[a-zA-Z0-9а-яА-ЯёЁ _/+#-]{2,120})",
     flags=re.IGNORECASE,
 )
+_SCHEDULE_TIME_PATTERN = re.compile(r"(?:\bв\b|\bat\b)\s*(?P<hour>\d{1,2})(?::(?P<minute>\d{1,2}))?")
+_MINUTE_ONLY_PATTERN = re.compile(
+    r"(?:\bв\b|\bat\b)\s*(?P<minute>\d{1,2})\s*(?:минут(?:а|ы)?|minute(?:s)?)",
+    flags=re.IGNORECASE,
+)
+_HOURLY_INTERVAL_PATTERN = re.compile(
+    r"(?:каждые|every)\s*(?P<hours>\d{1,2})\s*(?:час(?:а|ов)?|hours?)",
+    flags=re.IGNORECASE,
+)
+_HOUR_ONLY_PATTERN = re.compile(r"(?<!\d)(?P<hour>\d{1,2})\s*(?:час(?:а|ов)?|hours?)(?!\w)", flags=re.IGNORECASE)
+
+_DAILY_SCHEDULE_TOKENS: tuple[str, ...] = (
+    "каждый день",
+    "ежеднев",
+    "daily",
+    "every day",
+)
+_WEEKLY_SCHEDULE_TOKENS: tuple[str, ...] = (
+    "еженед",
+    "каждую неделю",
+    "weekly",
+    "every week",
+)
+_HOURLY_SCHEDULE_TOKENS: tuple[str, ...] = (
+    "каждый час",
+    "каждые",
+    "hourly",
+    "every hour",
+)
+_START_IMMEDIATELY_TOKENS: tuple[str, ...] = (
+    "сразу",
+    "прямо сейчас",
+    "немедленно",
+    "start now",
+    "immediately",
+    "run now",
+)
+
+_WEEKDAY_TOKENS: dict[str, str] = {
+    "понедель": "MO",
+    "пн": "MO",
+    "monday": "MO",
+    "mon": "MO",
+    "вторник": "TU",
+    "вт": "TU",
+    "tuesday": "TU",
+    "tue": "TU",
+    "сред": "WE",
+    "ср": "WE",
+    "wednesday": "WE",
+    "wed": "WE",
+    "четверг": "TH",
+    "чт": "TH",
+    "thursday": "TH",
+    "thu": "TH",
+    "пятниц": "FR",
+    "пт": "FR",
+    "friday": "FR",
+    "fri": "FR",
+    "суббот": "SA",
+    "сб": "SA",
+    "saturday": "SA",
+    "sat": "SA",
+    "воскрес": "SU",
+    "вс": "SU",
+    "sunday": "SU",
+    "sun": "SU",
+}
+
+_SOURCE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("reddit", ("reddit", "реддит")),
+    ("twitter", ("twitter", "x.com", "tweet", "твиттер", "икс")),
+    ("hackernews", ("hacker news", "hn", "news.ycombinator.com")),
+    ("arxiv", ("arxiv", "arxiv.org")),
+    ("github", ("github", "гитхаб")),
+    ("web", ("web", "internet", "интернет", "сайт", "новост", "news")),
+)
+CHAT_QUICKSTART_IDEMPOTENCY_MEMORY_PREFIX = "chat.quickstart.idempotency.v1."
 
 
 def _sign_action(
@@ -60,6 +139,61 @@ def _sign_action(
         )
     except Exception:
         return {}
+
+
+def _normalize_idempotency_key(raw_key: str | None) -> str:
+    key = str(raw_key or "").strip()
+    if not key:
+        return ""
+    return key[:200]
+
+
+def _chat_quickstart_payload_fingerprint(
+    *,
+    user_id: str,
+    query: str,
+    session_id: str | None,
+    model: str | None,
+) -> str:
+    canonical = {
+        "user_id": str(user_id or "").strip(),
+        "query": str(query or "").strip(),
+        "session_id": str(session_id or "").strip(),
+        "model": str(model or "").strip(),
+    }
+    serialized = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _chat_quickstart_auto_idempotency_key(
+    *,
+    user_id: str,
+    query: str,
+    session_id: str | None,
+    model: str | None,
+) -> str:
+    fingerprint = _chat_quickstart_payload_fingerprint(
+        user_id=user_id,
+        query=query,
+        session_id=session_id,
+        model=model,
+    )
+    return f"chat-quickstart-{fingerprint[:24]}"
+
+
+def _chat_quickstart_idempotency_memory_key(idempotency_key: str) -> str:
+    digest = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
+    return f"{CHAT_QUICKSTART_IDEMPOTENCY_MEMORY_PREFIX}{digest}"
+
+
+def _load_quickstart_idempotency_record(raw_value: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(str(raw_value or ""))
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return payload
 
 
 class ChatMessage(BaseModel):
@@ -144,6 +278,195 @@ def _clean_focus_text(text: str) -> str:
     return normalized[:120]
 
 
+def _strip_focus_tail(text: str) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    lowered = raw.lower()
+    cut_at = len(raw)
+    markers = (
+        " каждый день",
+        " ежедневно",
+        " daily",
+        " every day",
+        " каждый час",
+        " hourly",
+        " every hour",
+        " еженед",
+        " weekly",
+        " reddit",
+        " twitter",
+        " x.com",
+    )
+    for marker in markers:
+        idx = lowered.find(marker)
+        if idx > 0 and idx < cut_at:
+            cut_at = idx
+    return _clean_focus_text(raw[:cut_at])
+
+
+def _infer_source_targets(lowered_text: str) -> list[str]:
+    targets: list[str] = []
+    lowered = str(lowered_text or "").strip().lower()
+    if not lowered:
+        return targets
+    for source_id, variants in _SOURCE_PATTERNS:
+        if any(variant in lowered for variant in variants):
+            targets.append(source_id)
+    if ("новост" in lowered or "news" in lowered) and "web" not in targets:
+        targets.append("web")
+    return targets
+
+
+def _extract_time_hint(lowered_text: str, *, default_hour: int = 9, default_minute: int = 0) -> tuple[int, int]:
+    text = str(lowered_text or "")
+    match = _SCHEDULE_TIME_PATTERN.search(text)
+    if match is None:
+        minute_only = _MINUTE_ONLY_PATTERN.search(text)
+        if minute_only is None:
+            return default_hour, default_minute
+        try:
+            minute = int(minute_only.group("minute"))
+        except Exception:
+            minute = default_minute
+        minute = max(0, min(59, minute))
+        return default_hour, minute
+    if match.group("minute") is None:
+        tail = text[match.end() :]
+        if re.match(r"\s*(?:минут(?:а|ы)?|minute(?:s)?)\b", tail, flags=re.IGNORECASE):
+            try:
+                minute = int(match.group("hour"))
+            except Exception:
+                minute = default_minute
+            minute = max(0, min(59, minute))
+            return default_hour, minute
+    try:
+        hour = int(match.group("hour"))
+    except Exception:
+        hour = default_hour
+    try:
+        minute = int(match.group("minute") or default_minute)
+    except Exception:
+        minute = default_minute
+    hour = max(0, min(23, hour))
+    minute = max(0, min(59, minute))
+    return hour, minute
+
+
+def _extract_weekday_codes(lowered_text: str) -> list[str]:
+    lowered = str(lowered_text or "").lower()
+    if not lowered:
+        return []
+    seen: list[str] = []
+    for token, code in _WEEKDAY_TOKENS.items():
+        if token in lowered and code not in seen:
+            seen.append(code)
+    return seen
+
+
+def _infer_schedule_spec(lowered_text: str) -> dict[str, Any] | None:
+    lowered = str(lowered_text or "").strip().lower()
+    if not lowered:
+        return None
+    start_immediately = any(token in lowered for token in _START_IMMEDIATELY_TOKENS)
+
+    if any(token in lowered for token in _HOURLY_SCHEDULE_TOKENS):
+        interval_hours = 1
+        interval_match = _HOURLY_INTERVAL_PATTERN.search(lowered)
+        if interval_match is not None:
+            try:
+                interval_hours = int(interval_match.group("hours"))
+            except Exception:
+                interval_hours = 1
+        else:
+            direct_match = _HOUR_ONLY_PATTERN.search(lowered)
+            if direct_match is not None:
+                try:
+                    interval_hours = int(direct_match.group("hour"))
+                except Exception:
+                    interval_hours = 1
+        interval_hours = max(1, min(24, interval_hours))
+        _, minute = _extract_time_hint(lowered, default_hour=0, default_minute=0)
+        return {
+            "schedule_type": "hourly",
+            "schedule": {"interval_hours": interval_hours, "minute": minute},
+            "interval_sec": interval_hours * 3600,
+            "timezone": "UTC",
+            "start_immediately": start_immediately,
+        }
+
+    weekday_codes = _extract_weekday_codes(lowered)
+    is_daily = any(token in lowered for token in _DAILY_SCHEDULE_TOKENS)
+    is_weekly = any(token in lowered for token in _WEEKLY_SCHEDULE_TOKENS) or bool(weekday_codes)
+    if is_daily or is_weekly:
+        hour, minute = _extract_time_hint(lowered, default_hour=9, default_minute=0)
+        byday = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] if is_daily else (weekday_codes or ["MO"])
+        return {
+            "schedule_type": "weekly",
+            "schedule": {"byday": byday, "hour": hour, "minute": minute},
+            "interval_sec": 7 * 24 * 3600,
+            "timezone": "UTC",
+            "start_immediately": start_immediately,
+        }
+
+    return None
+
+
+def _automation_schedule_summary(automation: dict[str, Any]) -> str:
+    schedule_type = str(automation.get("schedule_type") or "")
+    schedule = automation.get("schedule")
+    if not isinstance(schedule, dict):
+        schedule = {}
+    if schedule_type == "hourly":
+        try:
+            hours = int(schedule.get("interval_hours", 1))
+        except Exception:
+            hours = 1
+        try:
+            minute = int(schedule.get("minute", 0))
+        except Exception:
+            minute = 0
+        return f"каждые {hours}ч в :{minute:02d} UTC"
+    if schedule_type == "weekly":
+        byday = schedule.get("byday")
+        if isinstance(byday, list):
+            days = ",".join(str(item) for item in byday if str(item).strip())
+        else:
+            days = "MO"
+        try:
+            hour = int(schedule.get("hour", 9))
+        except Exception:
+            hour = 9
+        try:
+            minute = int(schedule.get("minute", 0))
+        except Exception:
+            minute = 0
+        return f"по расписанию {days} {hour:02d}:{minute:02d} UTC"
+    if schedule_type:
+        return f"schedule_type={schedule_type}"
+    return "расписание активно"
+
+
+def _build_automation_message(
+    *,
+    name: str,
+    focus: str,
+    source_targets: list[str],
+    is_news: bool,
+) -> str:
+    focus_text = str(focus or "").strip() or "general domain"
+    if is_news:
+        channels = ", ".join(source_targets or ["web"])
+        return (
+            f"Run a news intelligence cycle for {focus_text}. "
+            f"Collect updates from {channels}, deduplicate overlaps, and provide a concise daily digest with links."
+        )
+    return (
+        f"Run maintenance cycle for agent '{name}' focused on {focus_text}. "
+        "Review recent context, extract key updates, and produce an actionable summary."
+    )
+
+
 def _infer_agent_spec_from_request(request_text: str) -> dict[str, Any]:
     raw = str(request_text or "").strip()
     lowered = raw.lower()
@@ -153,6 +476,8 @@ def _infer_agent_spec_from_request(request_text: str) -> dict[str, Any]:
 
     focus_match = _AGENT_FOCUS_PATTERN.search(raw)
     requested_focus = _clean_focus_text(focus_match.group("focus")) if focus_match is not None else ""
+    requested_focus = _strip_focus_tail(requested_focus)
+    source_targets = _infer_source_targets(lowered)
 
     if not requested_focus:
         if any(token in lowered for token in ("news", "новост", "twitter", "reddit", "x.com")):
@@ -162,7 +487,7 @@ def _infer_agent_spec_from_request(request_text: str) -> dict[str, Any]:
         else:
             requested_focus = "general productivity"
 
-    is_news = any(token in lowered for token in ("news", "новост", "reddit", "twitter", "x.com"))
+    is_news = any(token in lowered for token in ("news", "новост", "reddit", "twitter", "x.com")) or bool(source_targets)
     is_coding = any(token in lowered for token in ("code", "код", "python", "typescript", "git", "program"))
 
     if requested_name:
@@ -174,9 +499,14 @@ def _infer_agent_spec_from_request(request_text: str) -> dict[str, Any]:
     else:
         name = "Custom Assistant"
 
+    source_hint = ""
+    if source_targets:
+        source_hint = f"Primary source channels: {', '.join(source_targets)}. "
+
     if is_news:
         system_prompt = (
             f"You are {name}. You are a specialized news agent for {requested_focus}. "
+            f"{source_hint}"
             "Track updates, summarize key developments, deduplicate overlap, and always include source links."
         )
         tools = ["web_search"]
@@ -185,20 +515,55 @@ def _infer_agent_spec_from_request(request_text: str) -> dict[str, Any]:
             f"You are {name}. You are a specialized coding assistant for {requested_focus}. "
             "Propose implementation plans, write concise code, and include practical verification steps."
         )
-        tools = ["web_search"]
+        tools = ["web_search"] if "web" in source_targets else []
     else:
         system_prompt = (
             f"You are {name}. You are a specialized assistant for {requested_focus}. "
+            f"{source_hint}"
             "Provide actionable and structured help, asking clarifying questions only when necessary."
         )
-        tools = []
+        tools = ["web_search"] if "web" in source_targets else []
+
+    schedule_spec = _infer_schedule_spec(lowered)
+    automation_spec: dict[str, Any] | None = None
+    if schedule_spec is not None:
+        automation_spec = {
+            **schedule_spec,
+            "message": _build_automation_message(
+                name=name,
+                focus=requested_focus,
+                source_targets=source_targets,
+                is_news=is_news,
+            ),
+        }
 
     return {
         "name": name,
         "focus": requested_focus,
         "system_prompt": system_prompt,
         "tools": tools,
+        "source_targets": source_targets,
+        "kind": "news" if is_news else ("coding" if is_coding else "general"),
+        "automation": automation_spec,
     }
+
+
+def _build_quickstart_agent_created_content(
+    *,
+    agent_id: str,
+    agent_name: str,
+    focus: str,
+    automation: dict[str, Any] | None,
+    automation_error: str | None,
+) -> str:
+    content = f"Готово. Создал агента '{agent_name}' (id: {agent_id}). Фокус: {focus or 'general'}."
+    if isinstance(automation, dict):
+        content += f" Запустил автоматический режим ({_automation_schedule_summary(automation)})."
+    elif automation_error:
+        content += f" Агент создан, но расписание включить не удалось: {automation_error}."
+    else:
+        content += " Можешь сразу запускать его задачи."
+    return content
 
 
 def _build_quickstart_chat_completion(
@@ -208,6 +573,9 @@ def _build_quickstart_chat_completion(
     content: str,
     agent_record: dict[str, Any],
     action_receipt: dict[str, Any],
+    automation_record: dict[str, Any] | None = None,
+    quickstart_spec: dict[str, Any] | None = None,
+    idempotency: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     completion_id = f"chatcmpl-{uuid4().hex}"
     created = int(time.time())
@@ -246,6 +614,9 @@ def _build_quickstart_chat_completion(
         "quick_action": {
             "type": "agent_created",
             "agent": agent_record,
+            "automation": automation_record,
+            "quickstart_spec": quickstart_spec,
+            "idempotency": idempotency,
             "action_receipt": action_receipt,
         },
     }
@@ -329,6 +700,111 @@ def _maybe_handle_chat_agent_quickstart(
 
     services = request.app.state.services
     spec = _infer_agent_spec_from_request(query)
+    request_fingerprint = _chat_quickstart_payload_fingerprint(
+        user_id=str(payload.user_id),
+        query=query,
+        session_id=payload.session_id,
+        model=payload.model,
+    )
+    idempotency_key = _normalize_idempotency_key(request.headers.get("Idempotency-Key"))
+    if not idempotency_key:
+        idempotency_key = _normalize_idempotency_key(request.headers.get("X-Idempotency-Key"))
+    idempotency_derived = False
+    if not idempotency_key and str(payload.session_id or "").strip():
+        idempotency_key = _chat_quickstart_auto_idempotency_key(
+            user_id=str(payload.user_id),
+            query=query,
+            session_id=payload.session_id,
+            model=payload.model,
+        )
+        idempotency_derived = True
+
+    automation_record: dict[str, Any] | None = None
+    automation_error: str | None = None
+    idempotency_payload: dict[str, Any] | None = None
+    if idempotency_key:
+        memory_key = _chat_quickstart_idempotency_memory_key(idempotency_key)
+        cached_item = services.database.get_user_memory_item(
+            user_id=str(payload.user_id),
+            key=memory_key,
+        )
+        if isinstance(cached_item, dict):
+            cached_record = _load_quickstart_idempotency_record(str(cached_item.get("value") or ""))
+            cached_fingerprint = str(cached_record.get("fingerprint") or "").strip()
+            if cached_fingerprint and cached_fingerprint != request_fingerprint:
+                raise ValidationError("Idempotency key already used with a different quickstart payload.")
+            cached_agent_id = str(cached_record.get("agent_id") or "").strip()
+            if cached_agent_id:
+                cached_agent = services.agent_manager.get_agent(cached_agent_id)
+                if (
+                    cached_agent is not None
+                    and str(cached_agent.user_id or "").strip() == str(payload.user_id).strip()
+                ):
+                    cached_automation_id = str(cached_record.get("automation_id") or "").strip()
+                    cached_automation = (
+                        services.automation_scheduler.get_automation(cached_automation_id)
+                        if cached_automation_id
+                        else None
+                    )
+                    cached_spec = cached_record.get("quickstart_spec")
+                    if not isinstance(cached_spec, dict):
+                        cached_spec = spec
+                    content = str(cached_record.get("assistant_content") or "").strip()
+                    if not content:
+                        content = _build_quickstart_agent_created_content(
+                            agent_id=cached_agent.id,
+                            agent_name=cached_agent.name,
+                            focus=str(cached_spec.get("focus") or ""),
+                            automation=cached_automation if isinstance(cached_automation, dict) else None,
+                            automation_error=None,
+                        )
+                    replay_receipt = _sign_action(
+                        request,
+                        action="chat_agent_quickstart",
+                        payload={
+                            "request": query,
+                            "user_id": payload.user_id,
+                            "agent_name": cached_agent.name,
+                            "focus": str(cached_spec.get("focus") or ""),
+                            "kind": str(cached_spec.get("kind") or "general"),
+                            "sources": (
+                                cached_spec.get("source_targets")
+                                if isinstance(cached_spec.get("source_targets"), list)
+                                else []
+                            ),
+                            "automation_enabled": isinstance(cached_automation, dict),
+                            "idempotency_key": idempotency_key,
+                            "idempotency_replayed": True,
+                        },
+                        actor=actor_user_id,
+                        target_type="agent",
+                        target_id=cached_agent.id,
+                    )
+                    replay_idempotency = {
+                        "key": idempotency_key,
+                        "fingerprint": request_fingerprint,
+                        "replayed": True,
+                        "derived": idempotency_derived,
+                    }
+                    if payload.stream:
+                        return {"stream_response": _build_quickstart_stream_response(request=request, content=content)}
+                    return _build_quickstart_chat_completion(
+                        request=request,
+                        payload=payload,
+                        content=content,
+                        agent_record=cached_agent.to_record(),
+                        action_receipt=replay_receipt,
+                        automation_record=cached_automation if isinstance(cached_automation, dict) else None,
+                        quickstart_spec=cached_spec,
+                        idempotency=replay_idempotency,
+                    )
+        idempotency_payload = {
+            "key": idempotency_key,
+            "fingerprint": request_fingerprint,
+            "replayed": False,
+            "derived": idempotency_derived,
+        }
+
     try:
         agent = services.agent_manager.create_agent(
             name=str(spec.get("name") or "Custom Assistant"),
@@ -337,11 +813,32 @@ def _maybe_handle_chat_agent_quickstart(
             tools=spec.get("tools") if isinstance(spec.get("tools"), list) else [],
             user_id=payload.user_id,
         )
+        automation_spec = spec.get("automation")
+        if isinstance(automation_spec, dict):
+            try:
+                automation_record = services.automation_scheduler.create_automation(
+                    agent_id=agent.id,
+                    user_id=str(payload.user_id),
+                    session_id=payload.session_id,
+                    message=str(automation_spec.get("message") or "Run agent cycle"),
+                    interval_sec=automation_spec.get("interval_sec"),
+                    schedule_type=automation_spec.get("schedule_type"),
+                    schedule=automation_spec.get("schedule"),
+                    timezone_name=str(automation_spec.get("timezone") or "UTC"),
+                    start_immediately=bool(automation_spec.get("start_immediately", False)),
+                    mission_policy=None,
+                )
+            except Exception as exc:
+                automation_error = str(exc)
     except Exception as exc:
         _sign_action(
             request,
             action="chat_agent_quickstart",
-            payload={"request": query, "user_id": payload.user_id},
+            payload={
+                "request": query,
+                "user_id": payload.user_id,
+                "idempotency_key": idempotency_key or None,
+            },
             actor=actor_user_id,
             target_type="agent",
             status="failed",
@@ -357,15 +854,49 @@ def _maybe_handle_chat_agent_quickstart(
             "user_id": payload.user_id,
             "agent_name": agent.name,
             "focus": str(spec.get("focus") or ""),
+            "kind": str(spec.get("kind") or "general"),
+            "sources": spec.get("source_targets") if isinstance(spec.get("source_targets"), list) else [],
+            "automation_enabled": automation_record is not None,
+            "automation_error": automation_error,
+            "idempotency_key": idempotency_key or None,
+            "idempotency_replayed": False if idempotency_payload is not None else None,
         },
         actor=actor_user_id,
         target_type="agent",
         target_id=agent.id,
     )
-    content = (
-        f"Готово. Создал агента '{agent.name}' (id: {agent.id}). "
-        f"Фокус: {str(spec.get('focus') or 'general')}. Можешь сразу запускать его задачи."
+    content = _build_quickstart_agent_created_content(
+        agent_id=agent.id,
+        agent_name=agent.name,
+        focus=str(spec.get("focus") or ""),
+        automation=automation_record if isinstance(automation_record, dict) else None,
+        automation_error=automation_error,
     )
+    if idempotency_payload is not None:
+        try:
+            services.database.set_user_memory(
+                user_id=str(payload.user_id),
+                key=_chat_quickstart_idempotency_memory_key(idempotency_key),
+                value=json.dumps(
+                    {
+                        "fingerprint": request_fingerprint,
+                        "agent_id": agent.id,
+                        "automation_id": (
+                            str(automation_record.get("id") or "").strip()
+                            if isinstance(automation_record, dict)
+                            else None
+                        ),
+                        "quickstart_spec": spec,
+                        "assistant_content": content,
+                        "recorded_at": time.time(),
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+                source="chat_api.quickstart.idempotency",
+            )
+        except Exception:
+            pass
     agent_record = agent.to_record()
     if payload.stream:
         return {"stream_response": _build_quickstart_stream_response(request=request, content=content)}
@@ -375,6 +906,9 @@ def _maybe_handle_chat_agent_quickstart(
         content=content,
         agent_record=agent_record,
         action_receipt=receipt,
+        automation_record=automation_record,
+        quickstart_spec=spec,
+        idempotency=idempotency_payload,
     )
 
 

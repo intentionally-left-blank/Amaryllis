@@ -228,7 +228,30 @@ curl -X POST http://127.0.0.1:8000/agents/create \
   }'
 ```
 
-### 2) Plan first, then execute
+### 2) One-shot quickstart agent (plan -> apply)
+
+```bash
+# dry-run preview (no side effects)
+curl -X POST http://127.0.0.1:8000/v1/agents/quickstart/plan \
+  -H "Authorization: Bearer dev-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user-001",
+    "request": "создай агента для AI новостей каждый день в 08:15 из reddit и twitter"
+  }'
+
+# apply with idempotency_key from apply_hint.payload
+curl -X POST http://127.0.0.1:8000/v1/agents/quickstart \
+  -H "Authorization: Bearer dev-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user-001",
+    "request": "создай агента для AI новостей каждый день в 08:15 из reddit и twitter",
+    "idempotency_key": "quickstart-<from-plan>"
+  }'
+```
+
+### 3) Plan first, then execute
 
 ```bash
 # dry-run planning (no execution)
@@ -254,7 +277,7 @@ curl -X POST http://127.0.0.1:8000/agents/<agent_id>/runs/dispatch \
   }'
 ```
 
-### 3) Create an automation
+### 4) Create an automation
 
 ```bash
 curl -X POST http://127.0.0.1:8000/automations/create \
@@ -276,7 +299,7 @@ curl -X POST http://127.0.0.1:8000/automations/create \
   }'
 ```
 
-### 4) Run a supervisor DAG mission
+### 5) Run a supervisor DAG mission
 
 ```bash
 # create graph

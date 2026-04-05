@@ -257,6 +257,29 @@ final class AmaryllisAPIClient {
         return try await request(path: "/agents/create", method: "POST", body: body)
     }
 
+    func planQuickstartAgent(
+        request requestText: String,
+        model: String?,
+        userId: String?,
+        sessionId: String?,
+        idempotencyKey: String? = nil
+    ) async throws -> APIQuickstartAgentPlanResponse {
+        let payload = APIQuickstartAgentRequest(
+            request: requestText,
+            model: model,
+            userId: userId,
+            sessionId: sessionId,
+            idempotencyKey: idempotencyKey
+        )
+        let body = try jsonEncoder.encode(payload)
+        return try await request(path: "/v1/agents/quickstart/plan", method: "POST", body: body)
+    }
+
+    func applyQuickstartAgent(payload: APIQuickstartAgentApplyPayload) async throws -> APIQuickstartAgentApplyResponse {
+        let body = try jsonEncoder.encode(payload)
+        return try await request(path: "/v1/agents/quickstart", method: "POST", body: body)
+    }
+
     func listAgents(userId: String?) async throws -> APIListAgentsResponse {
         var path = "/agents"
         if let userId, !userId.isEmpty {

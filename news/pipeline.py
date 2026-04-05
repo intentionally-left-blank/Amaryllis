@@ -129,6 +129,85 @@ def _canonical_url_key(url: str) -> str:
     return normalized
 
 
+def _to_provenance_entry(item: dict[str, Any]) -> dict[str, Any]:
+    metadata = item.get("metadata")
+    metadata_payload = dict(metadata) if isinstance(metadata, dict) else {}
+    return {
+        "source": str(item.get("source") or "").strip().lower(),
+        "canonical_id": str(item.get("canonical_id") or "").strip(),
+        "url": str(item.get("url") or "").strip(),
+        "title": str(item.get("title") or "").strip(),
+        "published_at": str(item.get("published_at") or "").strip(),
+        "ingested_at": str(item.get("ingested_at") or "").strip(),
+        "raw_score": item.get("raw_score"),
+        "author": item.get("author"),
+        "metadata": metadata_payload,
+    }
+
+
+def _merge_provenance(base: dict[str, Any], incoming: dict[str, Any]) -> None:
+    metadata = base.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+        base["metadata"] = metadata
+    provenance_raw = metadata.get("provenance")
+    provenance: list[dict[str, Any]]
+    if isinstance(provenance_raw, list):
+        provenance = [item for item in provenance_raw if isinstance(item, dict)]
+    else:
+        provenance = []
+
+    incoming_entry = _to_provenance_entry(incoming)
+    incoming_signature = (
+        str(incoming_entry.get("source") or ""),
+        str(incoming_entry.get("canonical_id") or ""),
+        str(incoming_entry.get("url") or ""),
+    )
+    known_signatures = {
+        (
+            str(item.get("source") or ""),
+            str(item.get("canonical_id") or ""),
+            str(item.get("url") or ""),
+        )
+        for item in provenance
+    }
+    if incoming_signature not in known_signatures:
+        provenance.append(incoming_entry)
+    metadata["provenance"] = provenance
+
+    merged_sources_raw = metadata.get("merged_sources")
+    if isinstance(merged_sources_raw, list):
+        merged_sources = [str(item).strip().lower() for item in merged_sources_raw if str(item).strip()]
+    else:
+        merged_sources = []
+    base_source = str(base.get("source") or "").strip().lower()
+    if base_source and base_source not in merged_sources:
+        merged_sources.append(base_source)
+    incoming_source = str(incoming.get("source") or "").strip().lower()
+    if incoming_source and incoming_source not in merged_sources:
+        merged_sources.append(incoming_source)
+    metadata["merged_sources"] = merged_sources
+    metadata["merged_count"] = len(provenance)
+
+    if not str(base.get("excerpt") or "").strip():
+        excerpt = str(incoming.get("excerpt") or "").strip()
+        if excerpt:
+            base["excerpt"] = excerpt
+    if not str(base.get("author") or "").strip():
+        author = str(incoming.get("author") or "").strip()
+        if author:
+            base["author"] = author
+
+    base_score = base.get("raw_score")
+    incoming_score = incoming.get("raw_score")
+    try:
+        if incoming_score is not None and (base_score is None or float(incoming_score) > float(base_score)):
+            base["raw_score"] = incoming_score
+    except Exception:
+        if base_score is None and incoming_score is not None:
+            base["raw_score"] = incoming_score
+
+
 def _normalize_query_list(items: list[str] | None) -> list[str]:
     if not items:
         return []
@@ -298,13 +377,26 @@ class NewsIngestionPipeline:
             collected.extend(filtered)
 
         deduped: list[dict[str, Any]] = []
-        seen_keys: set[str] = set()
+        deduped_by_key: dict[str, dict[str, Any]] = {}
         for item in collected:
             key = _canonical_url_key(str(item.get("url") or ""))
-            if not key or key in seen_keys:
+            if not key:
                 continue
-            seen_keys.add(key)
-            deduped.append(item)
+            existing = deduped_by_key.get(key)
+            if existing is None:
+                payload = dict(item)
+                payload_metadata = payload.get("metadata")
+                if not isinstance(payload_metadata, dict):
+                    payload_metadata = {}
+                    payload["metadata"] = payload_metadata
+                payload_metadata["provenance"] = [_to_provenance_entry(payload)]
+                source_name = str(payload.get("source") or "").strip().lower()
+                payload_metadata["merged_sources"] = [source_name] if source_name else []
+                payload_metadata["merged_count"] = 1
+                deduped_by_key[key] = payload
+                deduped.append(payload)
+                continue
+            _merge_provenance(existing, item)
 
         return {
             "topic": str(topic or "").strip(),
@@ -322,6 +414,7 @@ class NewsIngestionPipeline:
             "connector_errors": connector_errors,
             "raw_count": len(collected),
             "deduped_count": len(deduped),
+            "duplicate_count": max(0, len(collected) - len(deduped)),
             "items": deduped,
             "generated_at": now,
         }

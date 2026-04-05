@@ -63,6 +63,28 @@
       ]
     },
     {
+      "method": "post",
+      "path": "/v1/agents/quickstart",
+      "request_required": [
+        "request"
+      ],
+      "response_statuses": [
+        "200",
+        "422"
+      ]
+    },
+    {
+      "method": "post",
+      "path": "/v1/agents/quickstart/plan",
+      "request_required": [
+        "request"
+      ],
+      "response_statuses": [
+        "200",
+        "422"
+      ]
+    },
+    {
       "method": "get",
       "path": "/v1/automations",
       "request_required": [],

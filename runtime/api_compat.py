@@ -25,6 +25,8 @@ CORE_V1_CONTRACT: tuple[EndpointContract, ...] = (
     EndpointContract(path="/v1/models/download", method="post", request_required=("model_id",)),
     EndpointContract(path="/v1/models/load", method="post", request_required=("model_id",)),
     EndpointContract(path="/v1/agents/create", method="post", request_required=("name", "system_prompt")),
+    EndpointContract(path="/v1/agents/quickstart", method="post", request_required=("request",)),
+    EndpointContract(path="/v1/agents/quickstart/plan", method="post", request_required=("request",)),
     EndpointContract(path="/v1/agents", method="get", response_statuses=("200",)),
     EndpointContract(path="/v1/automations", method="get", response_statuses=("200",)),
     EndpointContract(path="/v1/tools", method="get", response_statuses=("200",)),
@@ -167,4 +169,3 @@ def _resolve_schema(*, openapi: dict[str, Any], schema: dict[str, Any]) -> dict[
     if target is schema:
         return schema
     return _resolve_schema(openapi=openapi, schema=target)
-

@@ -53,3 +53,48 @@ Both examples call `POST /v1/chat/completions` and print the assistant reply.
 - JavaScript helper: `sdk/javascript/amaryllis_openai_compat.mjs`
 
 Use these wrappers when you need quick integration without bringing a full external SDK.
+
+## 6. One-Shot Agent Quickstart (Plan -> Apply)
+
+Plan first (dry-run, no side effects):
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/agents/quickstart/plan \
+  -H "Authorization: Bearer dev-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user-001",
+    "request": "create a daily AI news agent from reddit and twitter at 08:15"
+  }'
+```
+
+Then apply using `apply_hint.payload` from the plan response:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/agents/quickstart \
+  -H "Authorization: Bearer dev-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user-001",
+    "request": "create a daily AI news agent from reddit and twitter at 08:15",
+    "idempotency_key": "quickstart-<from-plan>"
+  }'
+```
+
+Using the same `idempotency_key` with the same payload is replay-safe: retries return the same created agent instead of creating duplicates.
+
+## 7. Optional: Reddit OAuth for News Ingest
+
+By default Reddit source ingest uses public search JSON.  
+For higher quota/stability, configure OAuth app credentials:
+
+```bash
+export AMARYLLIS_REDDIT_CLIENT_ID="<client-id>"
+export AMARYLLIS_REDDIT_CLIENT_SECRET="<client-secret>"
+export AMARYLLIS_REDDIT_REFRESH_TOKEN="<refresh-token-optional>"
+export AMARYLLIS_REDDIT_USER_AGENT="amaryllis-news-agent/1.0"
+export AMARYLLIS_X_BEARER_TOKEN="<x-bearer-token>"
+```
+
+When OAuth variables are set, the Reddit connector automatically switches to authenticated search and falls back to public mode only if OAuth call fails.  
+X connector requires `AMARYLLIS_X_BEARER_TOKEN` for `recent search` ingestion.

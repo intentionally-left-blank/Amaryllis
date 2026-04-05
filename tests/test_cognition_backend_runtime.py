@@ -106,6 +106,7 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         agent = quick_action.get("agent", {})
         created_agent_id = str(agent.get("id") or "")
         self.assertTrue(created_agent_id)
+        self.assertIsNone(quick_action.get("automation"))
 
         listed = self.client.get(
             "/agents",
@@ -118,6 +119,284 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         self.assertIsInstance(items, list)
         ids = {str(item.get("id")) for item in items if isinstance(item, dict)}
         self.assertIn(created_agent_id, ids)
+
+    def test_chat_quickstart_replays_when_session_request_retried(self) -> None:
+        before = self.client.get(
+            "/agents",
+            headers=self._auth("user-token"),
+            params={"user_id": "user-1"},
+        )
+        self.assertEqual(before.status_code, 200)
+        before_count = int(before.json().get("count", 0))
+
+        body = {
+            "user_id": "user-1",
+            "session_id": "chat-quickstart-idempotency-session-1",
+            "messages": [{"role": "user", "content": "сделай агента для AI новостей"}],
+            "stream": False,
+        }
+        first = self.client.post(
+            "/v1/chat/completions",
+            headers=self._auth("user-token"),
+            json=body,
+        )
+        self.assertEqual(first.status_code, 200)
+        first_payload = first.json()
+        first_quick_action = first_payload.get("quick_action", {})
+        first_agent = first_quick_action.get("agent", {})
+        first_agent_id = str(first_agent.get("id") or "")
+        self.assertTrue(first_agent_id)
+        first_idempotency = first_quick_action.get("idempotency", {})
+        self.assertFalse(bool(first_idempotency.get("replayed", False)))
+        self.assertTrue(bool(first_idempotency.get("derived", False)))
+
+        second = self.client.post(
+            "/v1/chat/completions",
+            headers=self._auth("user-token"),
+            json=body,
+        )
+        self.assertEqual(second.status_code, 200)
+        second_payload = second.json()
+        second_quick_action = second_payload.get("quick_action", {})
+        second_agent = second_quick_action.get("agent", {})
+        self.assertEqual(str(second_agent.get("id") or ""), first_agent_id)
+        second_idempotency = second_quick_action.get("idempotency", {})
+        self.assertTrue(bool(second_idempotency.get("replayed", False)))
+        self.assertTrue(bool(second_idempotency.get("derived", False)))
+
+        after = self.client.get(
+            "/agents",
+            headers=self._auth("user-token"),
+            params={"user_id": "user-1"},
+        )
+        self.assertEqual(after.status_code, 200)
+        after_count = int(after.json().get("count", 0))
+        self.assertEqual(after_count, before_count + 1)
+
+    def test_chat_phrase_can_create_scheduled_news_agent(self) -> None:
+        response = self.client.post(
+            "/v1/chat/completions",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            "создай новостного агента для AI каждый день в 08:15 "
+                            "из reddit и twitter, сразу запускай"
+                        ),
+                    }
+                ],
+                "stream": False,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(str(payload.get("provider")), "amaryllis")
+        quick_action = payload.get("quick_action", {})
+        self.assertEqual(str(quick_action.get("type")), "agent_created")
+
+        agent = quick_action.get("agent", {})
+        agent_id = str(agent.get("id") or "")
+        self.assertTrue(agent_id)
+        self.assertIn("web_search", agent.get("tools", []))
+        system_prompt = str(agent.get("system_prompt") or "").lower()
+        self.assertIn("reddit", system_prompt)
+        self.assertIn("twitter", system_prompt)
+
+        automation = quick_action.get("automation", {})
+        self.assertIsInstance(automation, dict)
+        self.assertTrue(str(automation.get("id") or "").strip())
+        self.assertEqual(str(automation.get("schedule_type")), "weekly")
+        schedule = automation.get("schedule", {})
+        self.assertIsInstance(schedule, dict)
+        self.assertEqual(int(schedule.get("hour", -1)), 8)
+        self.assertEqual(int(schedule.get("minute", -1)), 15)
+
+        listed = self.client.get(
+            "/automations",
+            headers=self._auth("user-token"),
+            params={"user_id": "user-1", "agent_id": agent_id},
+        )
+        self.assertEqual(listed.status_code, 200)
+        listed_payload = listed.json()
+        self.assertGreaterEqual(int(listed_payload.get("count", 0)), 1)
+
+    def test_chat_phrase_can_create_hourly_automation(self) -> None:
+        response = self.client.post(
+            "/v1/chat/completions",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "создай агента для мониторинга AI, каждые 3 часа в 05 минут",
+                    }
+                ],
+                "stream": False,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        quick_action = payload.get("quick_action", {})
+        automation = quick_action.get("automation", {})
+        self.assertIsInstance(automation, dict)
+        self.assertTrue(str(automation.get("id") or "").strip())
+        self.assertEqual(str(automation.get("schedule_type")), "hourly")
+        schedule = automation.get("schedule", {})
+        self.assertEqual(int(schedule.get("interval_hours", -1)), 3)
+        self.assertEqual(int(schedule.get("minute", -1)), 5)
+
+    def test_agents_quickstart_endpoint_creates_agent_and_automation(self) -> None:
+        response = self.client.post(
+            "/v1/agents/quickstart",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "request": "создай новостного агента для AI каждый день в 08:15 из reddit и twitter",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        agent = payload.get("agent", {})
+        self.assertTrue(str(agent.get("id") or "").strip())
+        self.assertIn("web_search", agent.get("tools", []))
+        self.assertIn("news", str(payload.get("quickstart_spec", {}).get("kind", "")).lower())
+        automation = payload.get("automation", {})
+        self.assertIsInstance(automation, dict)
+        self.assertTrue(str(automation.get("id") or "").strip())
+        self.assertEqual(str(automation.get("schedule_type")), "weekly")
+        schedule = automation.get("schedule", {})
+        self.assertEqual(int(schedule.get("hour", -1)), 8)
+        self.assertEqual(int(schedule.get("minute", -1)), 15)
+
+    def test_agents_quickstart_endpoint_is_idempotent_with_same_key(self) -> None:
+        before = self.client.get(
+            "/agents",
+            headers=self._auth("user-token"),
+            params={"user_id": "user-1"},
+        )
+        self.assertEqual(before.status_code, 200)
+        before_count = int(before.json().get("count", 0))
+
+        body = {
+            "user_id": "user-1",
+            "idempotency_key": "runtime-test-news-ai-idem-1",
+            "request": "создай агента для AI новостей каждый день в 08:15 из reddit и twitter",
+        }
+        first = self.client.post(
+            "/v1/agents/quickstart",
+            headers=self._auth("user-token"),
+            json=body,
+        )
+        self.assertEqual(first.status_code, 200)
+        first_payload = first.json()
+        first_agent = first_payload.get("agent", {})
+        first_agent_id = str(first_agent.get("id") or "")
+        self.assertTrue(first_agent_id)
+        first_automation = first_payload.get("automation", {})
+        self.assertIsInstance(first_automation, dict)
+        first_automation_id = str(first_automation.get("id") or "")
+        self.assertTrue(first_automation_id)
+        first_idempotency = first_payload.get("idempotency", {})
+        self.assertFalse(bool(first_idempotency.get("replayed", False)))
+
+        second = self.client.post(
+            "/v1/agents/quickstart",
+            headers=self._auth("user-token"),
+            json=body,
+        )
+        self.assertEqual(second.status_code, 200)
+        second_payload = second.json()
+        second_agent = second_payload.get("agent", {})
+        second_automation = second_payload.get("automation", {})
+        self.assertEqual(str(second_agent.get("id") or ""), first_agent_id)
+        self.assertEqual(str(second_automation.get("id") or ""), first_automation_id)
+        second_idempotency = second_payload.get("idempotency", {})
+        self.assertTrue(bool(second_idempotency.get("replayed", False)))
+
+        after = self.client.get(
+            "/agents",
+            headers=self._auth("user-token"),
+            params={"user_id": "user-1"},
+        )
+        self.assertEqual(after.status_code, 200)
+        after_count = int(after.json().get("count", 0))
+        self.assertEqual(after_count, before_count + 1)
+
+    def test_agents_quickstart_idempotency_key_rejects_payload_change(self) -> None:
+        first = self.client.post(
+            "/v1/agents/quickstart",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "idempotency_key": "runtime-test-news-ai-idem-2",
+                "request": "создай агента для AI новостей из reddit",
+            },
+        )
+        self.assertEqual(first.status_code, 200)
+
+        second = self.client.post(
+            "/v1/agents/quickstart",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "idempotency_key": "runtime-test-news-ai-idem-2",
+                "request": "создай агента для Python разработки",
+            },
+        )
+        self.assertEqual(second.status_code, 400)
+        error = second.json().get("error", {})
+        self.assertEqual(str(error.get("type")), "validation_error")
+        self.assertIn("Idempotency key", str(error.get("message", "")))
+
+    def test_agents_quickstart_plan_endpoint_has_no_side_effects(self) -> None:
+        before = self.client.get(
+            "/agents",
+            headers=self._auth("user-token"),
+            params={"user_id": "user-1"},
+        )
+        self.assertEqual(before.status_code, 200)
+        before_count = int(before.json().get("count", 0))
+
+        planned = self.client.post(
+            "/v1/agents/quickstart/plan",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "request": "создай агента для AI новостей каждый день в 09:30 из reddit и twitter",
+            },
+        )
+        self.assertEqual(planned.status_code, 200)
+        payload = planned.json()
+        quickstart_plan = payload.get("quickstart_plan", {})
+        self.assertEqual(str(quickstart_plan.get("kind")), "news")
+        self.assertEqual(str(quickstart_plan.get("name")), "News Scout")
+        self.assertIn("web_search", quickstart_plan.get("tools", []))
+        automation_plan = quickstart_plan.get("automation", {})
+        self.assertIsInstance(automation_plan, dict)
+        self.assertTrue(bool(automation_plan.get("enabled", False)))
+        self.assertEqual(str(automation_plan.get("schedule_type")), "weekly")
+        self.assertEqual(int((automation_plan.get("schedule") or {}).get("hour", -1)), 9)
+        self.assertEqual(int((automation_plan.get("schedule") or {}).get("minute", -1)), 30)
+
+        apply_hint = payload.get("apply_hint", {})
+        self.assertEqual(str(apply_hint.get("endpoint")), "/agents/quickstart")
+        apply_payload = apply_hint.get("payload", {})
+        self.assertEqual(str(apply_payload.get("user_id")), "user-1")
+        self.assertTrue(str(apply_payload.get("request") or "").strip())
+        self.assertTrue(str(apply_payload.get("idempotency_key") or "").strip())
+
+        after = self.client.get(
+            "/agents",
+            headers=self._auth("user-token"),
+            params={"user_id": "user-1"},
+        )
+        self.assertEqual(after.status_code, 200)
+        after_count = int(after.json().get("count", 0))
+        self.assertEqual(after_count, before_count)
 
     def test_chat_endpoint_returns_grounded_provenance_when_memory_fact_exists(self) -> None:
         services = self.server_module.app.state.services

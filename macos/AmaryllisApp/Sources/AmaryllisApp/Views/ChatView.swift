@@ -551,6 +551,10 @@ struct ChatView: View {
                         response = retryWithoutTools
                         content = retryWithoutTools.choices.first?.message.content ?? content
                     }
+                    let quickActionSummary = renderQuickActionSummary(response.quickAction)
+                    if !quickActionSummary.isEmpty {
+                        content += "\n\n\(quickActionSummary)"
+                    }
                     let routingTrace = renderRoutingTrace(response.routing)
                     if showAdvancedControls && !routingTrace.isEmpty {
                         content += "\n\n\(routingTrace)"
@@ -588,6 +592,10 @@ struct ChatView: View {
                             )
 
                             var retriedContent = response.choices.first?.message.content ?? content
+                            let retryQuickActionSummary = renderQuickActionSummary(response.quickAction)
+                            if !retryQuickActionSummary.isEmpty {
+                                retriedContent += "\n\n\(retryQuickActionSummary)"
+                            }
                             let retryRoutingTrace = renderRoutingTrace(response.routing)
                             if showAdvancedControls && !retryRoutingTrace.isEmpty {
                                 retriedContent += "\n\n\(retryRoutingTrace)"
@@ -740,6 +748,77 @@ struct ChatView: View {
             }
         }
         return lines.joined(separator: "\n")
+    }
+
+    private func renderQuickActionSummary(_ quickAction: APIChatCompletionsResponse.QuickAction?) -> String {
+        guard let quickAction else { return "" }
+
+        let type = quickAction.type.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !type.isEmpty else { return "" }
+
+        var lines: [String] = ["Quick action: \(type)"]
+
+        if let agent = quickAction.agent {
+            lines.append("- Agent: \(agent.name) (\(agent.id))")
+        }
+
+        if let automation = quickAction.automation {
+            lines.append("- Automation: \(quickAutomationSummary(automation))")
+        }
+
+        if let idempotency = quickAction.idempotency {
+            var details: [String] = []
+            if let key = trimmedOrNil(idempotency.key) {
+                details.append("key=\(shortToken(key))")
+            }
+            if let replayed = idempotency.replayed {
+                details.append("replayed=\(replayed ? "yes" : "no")")
+            }
+            if let derived = idempotency.derived {
+                details.append("derived=\(derived ? "yes" : "no")")
+            }
+            if !details.isEmpty {
+                lines.append("- Idempotency: \(details.joined(separator: " "))")
+            }
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    private func quickAutomationSummary(_ automation: APIAutomationRecord) -> String {
+        let normalizedType = automation.scheduleType.lowercased()
+        let cadence: String
+        if normalizedType == "interval" {
+            cadence = formatInterval(seconds: automation.intervalSec)
+        } else {
+            cadence = automation.scheduleType
+        }
+        return "\(cadence), next_run=\(automation.nextRunAt)"
+    }
+
+    private func formatInterval(seconds: Int) -> String {
+        let value = max(1, seconds)
+        if value % 3_600 == 0 {
+            return "every \(value / 3_600)h"
+        }
+        if value % 60 == 0 {
+            return "every \(value / 60)m"
+        }
+        return "every \(value)s"
+    }
+
+    private func shortToken(_ raw: String) -> String {
+        let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.count > 20 else { return normalized }
+        let prefix = normalized.prefix(8)
+        let suffix = normalized.suffix(8)
+        return "\(prefix)...\(suffix)"
+    }
+
+    private func trimmedOrNil(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? nil : normalized
     }
 
     private func renderPolicyWarning(events: [APIChatToolEvent]?, errorText: String?) -> String {

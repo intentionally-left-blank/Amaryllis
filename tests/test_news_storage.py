@@ -100,6 +100,49 @@ class NewsStorageTests(unittest.TestCase):
         self.assertEqual(str(item.get("title")), "One Updated")
         self.assertEqual(int(item.get("metadata", {}).get("version")), 2)
 
+    def test_upsert_preserves_merged_provenance_metadata(self) -> None:
+        inserted = self.database.upsert_news_items(
+            user_id="user-1",
+            topic="AI",
+            items=[
+                {
+                    "source": "web",
+                    "canonical_id": "web-merged",
+                    "url": "https://example.com/story",
+                    "title": "Merged story",
+                    "published_at": "2026-04-04T00:00:00+00:00",
+                    "ingested_at": "2026-04-04T00:03:00+00:00",
+                    "metadata": {
+                        "merged_sources": ["web", "reddit"],
+                        "merged_count": 2,
+                        "provenance": [
+                            {
+                                "source": "web",
+                                "canonical_id": "web-merged",
+                                "url": "https://example.com/story",
+                            },
+                            {
+                                "source": "reddit",
+                                "canonical_id": "t3_abc123",
+                                "url": "https://example.com/story",
+                            },
+                        ],
+                    },
+                }
+            ],
+        )
+        self.assertEqual(inserted, 1)
+
+        listed = self.database.list_news_items(user_id="user-1", topic="AI", source="web", limit=10)
+        self.assertEqual(len(listed), 1)
+        metadata = listed[0].get("metadata")
+        self.assertIsInstance(metadata, dict)
+        self.assertEqual(metadata.get("merged_sources"), ["web", "reddit"])
+        self.assertEqual(metadata.get("merged_count"), 2)
+        provenance = metadata.get("provenance")
+        self.assertIsInstance(provenance, list)
+        self.assertEqual(len(provenance), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,7 +7,7 @@ daily topic digests (for example AI), grounded by verifiable sources, with stabl
 
 ## Phase Status
 
-`planned` (execution-ready backlog v1)
+`in_progress` (P7-S0 execution underway)
 
 ## Status Legend
 
@@ -37,8 +37,8 @@ daily topic digests (for example AI), grounded by verifiable sources, with stabl
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
 | P7-A01 | done | Add unified source connector contract | `sources/base.py` + typed request/response schema | Runtime can call source connectors through a single contract with normalized item shape |
-| P7-A02 | todo | Implement Reddit connector (OAuth + search ingest) | `sources/reddit_connector.py` + policy/rate handling | Reddit items are ingested with canonical ids, timestamps, author, url, and retry policy |
-| P7-A03 | todo | Implement X connector (OAuth/Bearer + search ingest) | `sources/x_connector.py` + policy/rate handling | X items are ingested with the same normalized schema and source metadata |
+| P7-A02 | done | Implement Reddit connector (OAuth + search ingest) | `sources/reddit_connector.py` + policy/rate handling | Reddit items are ingested with canonical ids, timestamps, author, url, and retry policy |
+| P7-A03 | done | Implement X connector (OAuth/Bearer + search ingest) | `sources/x_connector.py` + policy/rate handling | X items are ingested with the same normalized schema and source metadata |
 | P7-A04 | todo | Upgrade web connector from raw search snippets to fetch+extract path | `sources/web_connector.py` | Web items include URL, title, excerpt, publish hints, and fetch status |
 
 ### Epic B - Provider Session and Entitlement Layer
@@ -54,7 +54,7 @@ daily topic digests (for example AI), grounded by verifiable sources, with stabl
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
 | P7-C01 | done | Add news mission planner contract | `/news/missions/plan` API + `contracts/news_mission_v1.json` | Mission plan returns topic, source policy, schedule, budget, and output schema |
-| P7-C02 | todo | Implement ingest -> normalize -> dedup pipeline | `news/pipeline.py` + storage tables | Same story from multiple sources is merged by canonical key with provenance retained |
+| P7-C02 | in_progress | Implement ingest -> normalize -> dedup pipeline | `news/pipeline.py` + storage tables | Same story from multiple sources is merged by canonical key with provenance retained |
 | P7-C03 | todo | Implement grounded digest composer | `news/digest.py` + citation policy | Every digest section has source references and confidence markers |
 | P7-C04 | todo | Add automation template for daily AI digest | `automation/mission_planner.py` template `ai_news_daily` | User can create a daily digest mission in one API call |
 
@@ -80,11 +80,11 @@ daily topic digests (for example AI), grounded by verifiable sources, with stabl
 | ID | Status | Scope |
 |---|---|---|
 | P7-A01 | done | Connector contract and normalized source item schema |
-| P7-A02 | todo | Reddit ingestion connector with retries/rate policy |
+| P7-A02 | done | Reddit ingestion connector with retries/rate policy |
 | P7-B01 | done | Provider session storage and revoke/list APIs |
 | P7-B02 | done | Entitlement resolver endpoint and model capability checks |
 | P7-C01 | done | `news_mission_v1` contract + mission plan API |
-| P7-C02 | todo | Ingest-normalize-dedup storage pipeline |
+| P7-C02 | in_progress | Ingest-normalize-dedup storage pipeline |
 
 Sprint goal:
 - one scheduled mission can ingest Reddit + web sources and produce a stored normalized corpus for digest composition.
@@ -93,7 +93,7 @@ Sprint goal:
 
 | ID | Status | Scope |
 |---|---|---|
-| P7-A03 | todo | X ingestion connector with policy controls |
+| P7-A03 | done | X ingestion connector with policy controls |
 | P7-A04 | todo | Web fetch/extract hardening |
 | P7-B03 | todo | Entitlement enforcement in model routing |
 | P7-C03 | todo | Grounded digest composer with citations |
@@ -143,5 +143,6 @@ Contracts and docs:
 
 ## Next Checkpoint
 
-- Continue P7-S0 with `P7-A02` and `P7-C02` (first real ingestion + dedup storage path).
-- Start `P7-B03` entitlement enforcement in model routing after `P7-C02` baseline is stable.
+- Continue with `P7-C02` (finish mission-level provenance merge contract and storage-level merge policy).
+- Start `P7-B03` entitlement enforcement in model routing once C02 merge policy is finalized.
+- Start `P7-A04` web fetch/extract hardening after C02 baseline is stable.

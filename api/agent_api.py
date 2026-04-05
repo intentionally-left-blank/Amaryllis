@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from typing import Any
@@ -8,6 +9,7 @@ from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from api.chat_api import _automation_schedule_summary, _infer_agent_spec_from_request
 from runtime.auth import assert_owner, auth_context_from_request, resolve_user_id
 from runtime.errors import AmaryllisError, NotFoundError, ProviderError, ValidationError
 
@@ -15,6 +17,7 @@ router = APIRouter(tags=["agents"])
 RUN_STATUSES: set[str] = {"queued", "running", "succeeded", "failed", "canceled"}
 REPLAY_TIMELINE_PRESETS: set[str] = {"errors", "tools", "verify"}
 RUN_INTERACTION_MODES: set[str] = {"plan", "execute"}
+QUICKSTART_IDEMPOTENCY_MEMORY_PREFIX = "agent.quickstart.idempotency.v1."
 
 
 def _request_id(request: Request) -> str:
@@ -91,6 +94,14 @@ class CreateAgentRequest(BaseModel):
     user_id: str | None = None
 
 
+class QuickstartAgentRequest(BaseModel):
+    request: str = Field(min_length=1, max_length=1000)
+    model: str | None = None
+    user_id: str | None = None
+    session_id: str | None = None
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
+
+
 class AgentChatRequest(BaseModel):
     user_id: str = Field(min_length=1)
     message: str = Field(min_length=1)
@@ -127,6 +138,70 @@ class AgentRunDispatchRequest(BaseModel):
     interaction_mode: str = Field(default="execute")
     max_attempts: int | None = Field(default=None, ge=1, le=10)
     budget: RunBudgetRequest | None = None
+
+
+def _normalize_quickstart_idempotency_key(raw_key: str | None) -> str:
+    key = str(raw_key or "").strip()
+    if not key:
+        return ""
+    return key[:200]
+
+
+def _quickstart_payload_fingerprint(
+    *,
+    payload: QuickstartAgentRequest,
+    user_id: str,
+) -> str:
+    canonical = {
+        "user_id": str(user_id or "").strip(),
+        "request": str(payload.request or "").strip(),
+        "model": str(payload.model or "").strip(),
+        "session_id": str(payload.session_id or "").strip(),
+    }
+    serialized = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _quickstart_default_idempotency_key(
+    *,
+    payload: QuickstartAgentRequest,
+    user_id: str,
+) -> str:
+    fingerprint = _quickstart_payload_fingerprint(payload=payload, user_id=user_id)
+    return f"quickstart-{fingerprint[:24]}"
+
+
+def _quickstart_idempotency_memory_key(idempotency_key: str) -> str:
+    digest = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
+    return f"{QUICKSTART_IDEMPOTENCY_MEMORY_PREFIX}{digest}"
+
+
+def _load_quickstart_idempotency_record(raw_value: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(str(raw_value or ""))
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return payload
+
+
+def _build_quickstart_assistant_reply(
+    *,
+    agent_id: str,
+    agent_name: str,
+    focus: str,
+    automation: dict[str, Any] | None,
+    automation_error: str | None,
+) -> str:
+    reply = f"Готово. Создал агента '{agent_name}' (id: {agent_id}). Фокус: {focus or 'general'}."
+    if isinstance(automation, dict):
+        reply += f" Запустил автоматический режим ({_automation_schedule_summary(automation)})."
+    elif automation_error:
+        reply += f" Агент создан, но расписание включить не удалось: {automation_error}."
+    else:
+        reply += " Можешь сразу запускать его задачи."
+    return reply
 
 
 @router.post("/agents/create")
@@ -178,6 +253,279 @@ def create_agent(payload: CreateAgentRequest, request: Request) -> dict[str, Any
             details={"error": str(exc)},
         )
         raise ProviderError(str(exc)) from exc
+
+
+@router.post("/agents/quickstart")
+def quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> dict[str, Any]:
+    services = request.app.state.services
+    auth = auth_context_from_request(request)
+    effective_user_id = resolve_user_id(request_user_id=payload.user_id, auth=auth)
+    request_fingerprint = _quickstart_payload_fingerprint(payload=payload, user_id=effective_user_id)
+    idempotency_key = _normalize_quickstart_idempotency_key(payload.idempotency_key)
+    if not idempotency_key:
+        idempotency_key = _normalize_quickstart_idempotency_key(request.headers.get("Idempotency-Key"))
+    if not idempotency_key:
+        idempotency_key = _normalize_quickstart_idempotency_key(request.headers.get("X-Idempotency-Key"))
+    idempotency_payload: dict[str, Any] | None = None
+
+    spec = _infer_agent_spec_from_request(payload.request)
+    automation: dict[str, Any] | None = None
+    automation_error: str | None = None
+    if idempotency_key:
+        memory_key = _quickstart_idempotency_memory_key(idempotency_key)
+        cached_item = services.database.get_user_memory_item(
+            user_id=effective_user_id,
+            key=memory_key,
+        )
+        if isinstance(cached_item, dict):
+            cached_record = _load_quickstart_idempotency_record(str(cached_item.get("value") or ""))
+            cached_fingerprint = str(cached_record.get("fingerprint") or "").strip()
+            if cached_fingerprint and cached_fingerprint != request_fingerprint:
+                raise ValidationError(
+                    "Idempotency key already used with a different quickstart payload."
+                )
+            cached_agent_id = str(cached_record.get("agent_id") or "").strip()
+            if cached_agent_id:
+                cached_agent = services.agent_manager.get_agent(cached_agent_id)
+                if (
+                    cached_agent is not None
+                    and str(cached_agent.user_id or "").strip() == str(effective_user_id).strip()
+                ):
+                    cached_automation_id = str(cached_record.get("automation_id") or "").strip()
+                    cached_automation = (
+                        services.automation_scheduler.get_automation(cached_automation_id)
+                        if cached_automation_id
+                        else None
+                    )
+                    cached_spec = cached_record.get("quickstart_spec")
+                    if not isinstance(cached_spec, dict):
+                        cached_spec = spec
+                    cached_focus = str(cached_spec.get("focus") or "")
+                    cached_reply = str(cached_record.get("assistant_reply") or "").strip()
+                    if not cached_reply:
+                        cached_reply = _build_quickstart_assistant_reply(
+                            agent_id=cached_agent.id,
+                            agent_name=cached_agent.name,
+                            focus=cached_focus,
+                            automation=cached_automation if isinstance(cached_automation, dict) else None,
+                            automation_error=None,
+                        )
+                    replay_receipt = _sign_action(
+                        request,
+                        action="agent_quickstart_create",
+                        payload={
+                            **payload.model_dump(exclude_none=True),
+                            "user_id": effective_user_id,
+                            "kind": str(cached_spec.get("kind") or "general"),
+                            "focus": cached_focus,
+                            "sources": (
+                                cached_spec.get("source_targets")
+                                if isinstance(cached_spec.get("source_targets"), list)
+                                else []
+                            ),
+                            "automation_enabled": isinstance(cached_automation, dict),
+                            "idempotency_key": idempotency_key,
+                            "idempotency_replayed": True,
+                        },
+                        actor=auth.user_id,
+                        target_type="agent",
+                        target_id=cached_agent.id,
+                    )
+                    return {
+                        "agent": cached_agent.to_record(),
+                        "automation": cached_automation if isinstance(cached_automation, dict) else None,
+                        "quickstart_spec": cached_spec,
+                        "assistant_reply": cached_reply,
+                        "idempotency": {
+                            "key": idempotency_key,
+                            "fingerprint": request_fingerprint,
+                            "replayed": True,
+                        },
+                        "action_receipt": replay_receipt,
+                        "request_id": _request_id(request),
+                    }
+        idempotency_payload = {
+            "key": idempotency_key,
+            "fingerprint": request_fingerprint,
+            "replayed": False,
+        }
+
+    try:
+        agent = services.agent_manager.create_agent(
+            name=str(spec.get("name") or "Custom Assistant"),
+            system_prompt=str(spec.get("system_prompt") or "You are a helpful assistant."),
+            model=payload.model,
+            tools=spec.get("tools") if isinstance(spec.get("tools"), list) else [],
+            user_id=effective_user_id,
+        )
+        automation_spec = spec.get("automation")
+        if isinstance(automation_spec, dict):
+            try:
+                automation = services.automation_scheduler.create_automation(
+                    agent_id=agent.id,
+                    user_id=effective_user_id,
+                    session_id=payload.session_id,
+                    message=str(automation_spec.get("message") or "Run agent cycle"),
+                    interval_sec=automation_spec.get("interval_sec"),
+                    schedule_type=automation_spec.get("schedule_type"),
+                    schedule=automation_spec.get("schedule"),
+                    timezone_name=str(automation_spec.get("timezone") or "UTC"),
+                    start_immediately=bool(automation_spec.get("start_immediately", False)),
+                    mission_policy=None,
+                )
+            except Exception as exc:
+                automation_error = str(exc)
+    except ValueError as exc:
+        _sign_action(
+            request,
+            action="agent_quickstart_create",
+            payload={**payload.model_dump(exclude_none=True), "user_id": effective_user_id},
+            actor=auth.user_id,
+            target_type="agent",
+            status="failed",
+            details={"error": str(exc)},
+        )
+        raise ValidationError(str(exc)) from exc
+    except AmaryllisError:
+        raise
+    except Exception as exc:
+        _sign_action(
+            request,
+            action="agent_quickstart_create",
+            payload={**payload.model_dump(exclude_none=True), "user_id": effective_user_id},
+            actor=auth.user_id,
+            target_type="agent",
+            status="failed",
+            details={"error": str(exc)},
+        )
+        raise ProviderError(str(exc)) from exc
+
+    receipt = _sign_action(
+        request,
+        action="agent_quickstart_create",
+        payload={
+            **payload.model_dump(exclude_none=True),
+            "user_id": effective_user_id,
+            "kind": str(spec.get("kind") or "general"),
+            "focus": str(spec.get("focus") or ""),
+            "sources": spec.get("source_targets") if isinstance(spec.get("source_targets"), list) else [],
+            "automation_enabled": automation is not None,
+            "automation_error": automation_error,
+            "idempotency_key": idempotency_key or None,
+            "idempotency_replayed": False if idempotency_payload is not None else None,
+        },
+        actor=auth.user_id,
+        target_type="agent",
+        target_id=agent.id,
+    )
+    assistant_reply = _build_quickstart_assistant_reply(
+        agent_id=agent.id,
+        agent_name=agent.name,
+        focus=str(spec.get("focus") or ""),
+        automation=automation if isinstance(automation, dict) else None,
+        automation_error=automation_error,
+    )
+    if idempotency_payload is not None:
+        try:
+            services.database.set_user_memory(
+                user_id=effective_user_id,
+                key=_quickstart_idempotency_memory_key(idempotency_key),
+                value=json.dumps(
+                    {
+                        "fingerprint": request_fingerprint,
+                        "agent_id": agent.id,
+                        "automation_id": (
+                            str(automation.get("id") or "").strip() if isinstance(automation, dict) else None
+                        ),
+                        "quickstart_spec": spec,
+                        "assistant_reply": assistant_reply,
+                        "recorded_at": time.time(),
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+                source="agent_api.quickstart.idempotency",
+            )
+        except Exception:
+            pass
+    return {
+        "agent": agent.to_record(),
+        "automation": automation,
+        "quickstart_spec": spec,
+        "assistant_reply": assistant_reply,
+        "idempotency": idempotency_payload,
+        "action_receipt": receipt,
+        "request_id": _request_id(request),
+    }
+
+
+@router.post("/agents/quickstart/plan")
+def plan_quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> dict[str, Any]:
+    auth = auth_context_from_request(request)
+    effective_user_id = resolve_user_id(request_user_id=payload.user_id, auth=auth)
+    spec = _infer_agent_spec_from_request(payload.request)
+    automation_spec = spec.get("automation")
+    automation_plan: dict[str, Any] | None = None
+    assistant_reply_preview = (
+        f"Будет создан агент '{str(spec.get('name') or 'Custom Assistant')}' "
+        f"с фокусом '{str(spec.get('focus') or 'general')}'."
+    )
+    if isinstance(automation_spec, dict):
+        schedule_preview = {
+            "schedule_type": automation_spec.get("schedule_type"),
+            "schedule": automation_spec.get("schedule"),
+        }
+        automation_plan = {
+            "enabled": True,
+            "schedule_type": str(automation_spec.get("schedule_type") or ""),
+            "schedule": automation_spec.get("schedule") if isinstance(automation_spec.get("schedule"), dict) else {},
+            "interval_sec": automation_spec.get("interval_sec"),
+            "timezone": str(automation_spec.get("timezone") or "UTC"),
+            "start_immediately": bool(automation_spec.get("start_immediately", False)),
+            "summary": _automation_schedule_summary(schedule_preview),
+        }
+        assistant_reply_preview += " Также будет включено расписание автозапуска."
+    else:
+        assistant_reply_preview += " Расписание не будет включено автоматически."
+
+    apply_payload = payload.model_dump(exclude_none=True)
+    apply_payload["user_id"] = effective_user_id
+    if not str(apply_payload.get("idempotency_key") or "").strip():
+        apply_payload["idempotency_key"] = _quickstart_default_idempotency_key(
+            payload=payload,
+            user_id=effective_user_id,
+        )
+
+    receipt = _sign_action(
+        request,
+        action="agent_quickstart_plan",
+        payload={
+            **apply_payload,
+            "kind": str(spec.get("kind") or "general"),
+            "focus": str(spec.get("focus") or ""),
+            "sources": spec.get("source_targets") if isinstance(spec.get("source_targets"), list) else [],
+            "automation_enabled": isinstance(automation_spec, dict),
+        },
+        actor=auth.user_id,
+        target_type="agent_quickstart_plan",
+    )
+    return {
+        "quickstart_plan": {
+            "kind": str(spec.get("kind") or "general"),
+            "name": str(spec.get("name") or "Custom Assistant"),
+            "focus": str(spec.get("focus") or "general"),
+            "tools": spec.get("tools") if isinstance(spec.get("tools"), list) else [],
+            "sources": spec.get("source_targets") if isinstance(spec.get("source_targets"), list) else [],
+            "automation": automation_plan,
+            "assistant_reply_preview": assistant_reply_preview,
+        },
+        "apply_hint": {
+            "endpoint": "/agents/quickstart",
+            "payload": apply_payload,
+        },
+        "action_receipt": receipt,
+        "request_id": _request_id(request),
+    }
 
 
 @router.get("/agents")

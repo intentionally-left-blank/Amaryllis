@@ -45,6 +45,34 @@ class _FakeRegistry:
         ]
 
 
+class _CrossSourceRegistry:
+    def search(self, *, source: str, query):  # noqa: ANN001
+        _ = query
+        if source == "web":
+            return [
+                {
+                    "source": "web",
+                    "canonical_id": "web-one",
+                    "url": "https://example.com/story",
+                    "title": "Story",
+                    "published_at": "2026-04-04T00:00:00+00:00",
+                    "metadata": {"connector": "web"},
+                }
+            ]
+        if source == "reddit":
+            return [
+                {
+                    "source": "reddit",
+                    "canonical_id": "reddit-one",
+                    "url": "https://example.com/story",
+                    "title": "Story from Reddit",
+                    "published_at": "2026-04-04T00:10:00+00:00",
+                    "metadata": {"connector": "reddit", "subreddit": "MachineLearning"},
+                }
+            ]
+        return []
+
+
 class NewsPipelineTests(unittest.TestCase):
     def test_build_query_bundle_uses_seed_urls_and_depth(self) -> None:
         bundle = build_query_bundle(
@@ -78,17 +106,53 @@ class NewsPipelineTests(unittest.TestCase):
 
         self.assertEqual(report.get("raw_count"), 2)
         self.assertEqual(report.get("deduped_count"), 1)
+        self.assertEqual(report.get("duplicate_count"), 1)
         self.assertEqual(report.get("per_source_count", {}).get("web"), 2)
 
         items = report.get("items", [])
         self.assertEqual(len(items), 1)
         self.assertEqual(str(items[0].get("url")), "https://openai.com/blog/launch?utm_source=test")
+        metadata = items[0].get("metadata")
+        self.assertIsInstance(metadata, dict)
+        provenance = metadata.get("provenance")
+        self.assertIsInstance(provenance, list)
+        self.assertEqual(len(provenance), 2)
+        merged_sources = metadata.get("merged_sources")
+        self.assertEqual(merged_sources, ["web"])
+        self.assertEqual(metadata.get("merged_count"), 2)
 
         first_call = registry.calls[0]
-        metadata = first_call.get("metadata")
-        self.assertIsInstance(metadata, dict)
-        include_domains = metadata.get("include_domains")
+        call_metadata = first_call.get("metadata")
+        self.assertIsInstance(call_metadata, dict)
+        include_domains = call_metadata.get("include_domains")
         self.assertIn("openai.com", include_domains)
+
+    def test_ingest_preview_keeps_cross_source_provenance_for_same_story(self) -> None:
+        registry = _CrossSourceRegistry()
+        pipeline = NewsIngestionPipeline(source_registry=registry)  # type: ignore[arg-type]
+
+        report = pipeline.ingest_preview(
+            topic="AI",
+            sources=["web", "reddit"],
+            window_hours=24,
+            max_items_per_source=10,
+            internet_scope={},
+        )
+
+        self.assertEqual(report.get("raw_count"), 2)
+        self.assertEqual(report.get("deduped_count"), 1)
+        self.assertEqual(report.get("duplicate_count"), 1)
+        items = report.get("items", [])
+        self.assertEqual(len(items), 1)
+        metadata = items[0].get("metadata")
+        self.assertIsInstance(metadata, dict)
+        self.assertEqual(metadata.get("merged_sources"), ["web", "reddit"])
+        self.assertEqual(metadata.get("merged_count"), 2)
+        provenance = metadata.get("provenance")
+        self.assertIsInstance(provenance, list)
+        self.assertEqual(len(provenance), 2)
+        sources = {str(item.get("source")) for item in provenance}
+        self.assertEqual(sources, {"web", "reddit"})
 
 
 if __name__ == "__main__":

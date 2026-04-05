@@ -12,6 +12,12 @@ struct AgentsView: View {
     @State private var newAgentName: String = "Research Agent"
     @State private var newAgentPrompt: String = "You are a practical AI agent. Use tools when they are needed."
     @State private var newAgentTools: String = "web_search,filesystem"
+    @State private var quickstartRequest: String =
+        "создай агента для AI новостей каждый день в 08:15 из reddit и twitter"
+    @State private var quickstartPlan: APIQuickstartAgentPlan?
+    @State private var quickstartApplyPayload: APIQuickstartAgentApplyPayload?
+    @State private var quickstartLastApply: APIQuickstartAgentApplyResponse?
+    @State private var quickstartStatusMessage: String = "Quickstart idle."
 
     @State private var agents: [APIAgentRecord] = []
     @State private var selectedAgentID: String?
@@ -71,6 +77,8 @@ struct AgentsView: View {
 
     @State private var isLoadingAgents: Bool = false
     @State private var isCreatingAgent: Bool = false
+    @State private var isPlanningQuickstart: Bool = false
+    @State private var isApplyingQuickstart: Bool = false
     @State private var isSending: Bool = false
     @State private var isLoadingRuns: Bool = false
     @State private var isCreatingRun: Bool = false
@@ -214,6 +222,8 @@ struct AgentsView: View {
             }
             .amaryllisCard()
 
+            quickstartCard
+
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     ForEach(agents) { agent in
@@ -274,6 +284,123 @@ struct AgentsView: View {
                     .foregroundStyle(AmaryllisTheme.accent)
             }
         }
+    }
+
+    private var quickstartCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("One-shot Quickstart")
+                    .font(AmaryllisTheme.sectionFont(size: 18))
+                    .foregroundStyle(AmaryllisTheme.textPrimary)
+                Spacer()
+                if let payload = quickstartApplyPayload,
+                   let key = payload.idempotencyKey,
+                   !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("key: \(shortQuickstartKey(key))")
+                        .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Text("Опиши агента простым языком. План создается без side effects, затем Apply создает или безопасно переиспользует агента.")
+                .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                .foregroundStyle(AmaryllisTheme.textSecondary)
+
+            TextEditor(text: $quickstartRequest)
+                .font(AmaryllisTheme.bodyFont(size: 12, weight: .medium))
+                .frame(height: 82)
+                .amaryllisEditorSurface()
+
+            HStack(spacing: 8) {
+                Button {
+                    Task { await planQuickstartAgent() }
+                } label: {
+                    if isPlanningQuickstart {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 90)
+                    } else {
+                        Text("Plan")
+                            .frame(width: 90)
+                    }
+                }
+                .buttonStyle(AmaryllisSecondaryButtonStyle())
+                .disabled(
+                    isPlanningQuickstart
+                        || isApplyingQuickstart
+                        || quickstartRequest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
+
+                Button {
+                    Task { await applyQuickstartAgentFromPlan() }
+                } label: {
+                    if isApplyingQuickstart {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 110)
+                    } else {
+                        Text("Apply Plan")
+                            .frame(width: 110)
+                    }
+                }
+                .buttonStyle(AmaryllisPrimaryButtonStyle())
+                .disabled(isApplyingQuickstart || quickstartApplyPayload == nil)
+
+                Button("Plan + Apply") {
+                    Task { await planAndApplyQuickstartAgent() }
+                }
+                .buttonStyle(AmaryllisSecondaryButtonStyle())
+                .disabled(
+                    isPlanningQuickstart
+                        || isApplyingQuickstart
+                        || quickstartRequest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
+            }
+
+            if let plan = quickstartPlan {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Plan: \(plan.name) [\(plan.kind)]")
+                        .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
+                        .foregroundStyle(AmaryllisTheme.textPrimary)
+                    Text("Focus: \(plan.focus)")
+                        .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                    if !plan.tools.isEmpty {
+                        Text("Tools: \(plan.tools.joined(separator: ", "))")
+                            .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                    }
+                    if !plan.sources.isEmpty {
+                        Text("Sources: \(plan.sources.joined(separator: ", "))")
+                            .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                    }
+                    if let automation = plan.automation,
+                       let summary = automation.summary,
+                       !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("Schedule: \(summary)")
+                            .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                            .foregroundStyle(AmaryllisTheme.textSecondary)
+                    }
+                }
+                .padding(8)
+                .background(AmaryllisTheme.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+
+            if let result = quickstartLastApply {
+                Text(renderQuickstartApplySummary(result))
+                    .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                    .foregroundStyle(AmaryllisTheme.textSecondary)
+            }
+
+            Text(quickstartStatusMessage)
+                .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                .foregroundStyle(AmaryllisTheme.textSecondary)
+                .lineLimit(3)
+        }
+        .amaryllisCard()
     }
 
     private var rightPanel: some View {
@@ -1291,6 +1418,77 @@ struct AgentsView: View {
     private var selectedRun: APIAgentRunRecord? {
         guard let id = selectedRunID else { return nil }
         return runs.first(where: { $0.id == id })
+    }
+
+    private func planQuickstartAgent() async {
+        let requestText = quickstartRequest.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !requestText.isEmpty else {
+            quickstartStatusMessage = "Quickstart request is empty."
+            return
+        }
+
+        isPlanningQuickstart = true
+        defer { isPlanningQuickstart = false }
+
+        do {
+            let response = try await appState.apiClient.planQuickstartAgent(
+                request: requestText,
+                model: activeModelForQuickstart(),
+                userId: trimmedOrNil(userID),
+                sessionId: trimmedOrNil(sessionID),
+                idempotencyKey: nil
+            )
+            quickstartPlan = response.quickstartPlan
+            quickstartApplyPayload = normalizedQuickstartApplyPayload(from: response.applyHint.payload)
+            quickstartStatusMessage = "Plan ready. Press Apply Plan to create agent safely."
+            appState.clearError()
+        } catch {
+            quickstartStatusMessage = "Quickstart plan failed."
+            appState.lastError = error.localizedDescription
+        }
+    }
+
+    private func applyQuickstartAgentFromPlan() async {
+        guard let payload = quickstartApplyPayload else {
+            quickstartStatusMessage = "No quickstart plan to apply."
+            return
+        }
+
+        isApplyingQuickstart = true
+        defer { isApplyingQuickstart = false }
+
+        do {
+            let normalizedPayload = normalizedQuickstartApplyPayload(from: payload)
+            let response = try await appState.apiClient.applyQuickstartAgent(payload: normalizedPayload)
+            quickstartApplyPayload = normalizedPayload
+            quickstartLastApply = response
+            selectedAgentID = response.agent.id
+
+            if response.idempotency?.replayed == true {
+                quickstartStatusMessage = "Apply completed: existing agent replayed safely."
+            } else {
+                quickstartStatusMessage = "Apply completed: new agent created."
+            }
+            if let automation = response.automation {
+                quickstartStatusMessage += " Automation enabled (\(scheduleSummary(for: automation)))."
+            }
+
+            await refreshAgents()
+            await refreshRuns()
+            await refreshAutomations()
+            await refreshInbox()
+            appState.clearError()
+        } catch {
+            quickstartStatusMessage = "Quickstart apply failed."
+            appState.lastError = error.localizedDescription
+        }
+    }
+
+    private func planAndApplyQuickstartAgent() async {
+        await planQuickstartAgent()
+        if quickstartApplyPayload != nil {
+            await applyQuickstartAgentFromPlan()
+        }
     }
 
     private func createAgent() async {
@@ -2614,6 +2812,66 @@ struct AgentsView: View {
         default:
             return "interval \(automation.intervalSec)s"
         }
+    }
+
+    private func normalizedQuickstartApplyPayload(
+        from payload: APIQuickstartAgentApplyPayload
+    ) -> APIQuickstartAgentApplyPayload {
+        let normalizedRequest = payload.request.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackRequest = quickstartRequest.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requestText = normalizedRequest.isEmpty ? fallbackRequest : normalizedRequest
+        let normalizedModel = trimmedOrNil(payload.model) ?? activeModelForQuickstart()
+        let normalizedUser = trimmedOrNil(payload.userId) ?? trimmedOrNil(userID)
+        let normalizedSession = trimmedOrNil(payload.sessionId) ?? trimmedOrNil(sessionID)
+        let normalizedIdempotencyKey = trimmedOrNil(payload.idempotencyKey)
+
+        return APIQuickstartAgentApplyPayload(
+            request: requestText,
+            model: normalizedModel,
+            userId: normalizedUser,
+            sessionId: normalizedSession,
+            idempotencyKey: normalizedIdempotencyKey
+        )
+    }
+
+    private func activeModelForQuickstart() -> String? {
+        guard let active = appState.modelCatalog?.active.model else {
+            return nil
+        }
+        let normalized = active.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty, normalized != "-" else {
+            return nil
+        }
+        return normalized
+    }
+
+    private func shortQuickstartKey(_ key: String) -> String {
+        let normalized = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.count > 20 else {
+            return normalized
+        }
+        let prefix = normalized.prefix(8)
+        let suffix = normalized.suffix(8)
+        return "\(prefix)…\(suffix)"
+    }
+
+    private func renderQuickstartApplySummary(_ response: APIQuickstartAgentApplyResponse) -> String {
+        var parts: [String] = []
+        if response.idempotency?.replayed == true {
+            parts.append("Replayed: \(response.agent.name) (\(response.agent.id)).")
+        } else {
+            parts.append("Created: \(response.agent.name) (\(response.agent.id)).")
+        }
+        if let automation = response.automation {
+            parts.append("Automation: \(scheduleSummary(for: automation)).")
+        }
+        return parts.joined(separator: " ")
+    }
+
+    private func trimmedOrNil(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? nil : normalized
     }
 
     private func parseWeekdaysInput(_ raw: String) -> [String] {

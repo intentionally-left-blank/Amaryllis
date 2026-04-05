@@ -627,6 +627,13 @@ struct APIChatToolEvent: Decodable {
 }
 
 struct APIChatCompletionsResponse: Decodable {
+    struct QuickAction: Decodable {
+        let type: String
+        let agent: APIAgentRecord?
+        let automation: APIAutomationRecord?
+        let idempotency: APIQuickstartIdempotencyInfo?
+    }
+
     struct Choice: Decodable {
         struct ChoiceMessage: Decodable {
             let role: String
@@ -650,6 +657,7 @@ struct APIChatCompletionsResponse: Decodable {
     let choices: [Choice]
     let toolEvents: [APIChatToolEvent]?
     let routing: APIChatRoutingDecision?
+    let quickAction: QuickAction?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -658,6 +666,7 @@ struct APIChatCompletionsResponse: Decodable {
         case choices
         case toolEvents = "tool_events"
         case routing
+        case quickAction = "quick_action"
     }
 }
 
@@ -698,6 +707,118 @@ struct APICreateAgentRequest: Encodable {
         case model
         case tools
         case userId = "user_id"
+    }
+}
+
+struct APIQuickstartAgentRequest: Encodable {
+    let request: String
+    let model: String?
+    let userId: String?
+    let sessionId: String?
+    let idempotencyKey: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case request
+        case model
+        case userId = "user_id"
+        case sessionId = "session_id"
+        case idempotencyKey = "idempotency_key"
+    }
+}
+
+struct APIQuickstartAgentApplyPayload: Codable {
+    let request: String
+    let model: String?
+    let userId: String?
+    let sessionId: String?
+    let idempotencyKey: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case request
+        case model
+        case userId = "user_id"
+        case sessionId = "session_id"
+        case idempotencyKey = "idempotency_key"
+    }
+}
+
+struct APIQuickstartAutomationPlan: Decodable {
+    let enabled: Bool
+    let scheduleType: String
+    let schedule: [String: JSONValue]
+    let intervalSec: Int?
+    let timezone: String?
+    let startImmediately: Bool?
+    let summary: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case enabled
+        case scheduleType = "schedule_type"
+        case schedule
+        case intervalSec = "interval_sec"
+        case timezone
+        case startImmediately = "start_immediately"
+        case summary
+    }
+}
+
+struct APIQuickstartAgentPlan: Decodable {
+    let kind: String
+    let name: String
+    let focus: String
+    let tools: [String]
+    let sources: [String]
+    let automation: APIQuickstartAutomationPlan?
+    let assistantReplyPreview: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case name
+        case focus
+        case tools
+        case sources
+        case automation
+        case assistantReplyPreview = "assistant_reply_preview"
+    }
+}
+
+struct APIQuickstartApplyHint: Decodable {
+    let endpoint: String
+    let payload: APIQuickstartAgentApplyPayload
+}
+
+struct APIQuickstartAgentPlanResponse: Decodable {
+    let quickstartPlan: APIQuickstartAgentPlan
+    let applyHint: APIQuickstartApplyHint
+    let requestId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case quickstartPlan = "quickstart_plan"
+        case applyHint = "apply_hint"
+        case requestId = "request_id"
+    }
+}
+
+struct APIQuickstartIdempotencyInfo: Decodable {
+    let key: String?
+    let fingerprint: String?
+    let replayed: Bool?
+    let derived: Bool?
+}
+
+struct APIQuickstartAgentApplyResponse: Decodable {
+    let agent: APIAgentRecord
+    let automation: APIAutomationRecord?
+    let assistantReply: String?
+    let idempotency: APIQuickstartIdempotencyInfo?
+    let requestId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case agent
+        case automation
+        case assistantReply = "assistant_reply"
+        case idempotency
+        case requestId = "request_id"
     }
 }
 
