@@ -185,6 +185,82 @@ class AgentFactoryTests(unittest.TestCase):
         self.assertEqual(int(schedule.get("interval_hours", -1)), 3)
         self.assertEqual(int(schedule.get("minute", -1)), 0)
 
+    def test_spanish_weekday_daypart_with_tokyo_timezone(self) -> None:
+        spec = infer_agent_spec_from_request(
+            "create an agent for AI digest entre semana por la manana timezone Tokyo"
+        )
+        automation = spec.get("automation", {})
+        self.assertIsInstance(automation, dict)
+        self.assertEqual(str(automation.get("schedule_type")), "weekly")
+        self.assertEqual(str(automation.get("timezone")), "Asia/Tokyo")
+        schedule = automation.get("schedule", {})
+        self.assertIsInstance(schedule, dict)
+        self.assertEqual(schedule.get("byday"), ["MO", "TU", "WE", "TH", "FR"])
+        self.assertEqual(int(schedule.get("hour", -1)), 9)
+        self.assertEqual(int(schedule.get("minute", -1)), 0)
+
+    def test_spanish_weekend_dot_time_with_ist_timezone(self) -> None:
+        spec = infer_agent_spec_from_request(
+            "create an agent for AI digest fin de semana at 7.15 IST"
+        )
+        automation = spec.get("automation", {})
+        self.assertIsInstance(automation, dict)
+        self.assertEqual(str(automation.get("schedule_type")), "weekly")
+        self.assertEqual(str(automation.get("timezone")), "UTC+05:30")
+        schedule = automation.get("schedule", {})
+        self.assertIsInstance(schedule, dict)
+        self.assertEqual(schedule.get("byday"), ["SA", "SU"])
+        self.assertEqual(int(schedule.get("hour", -1)), 7)
+        self.assertEqual(int(schedule.get("minute", -1)), 15)
+
+    def test_turkish_hourly_interval_with_kst_timezone(self) -> None:
+        spec = infer_agent_spec_from_request(
+            "create an agent for AI digest her 4 saat KST"
+        )
+        automation = spec.get("automation", {})
+        self.assertIsInstance(automation, dict)
+        self.assertEqual(str(automation.get("schedule_type")), "hourly")
+        self.assertEqual(str(automation.get("timezone")), "UTC+09:00")
+        schedule = automation.get("schedule", {})
+        self.assertIsInstance(schedule, dict)
+        self.assertEqual(int(schedule.get("interval_hours", -1)), 4)
+        self.assertEqual(int(schedule.get("minute", -1)), 0)
+
+    def test_portuguese_daily_hint_with_latam_timezone_alias(self) -> None:
+        spec = infer_agent_spec_from_request(
+            "create an agent for AI digest todo dia at 6:45 CDMX"
+        )
+        automation = spec.get("automation", {})
+        self.assertIsInstance(automation, dict)
+        self.assertEqual(str(automation.get("schedule_type")), "weekly")
+        self.assertEqual(str(automation.get("timezone")), "America/Mexico_City")
+        schedule = automation.get("schedule", {})
+        self.assertIsInstance(schedule, dict)
+        self.assertEqual(schedule.get("byday"), ["MO", "TU", "WE", "TH", "FR", "SA", "SU"])
+        self.assertEqual(int(schedule.get("hour", -1)), 6)
+        self.assertEqual(int(schedule.get("minute", -1)), 45)
+
+    def test_inference_reason_view_contains_ui_ready_summary(self) -> None:
+        spec = infer_agent_spec_from_request("создай агента для AI новостей и python разработки из reddit")
+        view = spec.get("inference_reason_view", {})
+        self.assertIsInstance(view, dict)
+        self.assertEqual(str(view.get("version")), "inference_reason_view_v1")
+        self.assertEqual(str(view.get("resolved_kind")), "news")
+        confidence = view.get("confidence", {})
+        self.assertIsInstance(confidence, dict)
+        self.assertIn(str(confidence.get("level")), {"high", "medium", "low"})
+        self.assertTrue(str(view.get("summary") or "").strip())
+
+    def test_inference_reason_view_contains_timezone_disambiguation_hint_for_ist(self) -> None:
+        spec = infer_agent_spec_from_request("create an agent for AI digest every day at 8:00 IST")
+        automation = spec.get("automation", {})
+        self.assertEqual(str(automation.get("timezone")), "UTC+05:30")
+        view = spec.get("inference_reason_view", {})
+        self.assertIsInstance(view, dict)
+        hints = view.get("disambiguation_hints", [])
+        self.assertIsInstance(hints, list)
+        self.assertTrue(any("IST can mean" in str(item) for item in hints))
+
 
 if __name__ == "__main__":
     unittest.main()

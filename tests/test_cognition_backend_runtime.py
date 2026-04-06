@@ -263,7 +263,11 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         agent = payload.get("agent", {})
         self.assertTrue(str(agent.get("id") or "").strip())
         self.assertIn("web_search", agent.get("tools", []))
-        self.assertIn("news", str(payload.get("quickstart_spec", {}).get("kind", "")).lower())
+        quickstart_spec = payload.get("quickstart_spec", {})
+        self.assertIn("news", str(quickstart_spec.get("kind", "")).lower())
+        inference_reason_view = quickstart_spec.get("inference_reason_view", {})
+        self.assertIsInstance(inference_reason_view, dict)
+        self.assertEqual(str(inference_reason_view.get("version") or ""), "inference_reason_view_v1")
         automation = payload.get("automation", {})
         self.assertIsInstance(automation, dict)
         self.assertTrue(str(automation.get("id") or "").strip())
@@ -314,6 +318,8 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         second_automation = second_payload.get("automation", {})
         self.assertEqual(str(second_agent.get("id") or ""), first_agent_id)
         self.assertEqual(str(second_automation.get("id") or ""), first_automation_id)
+        second_spec = second_payload.get("quickstart_spec", {})
+        self.assertIsInstance(second_spec.get("inference_reason_view", {}), dict)
         second_idempotency = second_payload.get("idempotency", {})
         self.assertTrue(bool(second_idempotency.get("replayed", False)))
 
@@ -450,6 +456,10 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         inference_reason = quickstart_plan.get("inference_reason", {})
         self.assertIsInstance(inference_reason, dict)
         self.assertEqual(str(inference_reason.get("resolved_kind")), "news")
+        inference_reason_view = quickstart_plan.get("inference_reason_view", {})
+        self.assertIsInstance(inference_reason_view, dict)
+        self.assertEqual(str(inference_reason_view.get("version")), "inference_reason_view_v1")
+        self.assertEqual(str(inference_reason_view.get("resolved_kind")), "news")
 
     def test_quickstart_plan_infers_weekdays_and_timezone(self) -> None:
         planned = self.client.post(
@@ -494,6 +504,55 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         self.assertEqual(schedule.get("byday"), ["MO", "TU", "WE", "TH", "FR", "SA", "SU"])
         self.assertEqual(int(schedule.get("hour", -1)), 20)
         self.assertEqual(int(schedule.get("minute", -1)), 30)
+
+    def test_quickstart_plan_supports_multilingual_schedule_aliases(self) -> None:
+        planned = self.client.post(
+            "/v1/agents/quickstart/plan",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "request": "create an agent for AI digest fin de semana at 7.15 IST",
+            },
+        )
+        self.assertEqual(planned.status_code, 200)
+        payload = planned.json()
+        quickstart_plan = payload.get("quickstart_plan", {})
+        automation = quickstart_plan.get("automation", {})
+        self.assertIsInstance(automation, dict)
+        self.assertEqual(str(automation.get("schedule_type")), "weekly")
+        self.assertEqual(str(automation.get("timezone")), "UTC+05:30")
+        schedule = automation.get("schedule", {})
+        self.assertIsInstance(schedule, dict)
+        self.assertEqual(schedule.get("byday"), ["SA", "SU"])
+        self.assertEqual(int(schedule.get("hour", -1)), 7)
+        self.assertEqual(int(schedule.get("minute", -1)), 15)
+        reason_view = quickstart_plan.get("inference_reason_view", {})
+        self.assertIsInstance(reason_view, dict)
+        hints = reason_view.get("disambiguation_hints", [])
+        self.assertIsInstance(hints, list)
+        self.assertTrue(any("IST can mean" in str(item) for item in hints))
+
+    def test_quickstart_plan_supports_portuguese_daily_with_cdmx_timezone(self) -> None:
+        planned = self.client.post(
+            "/v1/agents/quickstart/plan",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "request": "create an agent for AI digest todo dia at 6:45 CDMX",
+            },
+        )
+        self.assertEqual(planned.status_code, 200)
+        payload = planned.json()
+        quickstart_plan = payload.get("quickstart_plan", {})
+        automation = quickstart_plan.get("automation", {})
+        self.assertIsInstance(automation, dict)
+        self.assertEqual(str(automation.get("schedule_type")), "weekly")
+        self.assertEqual(str(automation.get("timezone")), "America/Mexico_City")
+        schedule = automation.get("schedule", {})
+        self.assertIsInstance(schedule, dict)
+        self.assertEqual(schedule.get("byday"), ["MO", "TU", "WE", "TH", "FR", "SA", "SU"])
+        self.assertEqual(int(schedule.get("hour", -1)), 6)
+        self.assertEqual(int(schedule.get("minute", -1)), 45)
 
     def test_quickstart_plan_accepts_structured_overrides(self) -> None:
         planned = self.client.post(

@@ -222,10 +222,8 @@ jobs:
       - name: Run nightly Agent Factory plan perf gate (blocking)
         run: |
           python scripts/release/agent_factory_plan_perf_gate.py \
-            --requests-total "${AMARYLLIS_NIGHTLY_AGENT_FACTORY_PLAN_PERF_REQUESTS_TOTAL:-40}" \
-            --concurrency "${AMARYLLIS_NIGHTLY_AGENT_FACTORY_PLAN_PERF_CONCURRENCY:-8}" \
-            --max-p95-latency-ms "${AMARYLLIS_NIGHTLY_AGENT_FACTORY_PLAN_PERF_MAX_P95_MS:-2500}" \
-            --max-error-rate-pct "${AMARYLLIS_NIGHTLY_AGENT_FACTORY_PLAN_PERF_MAX_ERROR_RATE_PCT:-0}" \
+            --baseline "eval/baselines/quality/agent_factory_plan_perf_envelope.json" \
+            --baseline-profile "${AMARYLLIS_NIGHTLY_AGENT_FACTORY_PLAN_PERF_PROFILE:-nightly}" \
             --output "artifacts/nightly-agent-factory-plan-perf-gate-report.json"
 
       - name: Run nightly first-run activation gate (blocking)

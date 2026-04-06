@@ -114,6 +114,61 @@
         "minute": 0,
         "timezone": "UTC+01:00"
       }
+    },
+    {
+      "id": "spanish_weekday_daypart_tokyo",
+      "request": "create an agent for AI digest entre semana por la manana timezone Tokyo",
+      "expected": {
+        "kind": "news",
+        "mixed_intent": false,
+        "source_policy_mode": "open_web",
+        "schedule_type": "weekly",
+        "hour": 9,
+        "minute": 0,
+        "timezone": "Asia/Tokyo",
+        "byday": ["MO", "TU", "WE", "TH", "FR"]
+      }
+    },
+    {
+      "id": "spanish_weekend_dot_time_india",
+      "request": "create an agent for AI digest fin de semana at 7.15 IST",
+      "expected": {
+        "kind": "news",
+        "mixed_intent": false,
+        "source_policy_mode": "open_web",
+        "schedule_type": "weekly",
+        "hour": 7,
+        "minute": 15,
+        "timezone": "UTC+05:30",
+        "byday": ["SA", "SU"]
+      }
+    },
+    {
+      "id": "turkish_hourly_kst",
+      "request": "create an agent for AI digest her 4 saat KST",
+      "expected": {
+        "kind": "news",
+        "mixed_intent": false,
+        "source_policy_mode": "open_web",
+        "schedule_type": "hourly",
+        "interval_hours": 4,
+        "minute": 0,
+        "timezone": "UTC+09:00"
+      }
+    },
+    {
+      "id": "portuguese_daily_cdmx",
+      "request": "create an agent for AI digest todo dia at 6:45 CDMX",
+      "expected": {
+        "kind": "news",
+        "mixed_intent": false,
+        "source_policy_mode": "open_web",
+        "schedule_type": "weekly",
+        "hour": 6,
+        "minute": 45,
+        "timezone": "America/Mexico_City",
+        "byday": ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]
+      }
     }
   ]
 }

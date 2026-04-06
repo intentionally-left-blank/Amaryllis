@@ -13,7 +13,7 @@ Default fixture:
 
 - `eval/fixtures/agent_factory/intent_inference_cases.json`
 
-The fixture can contain multilingual/noisy prompts (including daypart, timezone alias, and `am/pm` phrasing); each case defines expected outputs used by the gate.
+The fixture can contain multilingual/noisy prompts (including daypart, timezone alias, `am/pm`, dot-time, mixed locale phrases, and LatAm/APAC aliases like `CDMX`/`Tokyo`); each case defines expected outputs used by the gate.
 
 ## Run Locally
 

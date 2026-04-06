@@ -1,0 +1,63 @@
+name: Agent Factory Baseline Policy Gate
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "eval/baselines/quality/agent_factory_plan_perf_envelope.json"
+      - "scripts/release/agent_factory_plan_perf_baseline_policy_gate.py"
+      - "tests/test_agent_factory_plan_perf_baseline_policy_gate.py"
+      - "docs/agent-factory-plan-perf-gate.md"
+      - ".github/workflows/agent-factory-baseline-policy-gate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  baseline-policy-gate:
+    name: Agent Factory Baseline Policy Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.11"
+
+      - name: Prepare reference baseline
+        id: reference
+        run: |
+          mkdir -p artifacts
+          REF_PATH="artifacts/agent_factory_plan_perf_envelope.reference.json"
+
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" && -n "${GITHUB_BASE_REF}" ]]; then
+            git fetch origin "${GITHUB_BASE_REF}" --depth=1
+            if git show "origin/${GITHUB_BASE_REF}:eval/baselines/quality/agent_factory_plan_perf_envelope.json" > "${REF_PATH}" 2>/dev/null; then
+              echo "Loaded reference baseline from origin/${GITHUB_BASE_REF}."
+            else
+              echo "Reference baseline missing on base branch; using current baseline as fallback."
+              cp "eval/baselines/quality/agent_factory_plan_perf_envelope.json" "${REF_PATH}"
+            fi
+          else
+            cp "eval/baselines/quality/agent_factory_plan_perf_envelope.json" "${REF_PATH}"
+          fi
+
+          echo "reference_path=${REF_PATH}" >> "${GITHUB_OUTPUT}"
+
+      - name: Run baseline policy gate (blocking)
+        run: |
+          python scripts/release/agent_factory_plan_perf_baseline_policy_gate.py \
+            --reference-baseline "${{ steps.reference.outputs.reference_path }}" \
+            --current-baseline "eval/baselines/quality/agent_factory_plan_perf_envelope.json" \
+            --output "artifacts/agent-factory-plan-perf-baseline-policy-gate-report.json"
+
+      - name: Upload baseline policy gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-factory-plan-perf-baseline-policy-gate-report
+          path: artifacts/agent-factory-plan-perf-baseline-policy-gate-report.json
+          if-no-files-found: error

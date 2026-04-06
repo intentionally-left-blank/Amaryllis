@@ -178,6 +178,8 @@ jobs:
             tests.test_agent_factory_eval_fixtures \
             tests.test_agent_factory_intent_gate \
             tests.test_agent_factory_plan_perf_gate \
+            tests.test_agent_factory_plan_perf_baseline_refresh \
+            tests.test_agent_factory_plan_perf_baseline_policy_gate \
             tests.test_api_quickstart_compatibility_gate \
             tests.test_sdk_openai_compat_client \
             -v
@@ -213,10 +215,8 @@ jobs:
       - name: Run Agent Factory plan perf gate (blocking)
         run: |
           python scripts/release/agent_factory_plan_perf_gate.py \
-            --requests-total "${AMARYLLIS_AGENT_FACTORY_PLAN_PERF_REQUESTS_TOTAL:-30}" \
-            --concurrency "${AMARYLLIS_AGENT_FACTORY_PLAN_PERF_CONCURRENCY:-6}" \
-            --max-p95-latency-ms "${AMARYLLIS_AGENT_FACTORY_PLAN_PERF_MAX_P95_MS:-2000}" \
-            --max-error-rate-pct "${AMARYLLIS_AGENT_FACTORY_PLAN_PERF_MAX_ERROR_RATE_PCT:-0}" \
+            --baseline "eval/baselines/quality/agent_factory_plan_perf_envelope.json" \
+            --baseline-profile "${AMARYLLIS_AGENT_FACTORY_PLAN_PERF_PROFILE:-release}" \
             --output "artifacts/agent-factory-plan-perf-gate-report.json"
 
       - name: Upload Agent Factory plan perf gate report

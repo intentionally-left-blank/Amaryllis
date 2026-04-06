@@ -762,6 +762,62 @@ struct APIQuickstartAutomationPlan: Decodable {
     }
 }
 
+struct APIQuickstartInferenceConfidence: Decodable {
+    let level: String?
+    let scoreGap: Double?
+    let scores: [String: Double]
+
+    private enum CodingKeys: String, CodingKey {
+        case level
+        case scoreGap = "score_gap"
+        case scores
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        level = try container.decodeIfPresent(String.self, forKey: .level)
+        scoreGap = try container.decodeIfPresent(Double.self, forKey: .scoreGap)
+        scores = (try? container.decode([String: Double].self, forKey: .scores)) ?? [:]
+    }
+}
+
+struct APIQuickstartInferenceReasonView: Decodable {
+    let version: String
+    let resolvedKind: String?
+    let confidence: APIQuickstartInferenceConfidence?
+    let mixedIntent: Bool
+    let conflictResolution: [String]
+    let overridesApplied: [String]
+    let highlights: [String]
+    let disambiguationHints: [String]
+    let summary: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case version
+        case resolvedKind = "resolved_kind"
+        case confidence
+        case mixedIntent = "mixed_intent"
+        case conflictResolution = "conflict_resolution"
+        case overridesApplied = "overrides_applied"
+        case highlights
+        case disambiguationHints = "disambiguation_hints"
+        case summary
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = (try? container.decode(String.self, forKey: .version)) ?? ""
+        resolvedKind = try container.decodeIfPresent(String.self, forKey: .resolvedKind)
+        confidence = try container.decodeIfPresent(APIQuickstartInferenceConfidence.self, forKey: .confidence)
+        mixedIntent = (try? container.decode(Bool.self, forKey: .mixedIntent)) ?? false
+        conflictResolution = (try? container.decode([String].self, forKey: .conflictResolution)) ?? []
+        overridesApplied = (try? container.decode([String].self, forKey: .overridesApplied)) ?? []
+        highlights = (try? container.decode([String].self, forKey: .highlights)) ?? []
+        disambiguationHints = (try? container.decode([String].self, forKey: .disambiguationHints)) ?? []
+        summary = try container.decodeIfPresent(String.self, forKey: .summary)
+    }
+}
+
 struct APIQuickstartAgentPlan: Decodable {
     let kind: String
     let name: String
@@ -769,6 +825,7 @@ struct APIQuickstartAgentPlan: Decodable {
     let tools: [String]
     let sources: [String]
     let automation: APIQuickstartAutomationPlan?
+    let inferenceReasonView: APIQuickstartInferenceReasonView?
     let assistantReplyPreview: String?
 
     private enum CodingKeys: String, CodingKey {
@@ -778,6 +835,7 @@ struct APIQuickstartAgentPlan: Decodable {
         case tools
         case sources
         case automation
+        case inferenceReasonView = "inference_reason_view"
         case assistantReplyPreview = "assistant_reply_preview"
     }
 }

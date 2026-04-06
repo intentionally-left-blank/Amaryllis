@@ -22,10 +22,17 @@ Create specialized agents from a single natural-language request:
    - `tools`
    - `sources`
    - `source_policy` (`mode`, `channels`, `domains`)
-   - `inference_reason` (why factory picked this profile)
+   - `inference_reason` (raw explainability payload)
+   - `inference_reason_view` (UI-ready explanation summary/highlights/confidence)
    - `automation` schedule (`schedule_type`, `schedule`, `timezone`, `start_immediately`)
 3. Apply the same request via `/v1/agents/quickstart` (optionally with `idempotency_key`).
 4. Retry safely with the same `idempotency_key` (no duplicate agent creation).
+
+In macOS desktop (`Agents -> One-shot Quickstart`), `inference_reason_view` is rendered as:
+- confidence/kind chips;
+- highlight chips;
+- conflict-resolution timeline;
+- applied override chips.
 
 ## Optional Overrides
 
@@ -51,8 +58,11 @@ The planner supports multilingual schedule hints, including:
 - grouped weekdays/weekends (`по будням`, `on weekends`);
 - daypart hints (`утром`, `evening`, `noon`) when exact time is omitted;
 - `am/pm` time format (`at 8:30pm`);
+- dot time format (`at 7.15`);
 - timezone aliases and abbreviations (`мск`, `PST`, `CET`, `UTC+5`);
 - relative hourly phrasing (`in 3 hours`, `через 3 часа`) mapped to hourly schedule with `start_immediately=true`.
+- additional multilingual hints (`entre semana`, `fin de semana`, `todo dia`, `her 4 saat`, `Tokyo`, `IST`, `KST`, `CDMX`).
+- ambiguous timezone abbreviations (for example `IST`, `CST`) are still resolved deterministically, but `inference_reason_view.disambiguation_hints` is emitted for UI confirmation.
 
 ## Contract
 
@@ -73,4 +83,5 @@ Intent-inference regression gate:
 Plan performance gate:
 
 - script: `scripts/release/agent_factory_plan_perf_gate.py`
+- baseline envelope: `eval/baselines/quality/agent_factory_plan_perf_envelope.json`
 - docs: `docs/agent-factory-plan-perf-gate.md`

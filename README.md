@@ -407,7 +407,9 @@ python -m unittest \
 python scripts/release/api_compat_gate.py
 python scripts/release/api_quickstart_compatibility_gate.py --output artifacts/api-quickstart-compat-report.json
 python scripts/release/agent_factory_intent_gate.py --output artifacts/agent-factory-intent-gate-report.json
-python scripts/release/agent_factory_plan_perf_gate.py --output artifacts/agent-factory-plan-perf-gate-report.json
+python scripts/release/agent_factory_plan_perf_gate.py --baseline-profile release --output artifacts/agent-factory-plan-perf-gate-report.json
+python scripts/release/agent_factory_plan_perf_baseline_refresh.py --baseline eval/baselines/quality/agent_factory_plan_perf_envelope.json --report release=artifacts/agent-factory-plan-perf-gate-report.json --output artifacts/agent-factory-plan-perf-baseline-refresh-report.json
+python scripts/release/agent_factory_plan_perf_baseline_policy_gate.py --reference-baseline eval/baselines/quality/agent_factory_plan_perf_envelope.json --current-baseline eval/baselines/quality/agent_factory_plan_perf_envelope.json --output artifacts/agent-factory-plan-perf-baseline-policy-gate-report.json
 ```
 
 For full quality gates, use the GitHub Actions workflows:

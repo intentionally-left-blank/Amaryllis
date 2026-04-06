@@ -359,7 +359,7 @@ struct AgentsView: View {
             }
 
             if let plan = quickstartPlan {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text("Plan: \(plan.name) [\(plan.kind)]")
                         .font(AmaryllisTheme.bodyFont(size: 12, weight: .semibold))
                         .foregroundStyle(AmaryllisTheme.textPrimary)
@@ -382,6 +382,9 @@ struct AgentsView: View {
                         Text("Schedule: \(summary)")
                             .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
                             .foregroundStyle(AmaryllisTheme.textSecondary)
+                    }
+                    if let reasonView = plan.inferenceReasonView {
+                        quickstartInferenceReasonCard(reasonView)
                     }
                 }
                 .padding(8)
@@ -2853,6 +2856,165 @@ struct AgentsView: View {
         let prefix = normalized.prefix(8)
         let suffix = normalized.suffix(8)
         return "\(prefix)…\(suffix)"
+    }
+
+    private var quickstartReasonChipColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 120), spacing: 6, alignment: .leading)]
+    }
+
+    private func quickstartInferenceReasonCard(_ reasonView: APIQuickstartInferenceReasonView) -> some View {
+        let highlights = normalizedQuickstartReasonItems(reasonView.highlights, maxCount: 8)
+        let conflicts = normalizedQuickstartReasonItems(reasonView.conflictResolution, maxCount: 6)
+        let overrides = normalizedQuickstartReasonItems(reasonView.overridesApplied, maxCount: 8)
+        let disambiguationHints = normalizedQuickstartReasonItems(reasonView.disambiguationHints, maxCount: 4)
+        let scoreItems = quickstartReasonScoreItems(reasonView)
+        let summary = trimmedOrNil(reasonView.summary)
+        let resolvedKind = trimmedOrNil(reasonView.resolvedKind)
+        let confidenceSummary = quickstartConfidenceSummary(reasonView.confidence)
+
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text("Planner Explainability")
+                    .font(AmaryllisTheme.bodyFont(size: 11, weight: .semibold))
+                    .foregroundStyle(AmaryllisTheme.textPrimary)
+                Spacer()
+                if let confidenceSummary, !confidenceSummary.isEmpty {
+                    quickstartReasonChip(confidenceSummary, accent: false)
+                }
+                if let resolvedKind, !resolvedKind.isEmpty {
+                    quickstartReasonChip("kind: \(resolvedKind)", accent: true)
+                }
+            }
+
+            if let summary, !summary.isEmpty {
+                Text(summary)
+                    .font(AmaryllisTheme.bodyFont(size: 11, weight: .medium))
+                    .foregroundStyle(AmaryllisTheme.textSecondary)
+            }
+
+            if reasonView.mixedIntent {
+                Text("Mixed-intent detected: planner applied conflict resolution before final kind.")
+                    .font(AmaryllisTheme.bodyFont(size: 10, weight: .medium))
+                    .foregroundStyle(AmaryllisTheme.amber)
+            }
+
+            quickstartReasonChipSection(title: "Highlights", items: highlights, accent: false)
+            quickstartReasonChipSection(title: "Overrides", items: overrides, accent: true)
+            quickstartReasonChipSection(title: "Disambiguation Hints", items: disambiguationHints, accent: true)
+            quickstartReasonChipSection(title: "Scoreboard", items: scoreItems, accent: false)
+
+            if !conflicts.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Decision Timeline")
+                        .font(AmaryllisTheme.bodyFont(size: 10, weight: .semibold))
+                        .foregroundStyle(AmaryllisTheme.textSecondary)
+                    ForEach(conflicts.indices, id: \.self) { index in
+                        HStack(alignment: .top, spacing: 6) {
+                            Circle()
+                                .fill(AmaryllisTheme.accent)
+                                .frame(width: 4, height: 4)
+                                .padding(.top, 4)
+                            Text(conflicts[index])
+                                .font(AmaryllisTheme.bodyFont(size: 10, weight: .medium))
+                                .foregroundStyle(AmaryllisTheme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(8)
+        .background(AmaryllisTheme.inputBackground)
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(AmaryllisTheme.inputBorder.opacity(0.8), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
+    @ViewBuilder
+    private func quickstartReasonChipSection(title: String, items: [String], accent: Bool) -> some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(AmaryllisTheme.bodyFont(size: 10, weight: .semibold))
+                    .foregroundStyle(AmaryllisTheme.textSecondary)
+                LazyVGrid(columns: quickstartReasonChipColumns, alignment: .leading, spacing: 6) {
+                    ForEach(items, id: \.self) { item in
+                        quickstartReasonChip(item, accent: accent)
+                    }
+                }
+            }
+        }
+    }
+
+    private func quickstartReasonChip(_ text: String, accent: Bool) -> some View {
+        Text(text)
+            .font(AmaryllisTheme.monoFont(size: 10, weight: .regular))
+            .foregroundStyle(AmaryllisTheme.textPrimary)
+            .lineLimit(2)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                Capsule()
+                    .fill(accent ? AmaryllisTheme.accentSoft.opacity(0.6) : AmaryllisTheme.surfaceAlt)
+            )
+            .overlay(
+                Capsule()
+                    .stroke(accent ? AmaryllisTheme.accent.opacity(0.9) : AmaryllisTheme.border.opacity(0.8), lineWidth: 1)
+            )
+    }
+
+    private func quickstartReasonScoreItems(_ reasonView: APIQuickstartInferenceReasonView) -> [String] {
+        guard let confidence = reasonView.confidence, !confidence.scores.isEmpty else {
+            return []
+        }
+        return confidence.scores
+            .sorted { lhs, rhs in
+                if lhs.value == rhs.value {
+                    return lhs.key < rhs.key
+                }
+                return lhs.value > rhs.value
+            }
+            .prefix(4)
+            .map { key, value in
+                "\(key)=\(String(format: "%.2f", value))"
+            }
+    }
+
+    private func quickstartConfidenceSummary(_ confidence: APIQuickstartInferenceConfidence?) -> String? {
+        guard let confidence else {
+            return nil
+        }
+        let level = trimmedOrNil(confidence.level)?.uppercased()
+        let gap = confidence.scoreGap.map { String(format: "%.2f", $0) }
+        if let level, let gap {
+            return "\(level) Δ\(gap)"
+        }
+        if let level {
+            return level
+        }
+        if let gap {
+            return "Δ\(gap)"
+        }
+        return nil
+    }
+
+    private func normalizedQuickstartReasonItems(_ items: [String], maxCount: Int) -> [String] {
+        var seen = Set<String>()
+        var normalized: [String] = []
+        for item in items {
+            let value = item.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { continue }
+            let key = value.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            normalized.append(value)
+            if normalized.count >= max(1, maxCount) {
+                break
+            }
+        }
+        return normalized
     }
 
     private func renderQuickstartApplySummary(_ response: APIQuickstartAgentApplyResponse) -> String {

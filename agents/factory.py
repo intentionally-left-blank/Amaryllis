@@ -11,19 +11,20 @@ _AGENT_FOCUS_PATTERN = re.compile(
 )
 _SCHEDULE_TIME_PATTERN = re.compile(r"(?:\bв\b|\bat\b)\s*(?P<hour>\d{1,2})(?::(?P<minute>\d{1,2}))?")
 _SCHEDULE_TIME_AMPM_PATTERN = re.compile(
-    r"(?:\bв\b|\bat\b)\s*(?P<hour>\d{1,2})(?::(?P<minute>\d{1,2}))?\s*(?P<ampm>a\.?m\.?|p\.?m\.?)\b",
+    r"(?:\bв\b|\bat\b)\s*(?P<hour>\d{1,2})(?:[:.](?P<minute>\d{1,2}))?\s*(?P<ampm>a\.?m\.?|p\.?m\.?)\b",
     flags=re.IGNORECASE,
 )
+_SCHEDULE_TIME_DOT_PATTERN = re.compile(r"(?:\bв\b|\bat\b)\s*(?P<hour>\d{1,2})\.(?P<minute>\d{1,2})", flags=re.IGNORECASE)
 _MINUTE_ONLY_PATTERN = re.compile(
     r"(?:\bв\b|\bat\b)\s*(?P<minute>\d{1,2})\s*(?:минут(?:а|ы)?|minute(?:s)?)",
     flags=re.IGNORECASE,
 )
 _HOURLY_INTERVAL_PATTERN = re.compile(
-    r"(?:каждые|every)\s*(?P<hours>\d{1,2})\s*(?:час(?:а|ов)?|hours?)",
+    r"(?:каждые|every|cada|a\s*cada|her)\s*(?P<hours>\d{1,2})\s*(?:час(?:а|ов)?|hours?|horas?|saat|h|ч)\b",
     flags=re.IGNORECASE,
 )
 _RELATIVE_HOURLY_INTERVAL_PATTERN = re.compile(
-    r"(?:через|in)\s*(?P<hours>\d{1,2})\s*(?:час(?:а|ов)?|hours?)",
+    r"(?:через|in|en|em)\s*(?P<hours>\d{1,2})\s*(?:час(?:а|ов)?|hours?|horas?|saat|h|ч)\b",
     flags=re.IGNORECASE,
 )
 _HOUR_ONLY_PATTERN = re.compile(r"(?<!\d)(?P<hour>\d{1,2})\s*(?:час(?:а|ов)?|hours?)(?!\w)", flags=re.IGNORECASE)
@@ -38,13 +39,17 @@ _TIMEZONE_OFFSET_PATTERN = re.compile(
     r"\b(?:UTC|GMT)\s*(?P<sign>[+-])\s*(?P<hours>\d{1,2})(?::?(?P<minutes>\d{2}))?\b",
     flags=re.IGNORECASE,
 )
+_TIMEZONE_BARE_OFFSET_PATTERN = re.compile(
+    r"^(?P<sign>[+-])?(?P<hours>\d{1,2})(?::?(?P<minutes>\d{2}))?$",
+    flags=re.IGNORECASE,
+)
 _TIMEZONE_IANA_PATTERN = re.compile(
     r"\b(?P<tz>[A-Za-z][A-Za-z0-9_+-]{1,32}/[A-Za-z][A-Za-z0-9_+-]{1,32}(?:/[A-Za-z][A-Za-z0-9_+-]{1,32})?)\b",
     flags=re.IGNORECASE,
 )
 _TIMEZONE_CONTEXT_PATTERN = re.compile(
     r"(?:\b(?:timezone|time\s*zone|tz|gmt|utc)\b|(?:по\s+времени)|(?:часов(?:ой|ому)\s+пояс[ауе]?))"
-    r"\s*(?::|=|is)?\s*(?P<tz>[A-Za-z][A-Za-z0-9_+\-/:]{1,64})",
+    r"\s*(?::|=|is)?\s*(?P<tz>[A-Za-z0-9_+\-/:]{1,64})",
     flags=re.IGNORECASE,
 )
 
@@ -53,18 +58,30 @@ _DAILY_SCHEDULE_TOKENS: tuple[str, ...] = (
     "ежеднев",
     "daily",
     "every day",
+    "cada dia",
+    "todos los dias",
+    "todo dia",
+    "todos os dias",
+    "her gun",
 )
 _WEEKLY_SCHEDULE_TOKENS: tuple[str, ...] = (
     "еженед",
     "каждую неделю",
     "weekly",
     "every week",
+    "cada semana",
+    "toda semana",
+    "todas as semanas",
+    "her hafta",
 )
 _HOURLY_SCHEDULE_TOKENS: tuple[str, ...] = (
     "каждый час",
     "каждые",
     "hourly",
     "every hour",
+    "cada hora",
+    "a cada",
+    "her saat",
 )
 _START_IMMEDIATELY_TOKENS: tuple[str, ...] = (
     "сразу",
@@ -73,6 +90,8 @@ _START_IMMEDIATELY_TOKENS: tuple[str, ...] = (
     "start now",
     "immediately",
     "run now",
+    "asap",
+    "ahora",
 )
 _WEEKDAY_GROUP_TOKENS: tuple[str, ...] = (
     "weekdays",
@@ -82,6 +101,12 @@ _WEEKDAY_GROUP_TOKENS: tuple[str, ...] = (
     "будни",
     "по будням",
     "рабочие дни",
+    "entre semana",
+    "laborables",
+    "dias laborales",
+    "dias uteis",
+    "dias úteis",
+    "hafta ici",
 )
 _WEEKEND_GROUP_TOKENS: tuple[str, ...] = (
     "weekends",
@@ -89,19 +114,32 @@ _WEEKEND_GROUP_TOKENS: tuple[str, ...] = (
     "on weekends",
     "выходные",
     "по выходным",
+    "fin de semana",
+    "fines de semana",
+    "fim de semana",
+    "fins de semana",
+    "hafta sonu",
 )
 _TIME_OF_DAY_HINTS: tuple[tuple[str, int, int], ...] = (
     ("утром", 9, 0),
     ("morning", 9, 0),
+    ("manana", 9, 0),
+    ("manha", 9, 0),
+    ("sabah", 9, 0),
     ("днем", 14, 0),
     ("днём", 14, 0),
     ("afternoon", 14, 0),
+    ("tarde", 16, 0),
+    ("oglen", 12, 0),
     ("полдень", 12, 0),
     ("noon", 12, 0),
     ("вечером", 19, 0),
     ("evening", 19, 0),
+    ("aksam", 19, 0),
     ("ночью", 22, 0),
     ("night", 22, 0),
+    ("noche", 22, 0),
+    ("noite", 22, 0),
 )
 
 _WEEKDAY_EXACT_TOKENS: dict[str, str] = {
@@ -161,6 +199,43 @@ _TIMEZONE_TOKEN_MAP: dict[str, str] = {
     "cest": "UTC+02:00",
     "eet": "UTC+02:00",
     "eest": "UTC+03:00",
+    "tokyo": "Asia/Tokyo",
+    "jst": "UTC+09:00",
+    "seoul": "Asia/Seoul",
+    "kst": "UTC+09:00",
+    "india": "Asia/Kolkata",
+    "indian": "Asia/Kolkata",
+    "delhi": "Asia/Kolkata",
+    "mumbai": "Asia/Kolkata",
+    "kolkata": "Asia/Kolkata",
+    "ist": "UTC+05:30",
+    "singapore": "Asia/Singapore",
+    "sgt": "UTC+08:00",
+    "dubai": "Asia/Dubai",
+    "uae": "Asia/Dubai",
+    "gst": "UTC+04:00",
+    "riyadh": "Asia/Riyadh",
+    "ksa": "Asia/Riyadh",
+    "kyiv": "Europe/Kyiv",
+    "kiev": "Europe/Kyiv",
+    "turkiye": "Europe/Istanbul",
+    "turkey": "Europe/Istanbul",
+    "istanbul": "Europe/Istanbul",
+    "trt": "UTC+03:00",
+    "mexico": "America/Mexico_City",
+    "mexicocity": "America/Mexico_City",
+    "cdmx": "America/Mexico_City",
+    "bogota": "America/Bogota",
+    "buenosaires": "America/Argentina/Buenos_Aires",
+    "argentina": "America/Argentina/Buenos_Aires",
+    "santiago": "America/Santiago",
+    "saopaulo": "America/Sao_Paulo",
+    "brasilia": "America/Sao_Paulo",
+    "jakarta": "Asia/Jakarta",
+    "manila": "Asia/Manila",
+    "sydney": "Australia/Sydney",
+    "aest": "UTC+10:00",
+    "aedt": "UTC+11:00",
     "newyork": "America/New_York",
     "new_york": "America/New_York",
     "nyc": "America/New_York",
@@ -176,6 +251,11 @@ _TIMEZONE_TOKEN_MAP: dict[str, str] = {
     "cdt": "UTC-05:00",
     "mst": "UTC-07:00",
     "mdt": "UTC-06:00",
+}
+
+_AMBIGUOUS_TIMEZONE_HINTS: dict[str, str] = {
+    "ist": "IST can mean India (UTC+05:30), Israel (UTC+02:00), or Irish time; use city or UTC offset if needed.",
+    "cst": "CST can mean US Central (UTC-06:00) or China Standard Time (UTC+08:00); use city or UTC offset if needed.",
 }
 
 _SOURCE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -342,6 +422,19 @@ def _extract_time_hint(lowered_text: str, *, default_hour: int = 9, default_minu
         hour = max(0, min(23, hour))
         minute = max(0, min(59, minute))
         return hour, minute
+    dot_match = _SCHEDULE_TIME_DOT_PATTERN.search(text)
+    if dot_match is not None:
+        try:
+            hour = int(dot_match.group("hour"))
+        except Exception:
+            hour = default_hour
+        try:
+            minute = int(dot_match.group("minute") or default_minute)
+        except Exception:
+            minute = default_minute
+        hour = max(0, min(23, hour))
+        minute = max(0, min(59, minute))
+        return hour, minute
     match = _SCHEDULE_TIME_PATTERN.search(text)
     if match is None:
         minute_only = _MINUTE_ONLY_PATTERN.search(text)
@@ -402,6 +495,20 @@ def _normalize_timezone_name(raw_value: Any, *, default: str = "UTC") -> str:
     value = str(raw_value or "").strip()
     if not value:
         return default
+    bare_offset_match = _TIMEZONE_BARE_OFFSET_PATTERN.fullmatch(value)
+    if bare_offset_match is not None:
+        sign = "-" if str(bare_offset_match.group("sign") or "") == "-" else "+"
+        try:
+            hours = int(bare_offset_match.group("hours") or "0")
+        except Exception:
+            hours = 0
+        try:
+            minutes = int(bare_offset_match.group("minutes") or "0")
+        except Exception:
+            minutes = 0
+        hours = max(0, min(14, hours))
+        minutes = max(0, min(59, minutes))
+        return f"UTC{sign}{hours:02d}:{minutes:02d}"
     offset_match = _TIMEZONE_OFFSET_PATTERN.search(value)
     if offset_match is not None:
         sign = "-" if str(offset_match.group("sign") or "") == "-" else "+"
@@ -463,6 +570,23 @@ def _extract_timezone_hint(raw_text: str) -> str:
         if mapped is not None:
             return mapped
     return "UTC"
+
+
+def _extract_timezone_disambiguation_hints(raw_text: str) -> list[str]:
+    text = str(raw_text or "").strip()
+    if not text:
+        return []
+    hints: list[str] = []
+    words = [match.group(0).lower() for match in _WORD_TOKEN_PATTERN.finditer(text)]
+    for word in words:
+        hint = _AMBIGUOUS_TIMEZONE_HINTS.get(word)
+        if hint is not None and hint not in hints:
+            hints.append(hint)
+    compact = re.sub(r"[^a-zа-яё0-9_]+", "", text.lower())
+    compact_hint = _AMBIGUOUS_TIMEZONE_HINTS.get(compact)
+    if compact_hint is not None and compact_hint not in hints:
+        hints.append(compact_hint)
+    return hints
 
 
 def _extract_group_byday(lowered_text: str) -> list[str] | None:
@@ -1099,6 +1223,99 @@ def _resolve_kind_from_signals(
     return resolved_kind, reason
 
 
+def _safe_float(value: Any, *, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def build_inference_reason_view(reason_payload: dict[str, Any] | None) -> dict[str, Any]:
+    reason = reason_payload if isinstance(reason_payload, dict) else {}
+    base_reason = reason.get("base") if isinstance(reason.get("base"), dict) else {}
+    analytics = reason if isinstance(reason.get("scores"), dict) else base_reason
+    scores = analytics.get("scores") if isinstance(analytics.get("scores"), dict) else {}
+    news_score = _safe_float(scores.get("news"), default=0.0)
+    coding_score = _safe_float(scores.get("coding"), default=0.0)
+    score_gap = abs(news_score - coding_score)
+    top_score = max(news_score, coding_score)
+    if top_score >= 2.0 and score_gap >= 1.5:
+        confidence_level = "high"
+    elif top_score >= 1.0 and score_gap >= 0.75:
+        confidence_level = "medium"
+    else:
+        confidence_level = "low"
+
+    resolved_kind = str(reason.get("resolved_kind") or base_reason.get("resolved_kind") or "general").strip().lower() or "general"
+    mixed_intent = bool(reason.get("mixed_intent", base_reason.get("mixed_intent", False)))
+    conflict_resolution = str(reason.get("conflict_resolution") or base_reason.get("conflict_resolution") or "none")
+    overrides_applied = reason.get("overrides_applied") if isinstance(reason.get("overrides_applied"), list) else []
+    normalized_overrides = [str(item).strip() for item in overrides_applied if str(item).strip()]
+
+    signals = analytics.get("signals") if isinstance(analytics.get("signals"), dict) else {}
+    timezone_hints_raw = signals.get("timezone_disambiguation_hints")
+    timezone_hints = (
+        [str(item).strip() for item in timezone_hints_raw if str(item).strip()]
+        if isinstance(timezone_hints_raw, list)
+        else []
+    )
+    highlights_raw: list[str] = []
+    for key in (
+        "text_news_keywords",
+        "text_coding_keywords",
+        "focus_news_keywords",
+        "focus_coding_keywords",
+        "source_targets",
+        "news_domain_matches",
+        "coding_domain_matches",
+    ):
+        values = signals.get(key)
+        if not isinstance(values, list):
+            continue
+        for raw_item in values:
+            token = str(raw_item or "").strip()
+            if token and token not in highlights_raw:
+                highlights_raw.append(token)
+            if len(highlights_raw) >= 10:
+                break
+        if len(highlights_raw) >= 10:
+            break
+
+    summary = f"Resolved kind={resolved_kind}."
+    if normalized_overrides:
+        summary += f" Overrides applied: {', '.join(normalized_overrides)}."
+    elif mixed_intent:
+        summary += (
+            f" Mixed intent detected (news={news_score:.2f}, coding={coding_score:.2f}); "
+            f"resolution={conflict_resolution}."
+        )
+    elif top_score > 0:
+        summary += f" Dominant signal score gap={score_gap:.2f}."
+    else:
+        summary += " Fallback heuristics used due to weak explicit signals."
+    if timezone_hints:
+        summary += " Timezone abbreviation may be ambiguous; review disambiguation hints."
+
+    return {
+        "version": "inference_reason_view_v1",
+        "resolved_kind": resolved_kind,
+        "confidence": {
+            "level": confidence_level,
+            "score_gap": round(score_gap, 3),
+            "scores": {
+                "news": round(news_score, 3),
+                "coding": round(coding_score, 3),
+            },
+        },
+        "mixed_intent": mixed_intent,
+        "conflict_resolution": conflict_resolution,
+        "overrides_applied": normalized_overrides,
+        "highlights": highlights_raw[:8],
+        "disambiguation_hints": timezone_hints[:3],
+        "summary": summary,
+    }
+
+
 def infer_agent_spec_from_request(request_text: str) -> dict[str, Any]:
     raw = str(request_text or "").strip()
     lowered = raw.lower()
@@ -1118,6 +1335,13 @@ def infer_agent_spec_from_request(request_text: str) -> dict[str, Any]:
         source_targets=source_targets,
         source_domains=source_domains,
     )
+    timezone_disambiguation_hints = _extract_timezone_disambiguation_hints(raw)
+    if timezone_disambiguation_hints:
+        signals = inference_reason.get("signals")
+        if not isinstance(signals, dict):
+            signals = {}
+        signals["timezone_disambiguation_hints"] = timezone_disambiguation_hints
+        inference_reason["signals"] = signals
 
     if not requested_focus:
         if resolved_kind == "news":
@@ -1146,6 +1370,7 @@ def infer_agent_spec_from_request(request_text: str) -> dict[str, Any]:
         schedule_spec=schedule_spec,
     )
     composed["inference_reason"] = inference_reason
+    composed["inference_reason_view"] = build_inference_reason_view(inference_reason)
     return composed
 
 
@@ -1219,6 +1444,7 @@ def apply_agent_spec_overrides(*, spec: dict[str, Any], overrides: dict[str, Any
     if isinstance(base_reason, dict):
         reason_payload["base"] = base_reason
     composed["inference_reason"] = reason_payload
+    composed["inference_reason_view"] = build_inference_reason_view(reason_payload)
     return composed
 
 

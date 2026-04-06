@@ -16,12 +16,84 @@
 
 ```bash
 python scripts/release/agent_factory_plan_perf_gate.py \
-  --requests-total 30 \
-  --concurrency 6 \
-  --max-p95-latency-ms 2000 \
-  --max-error-rate-pct 0 \
+  --baseline "eval/baselines/quality/agent_factory_plan_perf_envelope.json" \
+  --baseline-profile release \
   --output artifacts/agent-factory-plan-perf-gate-report.json
 ```
+
+Optional CLI overrides (higher priority than baseline profile):
+
+- `--requests-total`
+- `--concurrency`
+- `--max-p95-latency-ms`
+- `--max-error-rate-pct`
+
+## Baseline Envelope
+
+Profile envelopes are stored in:
+
+- `eval/baselines/quality/agent_factory_plan_perf_envelope.json`
+
+Current calibrated profiles:
+
+- `release` (default release-gate profile)
+- `nightly` (default nightly-reliability profile)
+- `dev_macos`
+- `dev_linux`
+
+## Baseline Refresh
+
+Drift/suggestion script:
+
+- `scripts/release/agent_factory_plan_perf_baseline_refresh.py`
+
+Example:
+
+```bash
+python scripts/release/agent_factory_plan_perf_baseline_refresh.py \
+  --baseline eval/baselines/quality/agent_factory_plan_perf_envelope.json \
+  --report release=artifacts/agent-factory-plan-perf-gate-release-report.json \
+  --report nightly=artifacts/agent-factory-plan-perf-gate-nightly-report.json \
+  --report dev_linux=artifacts/agent-factory-plan-perf-gate-dev-linux-report.json \
+  --output artifacts/agent-factory-plan-perf-baseline-refresh-report.json \
+  --write-updated-baseline artifacts/agent_factory_plan_perf_envelope_suggested.json
+```
+
+Scheduled workflow:
+
+- `.github/workflows/agent-factory-baseline-refresh.yml`
+
+## Baseline Update Policy Gate
+
+Baseline PRs are validated by:
+
+- script: `scripts/release/agent_factory_plan_perf_baseline_policy_gate.py`
+- workflow: `.github/workflows/agent-factory-baseline-policy-gate.yml`
+
+What this gate enforces:
+
+- per-profile p95 threshold drift above auto limits requires manual approval metadata;
+- any `max_error_rate_pct` threshold change requires manual approval metadata;
+- changed baseline must include `change_control` metadata.
+
+Default auto-drift limits:
+
+- max increase without manual approval: `15%`
+- max decrease without manual approval: `20%`
+
+Required `change_control` fields for changed baseline:
+
+- `change_id`
+- `reason`
+- `ticket`
+- `requested_by`
+
+Additional required fields when manual approval is required:
+
+- `manual_approval=true`
+- `approved_by` (non-empty list)
+- `approved_at`
+- optional `approval_scope` (if provided, must include all profiles requiring manual approval)
 
 ## Report Contract
 
@@ -35,6 +107,9 @@ python scripts/release/agent_factory_plan_perf_gate.py \
 - `thresholds`:
   - `max_p95_latency_ms`
   - `max_error_rate_pct`
+- `gate_config`:
+  - `baseline_path`, `baseline_suite`, `baseline_profile`
+  - resolved `requests_total`, `concurrency`
 - `breaches[]`
 - `failure_samples[]`
 

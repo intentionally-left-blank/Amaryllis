@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from agents.factory import (
     apply_agent_spec_overrides as factory_apply_agent_spec_overrides,
     automation_schedule_summary as factory_automation_schedule_summary,
+    build_inference_reason_view as factory_build_inference_reason_view,
     infer_agent_spec_from_request as factory_infer_agent_spec_from_request,
 )
 from runtime.auth import assert_owner, auth_context_from_request, resolve_user_id
@@ -238,6 +239,17 @@ def _build_quickstart_assistant_reply(
     return reply
 
 
+def _ensure_inference_reason_view(spec: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(spec, dict):
+        return {}
+    if isinstance(spec.get("inference_reason_view"), dict):
+        return spec
+    reason = spec.get("inference_reason") if isinstance(spec.get("inference_reason"), dict) else {}
+    enriched = dict(spec)
+    enriched["inference_reason_view"] = factory_build_inference_reason_view(reason)
+    return enriched
+
+
 @router.post("/agents/create")
 def create_agent(payload: CreateAgentRequest, request: Request) -> dict[str, Any]:
     services = request.app.state.services
@@ -335,6 +347,7 @@ def quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> dict[
         spec=spec,
         overrides=payload.overrides.model_dump(exclude_none=True) if payload.overrides is not None else None,
     )
+    spec = _ensure_inference_reason_view(spec)
     automation: dict[str, Any] | None = None
     automation_error: str | None = None
     if idempotency_key:
@@ -366,6 +379,7 @@ def quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> dict[
                     cached_spec = cached_record.get("quickstart_spec")
                     if not isinstance(cached_spec, dict):
                         cached_spec = spec
+                    cached_spec = _ensure_inference_reason_view(cached_spec)
                     cached_focus = str(cached_spec.get("focus") or "")
                     cached_reply = str(cached_record.get("assistant_reply") or "").strip()
                     if not cached_reply:
@@ -540,6 +554,13 @@ def plan_quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> 
         spec=spec,
         overrides=payload.overrides.model_dump(exclude_none=True) if payload.overrides is not None else None,
     )
+    spec = _ensure_inference_reason_view(spec)
+    inference_reason = spec.get("inference_reason") if isinstance(spec.get("inference_reason"), dict) else {}
+    inference_reason_view = (
+        spec.get("inference_reason_view") if isinstance(spec.get("inference_reason_view"), dict) else {}
+    )
+    if not inference_reason_view:
+        inference_reason_view = factory_build_inference_reason_view(inference_reason)
     automation_spec = spec.get("automation")
     automation_plan: dict[str, Any] | None = None
     assistant_reply_preview = (
@@ -594,7 +615,8 @@ def plan_quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> 
             "tools": spec.get("tools") if isinstance(spec.get("tools"), list) else [],
             "sources": spec.get("source_targets") if isinstance(spec.get("source_targets"), list) else [],
             "source_policy": spec.get("source_policy") if isinstance(spec.get("source_policy"), dict) else {},
-            "inference_reason": spec.get("inference_reason") if isinstance(spec.get("inference_reason"), dict) else {},
+            "inference_reason": inference_reason,
+            "inference_reason_view": inference_reason_view,
             "automation": automation_plan,
             "assistant_reply_preview": assistant_reply_preview,
         },

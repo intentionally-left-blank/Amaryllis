@@ -1,0 +1,47 @@
+{
+  "generated_at": "2026-04-06T00:00:00+00:00",
+  "suite": "agent_factory_plan_perf_envelope_v1",
+  "change_control": {
+    "change_id": "agent-factory-perf-envelope-initial",
+    "reason": "Initialize profile-specific baseline envelope for quickstart plan perf gate.",
+    "ticket": "P8-A09",
+    "requested_by": "amaryllis-release-bot",
+    "manual_approval": true,
+    "approved_by": [
+      "maintainer"
+    ],
+    "approved_at": "2026-04-06T00:00:00+00:00",
+    "approval_scope": [
+      "release",
+      "nightly",
+      "dev_macos",
+      "dev_linux"
+    ]
+  },
+  "profiles": {
+    "release": {
+      "requests_total": 30,
+      "concurrency": 6,
+      "max_p95_latency_ms": 2000.0,
+      "max_error_rate_pct": 0.0
+    },
+    "nightly": {
+      "requests_total": 40,
+      "concurrency": 8,
+      "max_p95_latency_ms": 2500.0,
+      "max_error_rate_pct": 0.0
+    },
+    "dev_macos": {
+      "requests_total": 20,
+      "concurrency": 4,
+      "max_p95_latency_ms": 3000.0,
+      "max_error_rate_pct": 0.0
+    },
+    "dev_linux": {
+      "requests_total": 24,
+      "concurrency": 6,
+      "max_p95_latency_ms": 2600.0,
+      "max_error_rate_pct": 0.0
+    }
+  }
+}

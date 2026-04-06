@@ -17,9 +17,15 @@ Turn natural-language agent creation into a production-grade, contract-driven su
 | P8-A06 | done | Product hardening and UX polish | weighted mixed-intent conflict resolution + explainable `inference_reason` + resilient schedule/source parsing + expanded docs/examples | Factory handles broader request styles with deterministic, inspectable output |
 | P8-A07 | done | Add deterministic intent-eval release/nightly gate | `eval/fixtures/agent_factory/*` + `scripts/release/agent_factory_intent_gate.py` + CI artifact wiring | Intent inference drift is caught as a blocking contract regression |
 | P8-A08 | done | Add blocking quickstart plan perf gate | `scripts/release/agent_factory_plan_perf_gate.py` + unit tests + release/nightly artifact wiring | p95/error-rate regressions on `/v1/agents/quickstart/plan` are caught before release |
+| P8-A09 | done | Calibrate profile-specific latency envelopes | `eval/baselines/quality/agent_factory_plan_perf_envelope.json` + baseline-profile wiring in release/nightly workflows | Perf budgets are reproducible and versioned per profile (`release/nightly/dev_*`) |
+| P8-A10 | done | Add baseline refresh workflow and drift report | `scripts/release/agent_factory_plan_perf_baseline_refresh.py` + scheduled `.github/workflows/agent-factory-baseline-refresh.yml` + refresh tests | Weekly drift snapshot produces suggested envelope updates without blocking release flow |
+| P8-A11 | done | Expand multilingual schedule/timezone + UI-ready explainability | extended locale aliases in `agents/factory.py` + `inference_reason_view` in plan payload + contract/tests updates | Planner handles broader locale phrasing and frontend gets structured explanation payload |
+| P8-A12 | done | Render quickstart explainability in macOS UI | `APIQuickstartInferenceReasonView` models + `AgentsView` explainability card (chips, confidence, conflict timeline, override tags) | User can inspect "why this plan" directly in desktop quickstart flow |
+| P8-A13 | done | Add baseline refresh PR policy gate | `scripts/release/agent_factory_plan_perf_baseline_policy_gate.py` + `.github/workflows/agent-factory-baseline-policy-gate.yml` + gate tests/docs | Baseline drift over auto limits is blocked without manual-approval metadata |
+| P8-A14 | done | Add timezone abbreviation disambiguation hints + extra LatAm locale coverage | `agents/factory.py` timezone ambiguity hints (`IST/CST`) + `disambiguation_hints` in `inference_reason_view` + `CDMX`/Portuguese schedule coverage in fixtures/tests | Planner remains deterministic but surfaces ambiguity explicitly for UI confirmation |
 
 ## Next Priorities
 
-1. Extend schedule/timezone inference further for additional locales and ambiguous aliases beyond current RU/EN + common US/EU abbreviations.
-2. Add UI-level visualization for `inference_reason` signals and conflict-resolution path.
-3. Calibrate hardware/profile-specific latency budgets for `agent_factory_plan_perf_gate` and publish baseline envelopes.
+1. Add auto-generated baseline update PR template that pre-fills `change_control` metadata from refresh report.
+2. Add repo-level CI check that ensures baseline refresh PR description references refresh artifact and approver identity.
+3. Extend disambiguation hints with locale-specific fallback suggestions (for example preferred city aliases per user locale).

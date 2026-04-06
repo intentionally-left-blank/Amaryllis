@@ -24,26 +24,39 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--requests-total",
         type=int,
-        default=30,
-        help="Total number of quickstart plan requests to execute.",
+        default=None,
+        help="Total number of quickstart plan requests to execute (CLI override).",
     )
     parser.add_argument(
         "--concurrency",
         type=int,
-        default=6,
-        help="Concurrent request workers.",
+        default=None,
+        help="Concurrent request workers (CLI override).",
     )
     parser.add_argument(
         "--max-p95-latency-ms",
         type=float,
-        default=2000.0,
-        help="Maximum allowed p95 latency in milliseconds.",
+        default=None,
+        help="Maximum allowed p95 latency in milliseconds (CLI override).",
     )
     parser.add_argument(
         "--max-error-rate-pct",
         type=float,
-        default=0.0,
-        help="Maximum allowed error rate in percent.",
+        default=None,
+        help="Maximum allowed error rate in percent (CLI override).",
+    )
+    parser.add_argument(
+        "--baseline",
+        default=os.getenv(
+            "AMARYLLIS_AGENT_FACTORY_PLAN_PERF_BASELINE",
+            "eval/baselines/quality/agent_factory_plan_perf_envelope.json",
+        ),
+        help="Path to profile baseline envelope.",
+    )
+    parser.add_argument(
+        "--baseline-profile",
+        default=os.getenv("AMARYLLIS_AGENT_FACTORY_PLAN_PERF_PROFILE", "release"),
+        help="Profile name in baseline envelope (for example: release, nightly, dev_macos).",
     )
     parser.add_argument(
         "--output",
@@ -91,22 +104,139 @@ def _write_report(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _resolve_path(project_root: Path, raw_path: str) -> Path:
+    candidate = Path(str(raw_path or "").strip()).expanduser()
+    if not candidate.is_absolute():
+        candidate = project_root / candidate
+    return candidate.resolve()
+
+
+def _safe_int(value: Any, *, default: int) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return int(default)
+
+
+def _safe_float(value: Any, *, default: float) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _load_baseline_profile(path: Path, profile: str) -> tuple[dict[str, Any], str, str]:
+    if not path.exists():
+        raise ValueError(f"missing baseline file: {path}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("baseline root must be JSON object")
+    suite = str(payload.get("suite") or "")
+    profiles = payload.get("profiles")
+    if not isinstance(profiles, dict) or not profiles:
+        raise ValueError("baseline.profiles must be non-empty object")
+
+    normalized_profile = str(profile or "").strip().lower() or "release"
+    matched_profile_name = ""
+    matched_profile_payload: dict[str, Any] | None = None
+    for raw_name, raw_payload in profiles.items():
+        if not isinstance(raw_payload, dict):
+            continue
+        if str(raw_name or "").strip().lower() == normalized_profile:
+            matched_profile_name = str(raw_name)
+            matched_profile_payload = raw_payload
+            break
+    if matched_profile_payload is None:
+        available = ", ".join(sorted(str(name) for name in profiles.keys()))
+        raise ValueError(f"baseline profile not found: {normalized_profile} (available: {available})")
+    return matched_profile_payload, suite, matched_profile_name
+
+
+def _resolve_int_setting(
+    *,
+    cli_value: int | None,
+    baseline_payload: dict[str, Any],
+    baseline_key: str,
+    env_key: str,
+    hard_default: int,
+) -> int:
+    if cli_value is not None:
+        return int(cli_value)
+    if baseline_key in baseline_payload:
+        return _safe_int(baseline_payload.get(baseline_key), default=hard_default)
+    return _safe_int(os.getenv(env_key, str(hard_default)), default=hard_default)
+
+
+def _resolve_float_setting(
+    *,
+    cli_value: float | None,
+    baseline_payload: dict[str, Any],
+    baseline_key: str,
+    env_key: str,
+    hard_default: float,
+) -> float:
+    if cli_value is not None:
+        return float(cli_value)
+    if baseline_key in baseline_payload:
+        return _safe_float(baseline_payload.get(baseline_key), default=hard_default)
+    return _safe_float(os.getenv(env_key, str(hard_default)), default=hard_default)
+
+
 def main() -> int:
     args = _parse_args()
-    if args.requests_total <= 0:
+    project_root = Path(__file__).resolve().parents[2]
+    baseline_profile_input = str(args.baseline_profile or "").strip() or "release"
+    baseline_path = _resolve_path(project_root, str(args.baseline or ""))
+    try:
+        baseline_payload, baseline_suite, baseline_profile = _load_baseline_profile(
+            baseline_path, baseline_profile_input
+        )
+    except Exception as exc:
+        print(f"[agent-factory-plan-perf-gate] baseline_error={exc}", file=sys.stderr)
+        return 2
+
+    requests_total = _resolve_int_setting(
+        cli_value=args.requests_total,
+        baseline_payload=baseline_payload,
+        baseline_key="requests_total",
+        env_key="AMARYLLIS_AGENT_FACTORY_PLAN_PERF_REQUESTS_TOTAL",
+        hard_default=30,
+    )
+    concurrency = _resolve_int_setting(
+        cli_value=args.concurrency,
+        baseline_payload=baseline_payload,
+        baseline_key="concurrency",
+        env_key="AMARYLLIS_AGENT_FACTORY_PLAN_PERF_CONCURRENCY",
+        hard_default=6,
+    )
+    max_p95_latency_ms = _resolve_float_setting(
+        cli_value=args.max_p95_latency_ms,
+        baseline_payload=baseline_payload,
+        baseline_key="max_p95_latency_ms",
+        env_key="AMARYLLIS_AGENT_FACTORY_PLAN_PERF_MAX_P95_MS",
+        hard_default=2000.0,
+    )
+    max_error_rate_pct = _resolve_float_setting(
+        cli_value=args.max_error_rate_pct,
+        baseline_payload=baseline_payload,
+        baseline_key="max_error_rate_pct",
+        env_key="AMARYLLIS_AGENT_FACTORY_PLAN_PERF_MAX_ERROR_RATE_PCT",
+        hard_default=0.0,
+    )
+
+    if requests_total <= 0:
         print("[agent-factory-plan-perf-gate] --requests-total must be >= 1", file=sys.stderr)
         return 2
-    if args.concurrency <= 0:
+    if concurrency <= 0:
         print("[agent-factory-plan-perf-gate] --concurrency must be >= 1", file=sys.stderr)
         return 2
-    if args.max_p95_latency_ms < 0:
+    if max_p95_latency_ms < 0:
         print("[agent-factory-plan-perf-gate] --max-p95-latency-ms must be >= 0", file=sys.stderr)
         return 2
-    if args.max_error_rate_pct < 0 or args.max_error_rate_pct > 100:
+    if max_error_rate_pct < 0 or max_error_rate_pct > 100:
         print("[agent-factory-plan-perf-gate] --max-error-rate-pct must be in range 0..100", file=sys.stderr)
         return 2
 
-    project_root = Path(__file__).resolve().parents[2]
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
 
@@ -124,6 +254,10 @@ def main() -> int:
         "create an agent for AI digest every day at 8:30pm PST",
         "создай агента для AI новостей по будням утром по времени мск",
         "create an agent for AI digest in 3 hours CET",
+        "create an agent for AI digest entre semana por la manana timezone Tokyo",
+        "create an agent for AI digest fin de semana at 7.15 IST",
+        "create an agent for AI digest her 4 saat KST",
+        "create an agent for AI digest todo dia at 6:45 CDMX",
         "создай агента для личной продуктивности",
     ]
 
@@ -188,8 +322,8 @@ def main() -> int:
                         "latency_ms": round(elapsed_ms, 3),
                     }
 
-                with ThreadPoolExecutor(max_workers=int(args.concurrency)) as pool:
-                    samples = list(pool.map(_submit, range(int(args.requests_total))))
+                with ThreadPoolExecutor(max_workers=int(concurrency)) as pool:
+                    samples = list(pool.map(_submit, range(int(requests_total))))
         finally:
             _shutdown_app(app)
 
@@ -204,10 +338,10 @@ def main() -> int:
     max_latency_ms = max(latency_values) if latency_values else 0.0
 
     breaches: list[str] = []
-    if p95_latency_ms > float(args.max_p95_latency_ms):
-        breaches.append(f"p95_latency_ms={p95_latency_ms:.3f} > {float(args.max_p95_latency_ms):.3f}")
-    if error_rate_pct > float(args.max_error_rate_pct):
-        breaches.append(f"error_rate_pct={error_rate_pct:.3f} > {float(args.max_error_rate_pct):.3f}")
+    if p95_latency_ms > float(max_p95_latency_ms):
+        breaches.append(f"p95_latency_ms={p95_latency_ms:.3f} > {float(max_p95_latency_ms):.3f}")
+    if error_rate_pct > float(max_error_rate_pct):
+        breaches.append(f"error_rate_pct={error_rate_pct:.3f} > {float(max_error_rate_pct):.3f}")
 
     status = "pass" if not breaches else "fail"
     report = {
@@ -225,8 +359,15 @@ def main() -> int:
             "total_duration_ms": round(total_duration_ms, 4),
         },
         "thresholds": {
-            "max_p95_latency_ms": float(args.max_p95_latency_ms),
-            "max_error_rate_pct": float(args.max_error_rate_pct),
+            "max_p95_latency_ms": float(max_p95_latency_ms),
+            "max_error_rate_pct": float(max_error_rate_pct),
+        },
+        "gate_config": {
+            "baseline_path": str(baseline_path),
+            "baseline_suite": baseline_suite,
+            "baseline_profile": baseline_profile,
+            "requests_total": int(requests_total),
+            "concurrency": int(concurrency),
         },
         "breaches": breaches,
         "failure_samples": failure_samples[:20],
@@ -241,12 +382,14 @@ def main() -> int:
         print("[agent-factory-plan-perf-gate] FAILED")
         for reason in breaches:
             print(f" - {reason}")
+        print(f" - profile={baseline_profile}")
         print(f"[agent-factory-plan-perf-gate] report={output_path}")
         return 1
 
     print(
         "[agent-factory-plan-perf-gate] OK "
-        f"requests={len(samples)} p95={p95_latency_ms:.3f}ms error_rate={error_rate_pct:.3f}%"
+        f"profile={baseline_profile} requests={len(samples)} "
+        f"p95={p95_latency_ms:.3f}ms error_rate={error_rate_pct:.3f}%"
     )
     print(f"[agent-factory-plan-perf-gate] report={output_path}")
     return 0

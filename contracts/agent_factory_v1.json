@@ -138,6 +138,10 @@
         "inference_reason": {
           "type": "object",
           "additionalProperties": true
+        },
+        "inference_reason_view": {
+          "type": "object",
+          "additionalProperties": true
         }
       }
     }
@@ -183,6 +187,21 @@
             },
             "source_policy": {
               "$ref": "#/entities/source_policy"
+            },
+            "inference_reason": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "inference_reason_view": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "automation": {
+              "type": "object",
+              "nullable": true
+            },
+            "assistant_reply_preview": {
+              "type": "string"
             }
           }
         }
