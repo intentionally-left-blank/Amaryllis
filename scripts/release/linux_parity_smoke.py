@@ -162,9 +162,12 @@ def _install_runtime_stubs(app: Any) -> None:
         temperature: float = 0.7,
         max_tokens: int = 512,
         routing: dict[str, Any] | None = None,
+        fallback_targets: list[tuple[str, str]] | None = None,
         session_id: str | None = None,
+        user_id: str | None = None,
+        **extra_kwargs: Any,
     ) -> dict[str, Any]:
-        _ = (messages, temperature, max_tokens, routing, session_id)
+        _ = (messages, temperature, max_tokens, routing, fallback_targets, session_id, user_id, extra_kwargs)
         provider_value = provider or str(getattr(model_manager, "active_provider", "linux-parity"))
         model_value = model or str(getattr(model_manager, "active_model", "linux-parity-model"))
         return {
@@ -182,9 +185,12 @@ def _install_runtime_stubs(app: Any) -> None:
         temperature: float = 0.7,
         max_tokens: int = 512,
         routing: dict[str, Any] | None = None,
+        fallback_targets: list[tuple[str, str]] | None = None,
         session_id: str | None = None,
+        user_id: str | None = None,
+        **extra_kwargs: Any,
     ) -> tuple[Any, str, str, dict[str, Any]]:
-        _ = (messages, temperature, max_tokens, routing, session_id)
+        _ = (messages, temperature, max_tokens, routing, fallback_targets, session_id, user_id, extra_kwargs)
         provider_value = provider or str(getattr(model_manager, "active_provider", "linux-parity"))
         model_value = model or str(getattr(model_manager, "active_model", "linux-parity-model"))
         return (

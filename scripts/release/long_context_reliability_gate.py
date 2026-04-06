@@ -159,9 +159,12 @@ def _install_long_context_stubs(app: Any) -> None:
         temperature: float = 0.7,
         max_tokens: int = 512,
         routing: dict[str, Any] | None = None,
+        fallback_targets: list[tuple[str, str]] | None = None,
         session_id: str | None = None,
+        user_id: str | None = None,
+        **extra_kwargs: Any,
     ) -> dict[str, Any]:
-        _ = (temperature, max_tokens, routing, session_id)
+        _ = (temperature, max_tokens, routing, fallback_targets, session_id, user_id, extra_kwargs)
         keywords = _extract_keywords_from_marker(messages)
         if not keywords:
             keywords = ["context", "summary", "fallback"]
@@ -183,7 +186,10 @@ def _install_long_context_stubs(app: Any) -> None:
         temperature: float = 0.7,
         max_tokens: int = 512,
         routing: dict[str, Any] | None = None,
+        fallback_targets: list[tuple[str, str]] | None = None,
         session_id: str | None = None,
+        user_id: str | None = None,
+        **extra_kwargs: Any,
     ) -> tuple[Any, str, str, dict[str, Any]]:
         row = _fake_chat(
             messages=messages,
@@ -192,7 +198,10 @@ def _install_long_context_stubs(app: Any) -> None:
             temperature=temperature,
             max_tokens=max_tokens,
             routing=routing,
+            fallback_targets=fallback_targets,
             session_id=session_id,
+            user_id=user_id,
+            **extra_kwargs,
         )
         return iter([str(row.get("content") or "")]), str(row.get("provider") or ""), str(row.get("model") or ""), {
             "mode": "long_context_stub"
