@@ -14,10 +14,11 @@ Turn natural-language agent creation into a production-grade, contract-driven su
 | P8-A03 | done | Add domain allowlist inference | `source_policy.mode=allowlist` + parsed `domains` from NL requests | Plan output shows scoped web domains before apply |
 | P8-A04 | done | Validate in runtime tests | `tests/test_agent_factory.py`, updated `tests/test_cognition_backend_runtime.py` | CI proves contract endpoint and domain-aware planning behavior |
 | P8-A05 | done | Add structured quickstart overrides | typed payload overrides (`kind/name/focus/tools/source_policy/automation`) with idempotency-safe fingerprinting | advanced callers can refine plan/apply output without losing NL entry flow |
-| P8-A06 | in_progress | Product hardening and UX polish | richer intent profiles, safer source parsing fallback, explainable planning hints, docs/examples expansion | Factory handles broader request styles with consistent output |
+| P8-A06 | done | Product hardening and UX polish | weighted mixed-intent conflict resolution + explainable `inference_reason` + resilient schedule/source parsing + expanded docs/examples | Factory handles broader request styles with deterministic, inspectable output |
+| P8-A07 | done | Add deterministic intent-eval release/nightly gate | `eval/fixtures/agent_factory/*` + `scripts/release/agent_factory_intent_gate.py` + CI artifact wiring | Intent inference drift is caught as a blocking contract regression |
 
 ## Next Priorities
 
-1. Add conflict-resolution logic for mixed intents (for example coding + news in one request).
-2. Extend eval fixtures for multilingual and noisy prompts to reduce parser drift regressions.
-3. Add explainable planning hints (`inference_reason`) so UI can show why the factory chose a specific kind/source policy.
+1. Expand fixture coverage for additional schedule/timezone language variants (RU/EN mixed prompts, weekday abbreviations, relative time phrases).
+2. Add UI-level visualization for `inference_reason` signals and conflict-resolution path.
+3. Add perf envelope checks for bulk plan generation (`/v1/agents/quickstart/plan`) under concurrent load.

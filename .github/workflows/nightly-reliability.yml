@@ -214,6 +214,11 @@ jobs:
           python scripts/release/api_quickstart_compatibility_gate.py \
             --output "artifacts/nightly-api-quickstart-compat-report.json"
 
+      - name: Run nightly Agent Factory intent gate (blocking)
+        run: |
+          python scripts/release/agent_factory_intent_gate.py \
+            --output "artifacts/nightly-agent-factory-intent-gate-report.json"
+
       - name: Run nightly first-run activation gate (blocking)
         run: |
           python scripts/release/first_run_activation_gate.py \
@@ -503,6 +508,14 @@ jobs:
         with:
           name: nightly-api-quickstart-compat-report
           path: artifacts/nightly-api-quickstart-compat-report.json
+          if-no-files-found: error
+
+      - name: Upload nightly Agent Factory intent gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-agent-factory-intent-gate-report
+          path: artifacts/nightly-agent-factory-intent-gate-report.json
           if-no-files-found: error
 
       - name: Upload nightly first-run activation gate report

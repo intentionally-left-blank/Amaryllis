@@ -103,6 +103,18 @@ class AgentFactoryTests(unittest.TestCase):
         self.assertTrue(bool(reason.get("mixed_intent", False)))
         self.assertEqual(str(reason.get("resolved_kind")), "news")
 
+    def test_hourly_schedule_does_not_false_match_weekday_from_python(self) -> None:
+        spec = infer_agent_spec_from_request(
+            "create an agent for python package maintenance from pypi.org and github.com every 6 hours at 10 minute"
+        )
+        automation = spec.get("automation", {})
+        self.assertIsInstance(automation, dict)
+        self.assertEqual(str(automation.get("schedule_type")), "hourly")
+        schedule = automation.get("schedule", {})
+        self.assertIsInstance(schedule, dict)
+        self.assertEqual(int(schedule.get("interval_hours", -1)), 6)
+        self.assertEqual(int(schedule.get("minute", -1)), 10)
+
 
 if __name__ == "__main__":
     unittest.main()

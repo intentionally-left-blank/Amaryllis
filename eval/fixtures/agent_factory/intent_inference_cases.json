@@ -1,0 +1,47 @@
+{
+  "suite": "agent_factory_intent_inference_v1",
+  "cases": [
+    {
+      "id": "mixed_news_coding_with_reddit",
+      "request": "создай агента для AI новостей и python разработки из reddit",
+      "expected": {
+        "kind": "news",
+        "mixed_intent": true,
+        "source_policy_mode": "channels"
+      }
+    },
+    {
+      "id": "coding_allowlist_hourly",
+      "request": "create an agent for python package maintenance from pypi.org and github.com every 6 hours at 10 minute",
+      "expected": {
+        "kind": "coding",
+        "mixed_intent": false,
+        "source_policy_mode": "allowlist",
+        "schedule_type": "hourly",
+        "interval_hours": 6,
+        "minute": 10
+      }
+    },
+    {
+      "id": "general_productivity",
+      "request": "создай агента для личной продуктивности",
+      "expected": {
+        "kind": "general",
+        "mixed_intent": false,
+        "source_policy_mode": "open_web"
+      }
+    },
+    {
+      "id": "noisy_multilingual_news_priority",
+      "request": "pls сделай AGENT!!! for AI digest + bugfix updates from reddit.com, github.com, x.com daily at 08:30",
+      "expected": {
+        "kind": "news",
+        "mixed_intent": true,
+        "source_policy_mode": "allowlist",
+        "schedule_type": "weekly",
+        "hour": 8,
+        "minute": 30
+      }
+    }
+  ]
+}

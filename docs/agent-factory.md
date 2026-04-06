@@ -51,3 +51,11 @@ Machine-readable contract:
 - `contracts/agent_factory_v1.json`
 
 Use this file for integration checks and for external clients that need stable response expectations.
+
+## Quality Gate
+
+Intent-inference regression gate:
+
+- script: `scripts/release/agent_factory_intent_gate.py`
+- fixture: `eval/fixtures/agent_factory/intent_inference_cases.json`
+- docs: `docs/agent-factory-intent-gate.md`

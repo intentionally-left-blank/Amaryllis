@@ -397,12 +397,16 @@ Run a focused local gate pack:
 python -m unittest \
   tests.test_api_lifecycle \
   tests.test_api_compatibility \
+  tests.test_agent_factory \
+  tests.test_agent_factory_eval_fixtures \
+  tests.test_agent_factory_intent_gate \
   tests.test_supervisor_task_graph_manager \
   tests.test_supervisor_mission_gate \
   -v
 
 python scripts/release/api_compat_gate.py
 python scripts/release/api_quickstart_compatibility_gate.py --output artifacts/api-quickstart-compat-report.json
+python scripts/release/agent_factory_intent_gate.py --output artifacts/agent-factory-intent-gate-report.json
 ```
 
 For full quality gates, use the GitHub Actions workflows:
@@ -418,6 +422,8 @@ Start here:
 
 Core contracts:
 - [API lifecycle](docs/api-lifecycle.md)
+- [Agent Factory](docs/agent-factory.md)
+- [Agent Factory intent gate](docs/agent-factory-intent-gate.md)
 - [Supervisor task graph](docs/supervisor-task-graph-contract.md)
 - [Automation mission policy](docs/automation-mission-policy.md)
 - [Flow session contract](docs/flow-session-contract.md)

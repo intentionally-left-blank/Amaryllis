@@ -25,6 +25,7 @@ _DOMAIN_PATTERN = re.compile(
     r"\b(?P<domain>[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+)\b",
     flags=re.IGNORECASE,
 )
+_WORD_TOKEN_PATTERN = re.compile(r"[a-zа-яё]+", flags=re.IGNORECASE)
 
 _DAILY_SCHEDULE_TOKENS: tuple[str, ...] = (
     "каждый день",
@@ -53,8 +54,7 @@ _START_IMMEDIATELY_TOKENS: tuple[str, ...] = (
     "run now",
 )
 
-_WEEKDAY_TOKENS: dict[str, str] = {
-    "понедель": "MO",
+_WEEKDAY_EXACT_TOKENS: dict[str, str] = {
     "пн": "MO",
     "monday": "MO",
     "mon": "MO",
@@ -62,27 +62,31 @@ _WEEKDAY_TOKENS: dict[str, str] = {
     "вт": "TU",
     "tuesday": "TU",
     "tue": "TU",
-    "сред": "WE",
     "ср": "WE",
     "wednesday": "WE",
     "wed": "WE",
-    "четверг": "TH",
     "чт": "TH",
     "thursday": "TH",
     "thu": "TH",
-    "пятниц": "FR",
     "пт": "FR",
     "friday": "FR",
     "fri": "FR",
-    "суббот": "SA",
     "сб": "SA",
     "saturday": "SA",
     "sat": "SA",
-    "воскрес": "SU",
     "вс": "SU",
     "sunday": "SU",
     "sun": "SU",
 }
+_WEEKDAY_PREFIX_TOKENS: tuple[tuple[str, str], ...] = (
+    ("понедель", "MO"),
+    ("вторник", "TU"),
+    ("сред", "WE"),
+    ("четверг", "TH"),
+    ("пятниц", "FR"),
+    ("суббот", "SA"),
+    ("воскрес", "SU"),
+)
 
 _SOURCE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("reddit", ("reddit", "реддит")),
@@ -102,6 +106,73 @@ _SOURCE_DOMAIN_PREFIXES: tuple[tuple[str, str], ...] = (
 )
 _SUPPORTED_AGENT_KINDS: tuple[str, ...] = ("news", "coding", "general")
 _SUPPORTED_SOURCE_POLICY_MODES: tuple[str, ...] = ("open_web", "channels", "allowlist")
+_NEWS_KIND_KEYWORDS: tuple[str, ...] = (
+    "news",
+    "новост",
+    "digest",
+    "дайджест",
+    "headline",
+    "обзор",
+    "trend",
+    "trends",
+    "релиз",
+    "launch",
+)
+_CODING_KIND_KEYWORDS: tuple[str, ...] = (
+    "code",
+    "coding",
+    "код",
+    "разработ",
+    "developer",
+    "python",
+    "typescript",
+    "javascript",
+    "java",
+    "golang",
+    "rust",
+    "debug",
+    "bug",
+    "test",
+    "ci",
+    "repo",
+    "repository",
+    "commit",
+    "sdk",
+    "api",
+    "automation script",
+)
+_NEWS_SOURCE_WEIGHTS: dict[str, float] = {
+    "reddit": 2.0,
+    "twitter": 2.0,
+    "hackernews": 2.0,
+    "arxiv": 1.0,
+    "web": 0.25,
+}
+_CODING_SOURCE_WEIGHTS: dict[str, float] = {
+    "github": 2.0,
+    "arxiv": 0.25,
+}
+_NEWS_DOMAIN_SUFFIXES: tuple[str, ...] = (
+    "reddit.com",
+    "x.com",
+    "twitter.com",
+    "news.ycombinator.com",
+    "techcrunch.com",
+    "theverge.com",
+    "wired.com",
+    "reuters.com",
+    "bloomberg.com",
+)
+_CODING_DOMAIN_SUFFIXES: tuple[str, ...] = (
+    "github.com",
+    "gitlab.com",
+    "bitbucket.org",
+    "pypi.org",
+    "npmjs.com",
+    "crates.io",
+    "developer.mozilla.org",
+    "docs.python.org",
+)
 
 
 def looks_like_agent_quickstart_request(text: str) -> bool:
@@ -200,9 +271,18 @@ def _extract_weekday_codes(lowered_text: str) -> list[str]:
     lowered = str(lowered_text or "").lower()
     if not lowered:
         return []
+    words = [match.group(0).lower() for match in _WORD_TOKEN_PATTERN.finditer(lowered)]
+    if not words:
+        return []
     seen: list[str] = []
-    for token, code in _WEEKDAY_TOKENS.items():
-        if token in lowered and code not in seen:
+    for word in words:
+        code = _WEEKDAY_EXACT_TOKENS.get(word)
+        if code is None:
+            for prefix, prefix_code in _WEEKDAY_PREFIX_TOKENS:
+                if word.startswith(prefix):
+                    code = prefix_code
+                    break
+        if code is not None and code not in seen:
             seen.append(code)
     return seen
 
@@ -212,17 +292,21 @@ def _infer_schedule_spec(lowered_text: str) -> dict[str, Any] | None:
     if not lowered:
         return None
     start_immediately = any(token in lowered for token in _START_IMMEDIATELY_TOKENS)
-
-    if any(token in lowered for token in _HOURLY_SCHEDULE_TOKENS):
+    interval_match = _HOURLY_INTERVAL_PATTERN.search(lowered)
+    direct_match = _HOUR_ONLY_PATTERN.search(lowered)
+    has_hourly_hint = (
+        any(token in lowered for token in _HOURLY_SCHEDULE_TOKENS)
+        or interval_match is not None
+        or direct_match is not None
+    )
+    if has_hourly_hint:
         interval_hours = 1
-        interval_match = _HOURLY_INTERVAL_PATTERN.search(lowered)
         if interval_match is not None:
             try:
                 interval_hours = int(interval_match.group("hours"))
             except Exception:
                 interval_hours = 1
         else:
-            direct_match = _HOUR_ONLY_PATTERN.search(lowered)
             if direct_match is not None:
                 try:
                     interval_hours = int(direct_match.group("hour"))
@@ -699,6 +783,122 @@ def _build_automation_message(
     )
 
 
+def _matched_keywords(lowered_text: str, keywords: tuple[str, ...]) -> list[str]:
+    lowered = str(lowered_text or "").lower()
+    matched: list[str] = []
+    for token in keywords:
+        normalized = str(token or "").strip().lower()
+        if not normalized:
+            continue
+        if normalized in lowered and normalized not in matched:
+            matched.append(normalized)
+    return matched
+
+
+def _suffix_matches(*, domains: list[str], suffixes: tuple[str, ...]) -> list[str]:
+    matched: list[str] = []
+    for domain in domains:
+        normalized_domain = str(domain or "").strip().lower()
+        if not normalized_domain:
+            continue
+        for suffix in suffixes:
+            normalized_suffix = str(suffix or "").strip().lower()
+            if not normalized_suffix:
+                continue
+            if normalized_domain == normalized_suffix or normalized_domain.endswith(f".{normalized_suffix}"):
+                if normalized_domain not in matched:
+                    matched.append(normalized_domain)
+                break
+    return matched
+
+
+def _kind_score_from_sources(*, source_targets: list[str], weights: dict[str, float]) -> float:
+    score = 0.0
+    for target in source_targets:
+        score += float(weights.get(str(target or "").strip().lower(), 0.0))
+    return score
+
+
+def _resolve_kind_from_signals(
+    *,
+    lowered_text: str,
+    requested_focus: str,
+    source_targets: list[str],
+    source_domains: list[str],
+) -> tuple[str, dict[str, Any]]:
+    focus_lowered = str(requested_focus or "").strip().lower()
+    text_news_keywords = _matched_keywords(lowered_text, _NEWS_KIND_KEYWORDS)
+    text_coding_keywords = _matched_keywords(lowered_text, _CODING_KIND_KEYWORDS)
+    focus_news_keywords = _matched_keywords(focus_lowered, _NEWS_KIND_KEYWORDS)
+    focus_coding_keywords = _matched_keywords(focus_lowered, _CODING_KIND_KEYWORDS)
+
+    news_domain_matches = _suffix_matches(domains=source_domains, suffixes=_NEWS_DOMAIN_SUFFIXES)
+    coding_domain_matches = _suffix_matches(domains=source_domains, suffixes=_CODING_DOMAIN_SUFFIXES)
+
+    news_score = (
+        float(len(text_news_keywords))
+        + float(len(focus_news_keywords))
+        + _kind_score_from_sources(source_targets=source_targets, weights=_NEWS_SOURCE_WEIGHTS)
+        + float(len(news_domain_matches)) * 1.5
+    )
+    coding_score = (
+        float(len(text_coding_keywords))
+        + float(len(focus_coding_keywords))
+        + _kind_score_from_sources(source_targets=source_targets, weights=_CODING_SOURCE_WEIGHTS)
+        + float(len(coding_domain_matches)) * 1.5
+    )
+
+    resolved_kind = "general"
+    conflict_resolution = "none"
+    if news_score > coding_score and news_score > 0:
+        resolved_kind = "news"
+    elif coding_score > news_score and coding_score > 0:
+        resolved_kind = "coding"
+    elif news_score > 0 and coding_score > 0:
+        # Tie-breaker prefers explicit source-discovery channels.
+        source_news_weight = _kind_score_from_sources(source_targets=source_targets, weights=_NEWS_SOURCE_WEIGHTS)
+        source_coding_weight = _kind_score_from_sources(source_targets=source_targets, weights=_CODING_SOURCE_WEIGHTS)
+        if source_news_weight > source_coding_weight:
+            resolved_kind = "news"
+            conflict_resolution = "tie_break_by_news_source_weight"
+        elif source_coding_weight > source_news_weight:
+            resolved_kind = "coding"
+            conflict_resolution = "tie_break_by_coding_source_weight"
+        elif len(news_domain_matches) > len(coding_domain_matches):
+            resolved_kind = "news"
+            conflict_resolution = "tie_break_by_news_domain_count"
+        elif len(coding_domain_matches) > len(news_domain_matches):
+            resolved_kind = "coding"
+            conflict_resolution = "tie_break_by_coding_domain_count"
+        else:
+            resolved_kind = "news"
+            conflict_resolution = "tie_break_default_news"
+
+    mixed_intent = bool(news_score >= 1.0 and coding_score >= 1.0)
+
+    reason = {
+        "source": "natural_language_weighted_resolution_v2",
+        "resolved_kind": resolved_kind,
+        "scores": {
+            "news": round(news_score, 3),
+            "coding": round(coding_score, 3),
+        },
+        "signals": {
+            "text_news_keywords": text_news_keywords,
+            "text_coding_keywords": text_coding_keywords,
+            "focus_news_keywords": focus_news_keywords,
+            "focus_coding_keywords": focus_coding_keywords,
+            "source_targets": source_targets,
+            "domain_allowlist": source_domains,
+            "news_domain_matches": news_domain_matches,
+            "coding_domain_matches": coding_domain_matches,
+        },
+        "mixed_intent": mixed_intent,
+        "conflict_resolution": conflict_resolution,
+    }
+    return resolved_kind, reason
+
+
 def infer_agent_spec_from_request(request_text: str) -> dict[str, Any]:
     raw = str(request_text or "").strip()
     lowered = raw.lower()
@@ -712,55 +912,40 @@ def infer_agent_spec_from_request(request_text: str) -> dict[str, Any]:
     requested_focus = _strip_focus_tail(requested_focus)
 
     source_targets = _infer_source_targets(lowered, domains=source_domains)
+    resolved_kind, inference_reason = _resolve_kind_from_signals(
+        lowered_text=lowered,
+        requested_focus=requested_focus,
+        source_targets=source_targets,
+        source_domains=source_domains,
+    )
 
     if not requested_focus:
-        if any(token in lowered for token in ("news", "новост", "twitter", "reddit", "x.com")):
+        if resolved_kind == "news":
             requested_focus = "AI news and internet updates"
-        elif any(token in lowered for token in ("code", "код", "python", "typescript", "git", "program")):
+        elif resolved_kind == "coding":
             requested_focus = "software engineering tasks"
         else:
             requested_focus = "general productivity"
 
-    is_news = any(token in lowered for token in ("news", "новост", "reddit", "twitter", "x.com")) or bool(
-        source_targets
-    )
-    is_coding = any(token in lowered for token in ("code", "код", "python", "typescript", "git", "program"))
-
     if requested_name:
         name = requested_name
-    elif is_news:
+    elif resolved_kind == "news":
         name = "News Scout"
-    elif is_coding:
+    elif resolved_kind == "coding":
         name = "Code Copilot"
     else:
         name = "Custom Assistant"
 
     schedule_spec = _infer_schedule_spec(lowered)
-    resolved_kind = "news" if is_news else ("coding" if is_coding else "general")
     composed = _compose_agent_spec(
-        kind="news" if is_news else ("coding" if is_coding else "general"),
+        kind=resolved_kind,
         name=name,
         focus=requested_focus,
         source_targets=source_targets,
         source_domains=source_domains,
         schedule_spec=schedule_spec,
     )
-    composed["inference_reason"] = {
-        "source": "natural_language_heuristics_v1",
-        "resolved_kind": resolved_kind,
-        "signals": {
-            "news_signal": bool(is_news),
-            "coding_signal": bool(is_coding),
-            "source_targets_count": len(source_targets),
-            "domain_allowlist_count": len(source_domains),
-        },
-        "mixed_intent": bool(is_news and is_coding),
-        "conflict_resolution": (
-            "news_priority_due_to_source_scope"
-            if (is_news and is_coding)
-            else "none"
-        ),
-    }
+    composed["inference_reason"] = inference_reason
     return composed
 
 
@@ -794,13 +979,12 @@ def apply_agent_spec_overrides(*, spec: dict[str, Any], overrides: dict[str, Any
         if isinstance(source_policy_override.get("domains"), list):
             source_domains = _sanitize_domains(source_policy_override.get("domains"))
         policy_mode = str(source_policy_override.get("mode") or "").strip().lower()
-        if policy_mode == "open_web":
-            source_channels = []
-            source_domains = []
-        elif policy_mode == "channels":
-            source_domains = []
-        elif policy_mode == "allowlist":
-            pass
+        if policy_mode in _SUPPORTED_SOURCE_POLICY_MODES:
+            if policy_mode == "open_web":
+                source_channels = []
+                source_domains = []
+            elif policy_mode == "channels":
+                source_domains = []
 
     if source_domains and not source_channels:
         for domain in source_domains:
