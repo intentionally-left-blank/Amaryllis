@@ -23,7 +23,7 @@ Create specialized agents from a single natural-language request:
    - `sources`
    - `source_policy` (`mode`, `channels`, `domains`)
    - `inference_reason` (why factory picked this profile)
-   - `automation` schedule
+   - `automation` schedule (`schedule_type`, `schedule`, `timezone`, `start_immediately`)
 3. Apply the same request via `/v1/agents/quickstart` (optionally with `idempotency_key`).
 4. Retry safely with the same `idempotency_key` (no duplicate agent creation).
 
@@ -44,6 +44,16 @@ For advanced control you can send structured overrides while keeping NL request 
 - `channels`: channel constraints inferred (for example `reddit`, `twitter`, `web`).
 - `allowlist`: explicit domain list inferred (for example `openai.com`, `huggingface.co`).
 
+## Schedule/Timezone Inference
+
+The planner supports multilingual schedule hints, including:
+
+- grouped weekdays/weekends (`по будням`, `on weekends`);
+- daypart hints (`утром`, `evening`, `noon`) when exact time is omitted;
+- `am/pm` time format (`at 8:30pm`);
+- timezone aliases and abbreviations (`мск`, `PST`, `CET`, `UTC+5`);
+- relative hourly phrasing (`in 3 hours`, `через 3 часа`) mapped to hourly schedule with `start_immediately=true`.
+
 ## Contract
 
 Machine-readable contract:
@@ -59,3 +69,8 @@ Intent-inference regression gate:
 - script: `scripts/release/agent_factory_intent_gate.py`
 - fixture: `eval/fixtures/agent_factory/intent_inference_cases.json`
 - docs: `docs/agent-factory-intent-gate.md`
+
+Plan performance gate:
+
+- script: `scripts/release/agent_factory_plan_perf_gate.py`
+- docs: `docs/agent-factory-plan-perf-gate.md`

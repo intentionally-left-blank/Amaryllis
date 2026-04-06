@@ -451,6 +451,50 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         self.assertIsInstance(inference_reason, dict)
         self.assertEqual(str(inference_reason.get("resolved_kind")), "news")
 
+    def test_quickstart_plan_infers_weekdays_and_timezone(self) -> None:
+        planned = self.client.post(
+            "/v1/agents/quickstart/plan",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "request": "создай агента для AI новостей по будням в 09:30 timezone Asia/Almaty",
+            },
+        )
+        self.assertEqual(planned.status_code, 200)
+        payload = planned.json()
+        quickstart_plan = payload.get("quickstart_plan", {})
+        automation = quickstart_plan.get("automation", {})
+        self.assertIsInstance(automation, dict)
+        self.assertEqual(str(automation.get("schedule_type")), "weekly")
+        self.assertEqual(str(automation.get("timezone")), "Asia/Almaty")
+        schedule = automation.get("schedule", {})
+        self.assertIsInstance(schedule, dict)
+        self.assertEqual(schedule.get("byday"), ["MO", "TU", "WE", "TH", "FR"])
+        self.assertEqual(int(schedule.get("hour", -1)), 9)
+        self.assertEqual(int(schedule.get("minute", -1)), 30)
+
+    def test_quickstart_plan_supports_ampm_daypart_and_timezone_alias(self) -> None:
+        planned = self.client.post(
+            "/v1/agents/quickstart/plan",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "request": "create an agent for AI digest every day at 8:30pm PST",
+            },
+        )
+        self.assertEqual(planned.status_code, 200)
+        payload = planned.json()
+        quickstart_plan = payload.get("quickstart_plan", {})
+        automation = quickstart_plan.get("automation", {})
+        self.assertIsInstance(automation, dict)
+        self.assertEqual(str(automation.get("schedule_type")), "weekly")
+        self.assertEqual(str(automation.get("timezone")), "UTC-08:00")
+        schedule = automation.get("schedule", {})
+        self.assertIsInstance(schedule, dict)
+        self.assertEqual(schedule.get("byday"), ["MO", "TU", "WE", "TH", "FR", "SA", "SU"])
+        self.assertEqual(int(schedule.get("hour", -1)), 20)
+        self.assertEqual(int(schedule.get("minute", -1)), 30)
+
     def test_quickstart_plan_accepts_structured_overrides(self) -> None:
         planned = self.client.post(
             "/v1/agents/quickstart/plan",

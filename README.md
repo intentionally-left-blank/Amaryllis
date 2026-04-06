@@ -407,6 +407,7 @@ python -m unittest \
 python scripts/release/api_compat_gate.py
 python scripts/release/api_quickstart_compatibility_gate.py --output artifacts/api-quickstart-compat-report.json
 python scripts/release/agent_factory_intent_gate.py --output artifacts/agent-factory-intent-gate-report.json
+python scripts/release/agent_factory_plan_perf_gate.py --output artifacts/agent-factory-plan-perf-gate-report.json
 ```
 
 For full quality gates, use the GitHub Actions workflows:
@@ -424,6 +425,7 @@ Core contracts:
 - [API lifecycle](docs/api-lifecycle.md)
 - [Agent Factory](docs/agent-factory.md)
 - [Agent Factory intent gate](docs/agent-factory-intent-gate.md)
+- [Agent Factory plan perf gate](docs/agent-factory-plan-perf-gate.md)
 - [Supervisor task graph](docs/supervisor-task-graph-contract.md)
 - [Automation mission policy](docs/automation-mission-policy.md)
 - [Flow session contract](docs/flow-session-contract.md)

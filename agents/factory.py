@@ -10,12 +10,20 @@ _AGENT_FOCUS_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 _SCHEDULE_TIME_PATTERN = re.compile(r"(?:\bв\b|\bat\b)\s*(?P<hour>\d{1,2})(?::(?P<minute>\d{1,2}))?")
+_SCHEDULE_TIME_AMPM_PATTERN = re.compile(
+    r"(?:\bв\b|\bat\b)\s*(?P<hour>\d{1,2})(?::(?P<minute>\d{1,2}))?\s*(?P<ampm>a\.?m\.?|p\.?m\.?)\b",
+    flags=re.IGNORECASE,
+)
 _MINUTE_ONLY_PATTERN = re.compile(
     r"(?:\bв\b|\bat\b)\s*(?P<minute>\d{1,2})\s*(?:минут(?:а|ы)?|minute(?:s)?)",
     flags=re.IGNORECASE,
 )
 _HOURLY_INTERVAL_PATTERN = re.compile(
     r"(?:каждые|every)\s*(?P<hours>\d{1,2})\s*(?:час(?:а|ов)?|hours?)",
+    flags=re.IGNORECASE,
+)
+_RELATIVE_HOURLY_INTERVAL_PATTERN = re.compile(
+    r"(?:через|in)\s*(?P<hours>\d{1,2})\s*(?:час(?:а|ов)?|hours?)",
     flags=re.IGNORECASE,
 )
 _HOUR_ONLY_PATTERN = re.compile(r"(?<!\d)(?P<hour>\d{1,2})\s*(?:час(?:а|ов)?|hours?)(?!\w)", flags=re.IGNORECASE)
@@ -26,6 +34,19 @@ _DOMAIN_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 _WORD_TOKEN_PATTERN = re.compile(r"[a-zа-яё]+", flags=re.IGNORECASE)
+_TIMEZONE_OFFSET_PATTERN = re.compile(
+    r"\b(?:UTC|GMT)\s*(?P<sign>[+-])\s*(?P<hours>\d{1,2})(?::?(?P<minutes>\d{2}))?\b",
+    flags=re.IGNORECASE,
+)
+_TIMEZONE_IANA_PATTERN = re.compile(
+    r"\b(?P<tz>[A-Za-z][A-Za-z0-9_+-]{1,32}/[A-Za-z][A-Za-z0-9_+-]{1,32}(?:/[A-Za-z][A-Za-z0-9_+-]{1,32})?)\b",
+    flags=re.IGNORECASE,
+)
+_TIMEZONE_CONTEXT_PATTERN = re.compile(
+    r"(?:\b(?:timezone|time\s*zone|tz|gmt|utc)\b|(?:по\s+времени)|(?:часов(?:ой|ому)\s+пояс[ауе]?))"
+    r"\s*(?::|=|is)?\s*(?P<tz>[A-Za-z][A-Za-z0-9_+\-/:]{1,64})",
+    flags=re.IGNORECASE,
+)
 
 _DAILY_SCHEDULE_TOKENS: tuple[str, ...] = (
     "каждый день",
@@ -52,6 +73,35 @@ _START_IMMEDIATELY_TOKENS: tuple[str, ...] = (
     "start now",
     "immediately",
     "run now",
+)
+_WEEKDAY_GROUP_TOKENS: tuple[str, ...] = (
+    "weekdays",
+    "weekday",
+    "workdays",
+    "on weekdays",
+    "будни",
+    "по будням",
+    "рабочие дни",
+)
+_WEEKEND_GROUP_TOKENS: tuple[str, ...] = (
+    "weekends",
+    "weekend",
+    "on weekends",
+    "выходные",
+    "по выходным",
+)
+_TIME_OF_DAY_HINTS: tuple[tuple[str, int, int], ...] = (
+    ("утром", 9, 0),
+    ("morning", 9, 0),
+    ("днем", 14, 0),
+    ("днём", 14, 0),
+    ("afternoon", 14, 0),
+    ("полдень", 12, 0),
+    ("noon", 12, 0),
+    ("вечером", 19, 0),
+    ("evening", 19, 0),
+    ("ночью", 22, 0),
+    ("night", 22, 0),
 )
 
 _WEEKDAY_EXACT_TOKENS: dict[str, str] = {
@@ -87,6 +137,46 @@ _WEEKDAY_PREFIX_TOKENS: tuple[tuple[str, str], ...] = (
     ("суббот", "SA"),
     ("воскрес", "SU"),
 )
+_TIMEZONE_TOKEN_MAP: dict[str, str] = {
+    "utc": "UTC",
+    "gmt": "UTC",
+    "almaty": "Asia/Almaty",
+    "astana": "Asia/Almaty",
+    "алматы": "Asia/Almaty",
+    "астана": "Asia/Almaty",
+    "kz": "Asia/Almaty",
+    "msk": "Europe/Moscow",
+    "moscow": "Europe/Moscow",
+    "мск": "Europe/Moscow",
+    "москва": "Europe/Moscow",
+    "spb": "Europe/Moscow",
+    "piter": "Europe/Moscow",
+    "питер": "Europe/Moscow",
+    "санктпетербург": "Europe/Moscow",
+    "stpetersburg": "Europe/Moscow",
+    "saintpetersburg": "Europe/Moscow",
+    "berlin": "Europe/Berlin",
+    "london": "Europe/London",
+    "cet": "UTC+01:00",
+    "cest": "UTC+02:00",
+    "eet": "UTC+02:00",
+    "eest": "UTC+03:00",
+    "newyork": "America/New_York",
+    "new_york": "America/New_York",
+    "nyc": "America/New_York",
+    "ny": "America/New_York",
+    "losangeles": "America/Los_Angeles",
+    "los_angeles": "America/Los_Angeles",
+    "la": "America/Los_Angeles",
+    "pst": "UTC-08:00",
+    "pdt": "UTC-07:00",
+    "est": "UTC-05:00",
+    "edt": "UTC-04:00",
+    "cst": "UTC-06:00",
+    "cdt": "UTC-05:00",
+    "mst": "UTC-07:00",
+    "mdt": "UTC-06:00",
+}
 
 _SOURCE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("reddit", ("reddit", "реддит")),
@@ -234,10 +324,31 @@ def _strip_focus_tail(text: str) -> str:
 
 def _extract_time_hint(lowered_text: str, *, default_hour: int = 9, default_minute: int = 0) -> tuple[int, int]:
     text = str(lowered_text or "")
+    ampm_match = _SCHEDULE_TIME_AMPM_PATTERN.search(text)
+    if ampm_match is not None:
+        try:
+            hour = int(ampm_match.group("hour"))
+        except Exception:
+            hour = default_hour
+        try:
+            minute = int(ampm_match.group("minute") or default_minute)
+        except Exception:
+            minute = default_minute
+        marker = str(ampm_match.group("ampm") or "").lower().replace(".", "")
+        if marker == "pm" and hour < 12:
+            hour += 12
+        if marker == "am" and hour == 12:
+            hour = 0
+        hour = max(0, min(23, hour))
+        minute = max(0, min(59, minute))
+        return hour, minute
     match = _SCHEDULE_TIME_PATTERN.search(text)
     if match is None:
         minute_only = _MINUTE_ONLY_PATTERN.search(text)
         if minute_only is None:
+            for token, hinted_hour, hinted_minute in _TIME_OF_DAY_HINTS:
+                if re.search(rf"(?<![a-zа-яё]){re.escape(token)}(?![a-zа-яё])", text, flags=re.IGNORECASE):
+                    return hinted_hour, hinted_minute
             return default_hour, default_minute
         try:
             minute = int(minute_only.group("minute"))
@@ -287,16 +398,98 @@ def _extract_weekday_codes(lowered_text: str) -> list[str]:
     return seen
 
 
-def _infer_schedule_spec(lowered_text: str) -> dict[str, Any] | None:
-    lowered = str(lowered_text or "").strip().lower()
+def _normalize_timezone_name(raw_value: Any, *, default: str = "UTC") -> str:
+    value = str(raw_value or "").strip()
+    if not value:
+        return default
+    offset_match = _TIMEZONE_OFFSET_PATTERN.search(value)
+    if offset_match is not None:
+        sign = "-" if str(offset_match.group("sign") or "") == "-" else "+"
+        try:
+            hours = int(offset_match.group("hours") or "0")
+        except Exception:
+            hours = 0
+        try:
+            minutes = int(offset_match.group("minutes") or "0")
+        except Exception:
+            minutes = 0
+        hours = max(0, min(14, hours))
+        minutes = max(0, min(59, minutes))
+        return f"UTC{sign}{hours:02d}:{minutes:02d}"
+    if value.upper() in {"UTC", "GMT"}:
+        return "UTC"
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9_+-]{1,32}/[A-Za-z][A-Za-z0-9_+-]{1,32}(?:/[A-Za-z][A-Za-z0-9_+-]{1,32})?", value):
+        return value
+    lowered = value.lower()
+    mapped = _TIMEZONE_TOKEN_MAP.get(lowered)
+    if mapped is not None:
+        return mapped
+    compact = re.sub(r"[^a-zа-яё0-9_]+", "", lowered)
+    mapped = _TIMEZONE_TOKEN_MAP.get(compact)
+    if mapped is not None:
+        return mapped
+    return default
+
+
+def _extract_timezone_hint(raw_text: str) -> str:
+    text = str(raw_text or "").strip()
+    if not text:
+        return "UTC"
+
+    offset_match = _TIMEZONE_OFFSET_PATTERN.search(text)
+    if offset_match is not None:
+        return _normalize_timezone_name(offset_match.group(0))
+
+    context_match = _TIMEZONE_CONTEXT_PATTERN.search(text)
+    if context_match is not None:
+        candidate = str(context_match.group("tz") or "").strip(" ,.;:!?)]}\"'")
+        if candidate:
+            normalized = _normalize_timezone_name(candidate, default="")
+            if normalized:
+                return normalized
+
+    iana_match = _TIMEZONE_IANA_PATTERN.search(text)
+    if iana_match is not None:
+        return _normalize_timezone_name(iana_match.group("tz"))
+
+    words = [match.group(0).lower() for match in _WORD_TOKEN_PATTERN.finditer(text)]
+    for word in words:
+        mapped = _TIMEZONE_TOKEN_MAP.get(word)
+        if mapped is not None:
+            return mapped
+    compact = re.sub(r"[^a-zа-яё0-9_]+", "", text.lower())
+    if compact:
+        mapped = _TIMEZONE_TOKEN_MAP.get(compact)
+        if mapped is not None:
+            return mapped
+    return "UTC"
+
+
+def _extract_group_byday(lowered_text: str) -> list[str] | None:
+    lowered = str(lowered_text or "").lower()
     if not lowered:
         return None
-    start_immediately = any(token in lowered for token in _START_IMMEDIATELY_TOKENS)
+    if any(token in lowered for token in _WEEKDAY_GROUP_TOKENS):
+        return ["MO", "TU", "WE", "TH", "FR"]
+    if any(token in lowered for token in _WEEKEND_GROUP_TOKENS):
+        return ["SA", "SU"]
+    return None
+
+
+def _infer_schedule_spec(raw_text: str) -> dict[str, Any] | None:
+    text = str(raw_text or "").strip()
+    lowered = text.lower()
+    if not lowered:
+        return None
+    relative_interval_match = _RELATIVE_HOURLY_INTERVAL_PATTERN.search(lowered)
+    start_immediately = any(token in lowered for token in _START_IMMEDIATELY_TOKENS) or relative_interval_match is not None
+    timezone_name = _extract_timezone_hint(text)
     interval_match = _HOURLY_INTERVAL_PATTERN.search(lowered)
     direct_match = _HOUR_ONLY_PATTERN.search(lowered)
     has_hourly_hint = (
         any(token in lowered for token in _HOURLY_SCHEDULE_TOKENS)
         or interval_match is not None
+        or relative_interval_match is not None
         or direct_match is not None
     )
     if has_hourly_hint:
@@ -307,7 +500,12 @@ def _infer_schedule_spec(lowered_text: str) -> dict[str, Any] | None:
             except Exception:
                 interval_hours = 1
         else:
-            if direct_match is not None:
+            if relative_interval_match is not None:
+                try:
+                    interval_hours = int(relative_interval_match.group("hours"))
+                except Exception:
+                    interval_hours = 1
+            elif direct_match is not None:
                 try:
                     interval_hours = int(direct_match.group("hour"))
                 except Exception:
@@ -318,21 +516,22 @@ def _infer_schedule_spec(lowered_text: str) -> dict[str, Any] | None:
             "schedule_type": "hourly",
             "schedule": {"interval_hours": interval_hours, "minute": minute},
             "interval_sec": interval_hours * 3600,
-            "timezone": "UTC",
+            "timezone": timezone_name,
             "start_immediately": start_immediately,
         }
 
+    byday_group = _extract_group_byday(lowered)
     weekday_codes = _extract_weekday_codes(lowered)
-    is_daily = any(token in lowered for token in _DAILY_SCHEDULE_TOKENS)
-    is_weekly = any(token in lowered for token in _WEEKLY_SCHEDULE_TOKENS) or bool(weekday_codes)
+    is_daily = bool(any(token in lowered for token in _DAILY_SCHEDULE_TOKENS) and byday_group is None)
+    is_weekly = any(token in lowered for token in _WEEKLY_SCHEDULE_TOKENS) or bool(weekday_codes or byday_group)
     if is_daily or is_weekly:
         hour, minute = _extract_time_hint(lowered, default_hour=9, default_minute=0)
-        byday = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] if is_daily else (weekday_codes or ["MO"])
+        byday = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] if is_daily else (byday_group or weekday_codes or ["MO"])
         return {
             "schedule_type": "weekly",
             "schedule": {"byday": byday, "hour": hour, "minute": minute},
             "interval_sec": 7 * 24 * 3600,
-            "timezone": "UTC",
+            "timezone": timezone_name,
             "start_immediately": start_immediately,
         }
 
@@ -344,6 +543,7 @@ def automation_schedule_summary(automation: dict[str, Any]) -> str:
     schedule = automation.get("schedule")
     if not isinstance(schedule, dict):
         schedule = {}
+    timezone_name = _normalize_timezone_name(automation.get("timezone"), default="UTC")
     if schedule_type == "hourly":
         try:
             hours = int(schedule.get("interval_hours", 1))
@@ -353,7 +553,7 @@ def automation_schedule_summary(automation: dict[str, Any]) -> str:
             minute = int(schedule.get("minute", 0))
         except Exception:
             minute = 0
-        return f"каждые {hours}ч в :{minute:02d} UTC"
+        return f"каждые {hours}ч в :{minute:02d} {timezone_name}"
     if schedule_type == "weekly":
         byday = schedule.get("byday")
         if isinstance(byday, list):
@@ -368,7 +568,7 @@ def automation_schedule_summary(automation: dict[str, Any]) -> str:
             minute = int(schedule.get("minute", 0))
         except Exception:
             minute = 0
-        return f"по расписанию {days} {hour:02d}:{minute:02d} UTC"
+        return f"по расписанию {days} {hour:02d}:{minute:02d} {timezone_name}"
     if schedule_type:
         return f"schedule_type={schedule_type}"
     return "расписание активно"
@@ -496,7 +696,7 @@ def _normalize_schedule_spec(schedule_spec: dict[str, Any] | None) -> dict[str, 
                 "minute": minute,
             },
             "interval_sec": interval_sec,
-            "timezone": str(schedule_spec.get("timezone") or "UTC"),
+            "timezone": _normalize_timezone_name(schedule_spec.get("timezone"), default="UTC"),
             "start_immediately": bool(schedule_spec.get("start_immediately", False)),
         }
 
@@ -531,7 +731,7 @@ def _normalize_schedule_spec(schedule_spec: dict[str, Any] | None) -> dict[str, 
             "minute": minute,
         },
         "interval_sec": interval_sec,
-        "timezone": str(schedule_spec.get("timezone") or "UTC"),
+        "timezone": _normalize_timezone_name(schedule_spec.get("timezone"), default="UTC"),
         "start_immediately": bool(schedule_spec.get("start_immediately", False)),
     }
 
@@ -592,7 +792,7 @@ def _apply_automation_override(
         except Exception:
             pass
     if override.get("timezone") is not None:
-        resolved["timezone"] = str(override.get("timezone") or "UTC")
+        resolved["timezone"] = _normalize_timezone_name(override.get("timezone"), default="UTC")
     if override.get("start_immediately") is not None:
         resolved["start_immediately"] = bool(override.get("start_immediately"))
     return _normalize_schedule_spec(resolved)
@@ -936,7 +1136,7 @@ def infer_agent_spec_from_request(request_text: str) -> dict[str, Any]:
     else:
         name = "Custom Assistant"
 
-    schedule_spec = _infer_schedule_spec(lowered)
+    schedule_spec = _infer_schedule_spec(raw)
     composed = _compose_agent_spec(
         kind=resolved_kind,
         name=name,

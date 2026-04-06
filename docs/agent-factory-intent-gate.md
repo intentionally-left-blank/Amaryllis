@@ -5,7 +5,7 @@
 - resolved `kind` (`news|coding|general`),
 - `source_policy.mode` (`open_web|channels|allowlist`),
 - explainability hints (`inference_reason.resolved_kind`, `inference_reason.mixed_intent`),
-- inferred schedule fields when expected (`schedule_type`, `interval_hours`, `hour`, `minute`).
+- inferred schedule fields when expected (`schedule_type`, `interval_hours`, `hour`, `minute`, `byday`, `timezone`).
 
 ## Fixture
 
@@ -13,7 +13,7 @@ Default fixture:
 
 - `eval/fixtures/agent_factory/intent_inference_cases.json`
 
-The fixture can contain multilingual/noisy prompts; each case defines expected outputs used by the gate.
+The fixture can contain multilingual/noisy prompts (including daypart, timezone alias, and `am/pm` phrasing); each case defines expected outputs used by the gate.
 
 ## Run Locally
 

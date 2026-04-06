@@ -19,7 +19,8 @@
         "source_policy_mode": "allowlist",
         "schedule_type": "hourly",
         "interval_hours": 6,
-        "minute": 10
+        "minute": 10,
+        "timezone": "UTC"
       }
     },
     {
@@ -40,7 +41,78 @@
         "source_policy_mode": "allowlist",
         "schedule_type": "weekly",
         "hour": 8,
-        "minute": 30
+        "minute": 30,
+        "timezone": "UTC",
+        "byday": ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]
+      }
+    },
+    {
+      "id": "weekday_timezone_iana",
+      "request": "создай агента для AI новостей по будням в 09:30 timezone Asia/Almaty",
+      "expected": {
+        "kind": "news",
+        "mixed_intent": false,
+        "source_policy_mode": "channels",
+        "schedule_type": "weekly",
+        "hour": 9,
+        "minute": 30,
+        "timezone": "Asia/Almaty",
+        "byday": ["MO", "TU", "WE", "TH", "FR"]
+      }
+    },
+    {
+      "id": "weekend_timezone_offset",
+      "request": "create an agent for AI digest on weekends at 11:45 UTC+5",
+      "expected": {
+        "kind": "news",
+        "mixed_intent": false,
+        "source_policy_mode": "open_web",
+        "schedule_type": "weekly",
+        "hour": 11,
+        "minute": 45,
+        "timezone": "UTC+05:00",
+        "byday": ["SA", "SU"]
+      }
+    },
+    {
+      "id": "weekday_daypart_cyrillic_timezone_alias",
+      "request": "создай агента для AI новостей по будням утром по времени мск",
+      "expected": {
+        "kind": "news",
+        "mixed_intent": false,
+        "source_policy_mode": "channels",
+        "schedule_type": "weekly",
+        "hour": 9,
+        "minute": 0,
+        "timezone": "Europe/Moscow",
+        "byday": ["MO", "TU", "WE", "TH", "FR"]
+      }
+    },
+    {
+      "id": "daily_ampm_timezone_abbreviation",
+      "request": "create an agent for AI digest every day at 8:30pm PST",
+      "expected": {
+        "kind": "news",
+        "mixed_intent": false,
+        "source_policy_mode": "open_web",
+        "schedule_type": "weekly",
+        "hour": 20,
+        "minute": 30,
+        "timezone": "UTC-08:00",
+        "byday": ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]
+      }
+    },
+    {
+      "id": "relative_hourly_interval_timezone_abbreviation",
+      "request": "create an agent for AI digest in 3 hours CET",
+      "expected": {
+        "kind": "news",
+        "mixed_intent": false,
+        "source_policy_mode": "open_web",
+        "schedule_type": "hourly",
+        "interval_hours": 3,
+        "minute": 0,
+        "timezone": "UTC+01:00"
       }
     }
   ]

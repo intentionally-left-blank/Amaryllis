@@ -157,6 +157,12 @@ def _evaluate_case(
                 _safe_int(schedule.get("minute")),
                 _safe_int(expected.get("minute")),
             )
+        if "timezone" in expected:
+            assert_equal("automation.timezone", str(automation.get("timezone") or ""), str(expected.get("timezone") or ""))
+        if "byday" in expected:
+            actual_byday = list(schedule.get("byday") or [])
+            expected_byday = list(expected.get("byday") or [])
+            assert_equal("automation.schedule.byday", actual_byday, expected_byday)
 
     status = "pass" if not mismatches else "fail"
     return {

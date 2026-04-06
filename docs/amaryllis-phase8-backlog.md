@@ -16,9 +16,10 @@ Turn natural-language agent creation into a production-grade, contract-driven su
 | P8-A05 | done | Add structured quickstart overrides | typed payload overrides (`kind/name/focus/tools/source_policy/automation`) with idempotency-safe fingerprinting | advanced callers can refine plan/apply output without losing NL entry flow |
 | P8-A06 | done | Product hardening and UX polish | weighted mixed-intent conflict resolution + explainable `inference_reason` + resilient schedule/source parsing + expanded docs/examples | Factory handles broader request styles with deterministic, inspectable output |
 | P8-A07 | done | Add deterministic intent-eval release/nightly gate | `eval/fixtures/agent_factory/*` + `scripts/release/agent_factory_intent_gate.py` + CI artifact wiring | Intent inference drift is caught as a blocking contract regression |
+| P8-A08 | done | Add blocking quickstart plan perf gate | `scripts/release/agent_factory_plan_perf_gate.py` + unit tests + release/nightly artifact wiring | p95/error-rate regressions on `/v1/agents/quickstart/plan` are caught before release |
 
 ## Next Priorities
 
-1. Expand fixture coverage for additional schedule/timezone language variants (RU/EN mixed prompts, weekday abbreviations, relative time phrases).
+1. Extend schedule/timezone inference further for additional locales and ambiguous aliases beyond current RU/EN + common US/EU abbreviations.
 2. Add UI-level visualization for `inference_reason` signals and conflict-resolution path.
-3. Add perf envelope checks for bulk plan generation (`/v1/agents/quickstart/plan`) under concurrent load.
+3. Calibrate hardware/profile-specific latency budgets for `agent_factory_plan_perf_gate` and publish baseline envelopes.

@@ -115,6 +115,76 @@ class AgentFactoryTests(unittest.TestCase):
         self.assertEqual(int(schedule.get("interval_hours", -1)), 6)
         self.assertEqual(int(schedule.get("minute", -1)), 10)
 
+    def test_weekday_schedule_infers_iana_timezone(self) -> None:
+        spec = infer_agent_spec_from_request(
+            "создай агента для AI новостей по будням в 09:30 timezone Asia/Almaty"
+        )
+        automation = spec.get("automation", {})
+        self.assertIsInstance(automation, dict)
+        self.assertEqual(str(automation.get("schedule_type")), "weekly")
+        self.assertEqual(str(automation.get("timezone")), "Asia/Almaty")
+        schedule = automation.get("schedule", {})
+        self.assertIsInstance(schedule, dict)
+        self.assertEqual(schedule.get("byday"), ["MO", "TU", "WE", "TH", "FR"])
+        self.assertEqual(int(schedule.get("hour", -1)), 9)
+        self.assertEqual(int(schedule.get("minute", -1)), 30)
+
+    def test_weekend_schedule_infers_utc_offset_timezone(self) -> None:
+        spec = infer_agent_spec_from_request(
+            "create an agent for AI digest on weekends at 11:45 UTC+5"
+        )
+        automation = spec.get("automation", {})
+        self.assertIsInstance(automation, dict)
+        self.assertEqual(str(automation.get("schedule_type")), "weekly")
+        self.assertEqual(str(automation.get("timezone")), "UTC+05:00")
+        schedule = automation.get("schedule", {})
+        self.assertIsInstance(schedule, dict)
+        self.assertEqual(schedule.get("byday"), ["SA", "SU"])
+        self.assertEqual(int(schedule.get("hour", -1)), 11)
+        self.assertEqual(int(schedule.get("minute", -1)), 45)
+
+    def test_weekday_schedule_infers_daypart_and_cyrillic_timezone_alias(self) -> None:
+        spec = infer_agent_spec_from_request(
+            "создай агента для AI новостей по будням утром по времени мск"
+        )
+        automation = spec.get("automation", {})
+        self.assertIsInstance(automation, dict)
+        self.assertEqual(str(automation.get("schedule_type")), "weekly")
+        self.assertEqual(str(automation.get("timezone")), "Europe/Moscow")
+        schedule = automation.get("schedule", {})
+        self.assertIsInstance(schedule, dict)
+        self.assertEqual(schedule.get("byday"), ["MO", "TU", "WE", "TH", "FR"])
+        self.assertEqual(int(schedule.get("hour", -1)), 9)
+        self.assertEqual(int(schedule.get("minute", -1)), 0)
+
+    def test_daily_schedule_supports_ampm_and_timezone_abbreviation(self) -> None:
+        spec = infer_agent_spec_from_request(
+            "create an agent for AI digest every day at 8:30pm PST"
+        )
+        automation = spec.get("automation", {})
+        self.assertIsInstance(automation, dict)
+        self.assertEqual(str(automation.get("schedule_type")), "weekly")
+        self.assertEqual(str(automation.get("timezone")), "UTC-08:00")
+        schedule = automation.get("schedule", {})
+        self.assertIsInstance(schedule, dict)
+        self.assertEqual(schedule.get("byday"), ["MO", "TU", "WE", "TH", "FR", "SA", "SU"])
+        self.assertEqual(int(schedule.get("hour", -1)), 20)
+        self.assertEqual(int(schedule.get("minute", -1)), 30)
+
+    def test_relative_hourly_schedule_starts_immediately(self) -> None:
+        spec = infer_agent_spec_from_request(
+            "create an agent for AI digest in 3 hours CET"
+        )
+        automation = spec.get("automation", {})
+        self.assertIsInstance(automation, dict)
+        self.assertEqual(str(automation.get("schedule_type")), "hourly")
+        self.assertEqual(str(automation.get("timezone")), "UTC+01:00")
+        self.assertTrue(bool(automation.get("start_immediately")))
+        schedule = automation.get("schedule", {})
+        self.assertIsInstance(schedule, dict)
+        self.assertEqual(int(schedule.get("interval_hours", -1)), 3)
+        self.assertEqual(int(schedule.get("minute", -1)), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

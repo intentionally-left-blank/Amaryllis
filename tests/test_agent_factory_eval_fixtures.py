@@ -48,6 +48,10 @@ class AgentFactoryEvalFixturesTests(unittest.TestCase):
                     self.assertEqual(int(schedule.get("hour", -1)), int(expected.get("hour")))
                 if "minute" in expected:
                     self.assertEqual(int(schedule.get("minute", -1)), int(expected.get("minute")))
+                if "timezone" in expected:
+                    self.assertEqual(str(automation.get("timezone") or ""), str(expected.get("timezone") or ""))
+                if "byday" in expected:
+                    self.assertEqual(list(schedule.get("byday") or []), list(expected.get("byday") or []))
 
 
 if __name__ == "__main__":
