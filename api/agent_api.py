@@ -9,7 +9,7 @@ from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from agents.factory import (
+from kernel.agent_factory import (
     apply_agent_spec_overrides as factory_apply_agent_spec_overrides,
     automation_schedule_summary as factory_automation_schedule_summary,
     build_inference_reason_view as factory_build_inference_reason_view,

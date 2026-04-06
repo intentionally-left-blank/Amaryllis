@@ -14,7 +14,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from agents.factory import (
+from kernel.agent_factory import (
     automation_schedule_summary as factory_automation_schedule_summary,
     build_quickstart_agent_created_content as factory_build_quickstart_agent_created_content,
     infer_agent_spec_from_request as factory_infer_agent_spec_from_request,
