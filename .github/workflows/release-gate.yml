@@ -180,6 +180,8 @@ jobs:
             tests.test_agent_factory_plan_perf_gate \
             tests.test_agent_factory_plan_perf_baseline_refresh \
             tests.test_agent_factory_plan_perf_baseline_policy_gate \
+            tests.test_agent_factory_plan_perf_baseline_pr_template \
+            tests.test_agent_factory_plan_perf_baseline_pr_description_gate \
             tests.test_api_quickstart_compatibility_gate \
             tests.test_sdk_openai_compat_client \
             -v

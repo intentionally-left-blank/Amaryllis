@@ -6,9 +6,15 @@ on:
     paths:
       - "eval/baselines/quality/agent_factory_plan_perf_envelope.json"
       - "scripts/release/agent_factory_plan_perf_baseline_policy_gate.py"
+      - "scripts/release/agent_factory_plan_perf_baseline_pr_description_gate.py"
+      - "scripts/release/agent_factory_plan_perf_baseline_pr_template.py"
       - "tests/test_agent_factory_plan_perf_baseline_policy_gate.py"
+      - "tests/test_agent_factory_plan_perf_baseline_pr_description_gate.py"
+      - "tests/test_agent_factory_plan_perf_baseline_pr_template.py"
       - "docs/agent-factory-plan-perf-gate.md"
+      - ".github/PULL_REQUEST_TEMPLATE/agent-factory-baseline-refresh.md"
       - ".github/workflows/agent-factory-baseline-policy-gate.yml"
+      - ".github/workflows/agent-factory-baseline-refresh.yml"
 
 permissions:
   contents: read
@@ -60,4 +66,18 @@ jobs:
         with:
           name: agent-factory-plan-perf-baseline-policy-gate-report
           path: artifacts/agent-factory-plan-perf-baseline-policy-gate-report.json
+          if-no-files-found: error
+
+      - name: Run baseline PR description metadata gate (blocking)
+        run: |
+          python scripts/release/agent_factory_plan_perf_baseline_pr_description_gate.py \
+            --event-path "${GITHUB_EVENT_PATH}" \
+            --allow-non-pr-events \
+            --output "artifacts/agent-factory-plan-perf-baseline-pr-description-gate-report.json"
+
+      - name: Upload baseline PR description metadata gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-factory-plan-perf-baseline-pr-description-gate-report
+          path: artifacts/agent-factory-plan-perf-baseline-pr-description-gate-report.json
           if-no-files-found: error

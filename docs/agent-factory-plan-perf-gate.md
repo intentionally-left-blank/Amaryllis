@@ -62,19 +62,31 @@ python scripts/release/agent_factory_plan_perf_baseline_refresh.py \
 Scheduled workflow:
 
 - `.github/workflows/agent-factory-baseline-refresh.yml`
+- auto-generates:
+  - `artifacts/agent-factory-plan-perf-baseline-pr-template.md`
+  - `artifacts/agent-factory-plan-perf-baseline-pr-template-metadata.json`
+
+PR-template generator:
+
+- `scripts/release/agent_factory_plan_perf_baseline_pr_template.py`
 
 ## Baseline Update Policy Gate
 
 Baseline PRs are validated by:
 
 - script: `scripts/release/agent_factory_plan_perf_baseline_policy_gate.py`
+- script: `scripts/release/agent_factory_plan_perf_baseline_pr_description_gate.py`
 - workflow: `.github/workflows/agent-factory-baseline-policy-gate.yml`
+- PR template: `.github/PULL_REQUEST_TEMPLATE/agent-factory-baseline-refresh.md`
 
 What this gate enforces:
 
 - per-profile p95 threshold drift above auto limits requires manual approval metadata;
 - any `max_error_rate_pct` threshold change requires manual approval metadata;
 - changed baseline must include `change_control` metadata.
+- PR description must include:
+  - `Refresh artifact reference` (non-placeholder)
+  - `Approver identity` (non-placeholder handle/email)
 
 Default auto-drift limits:
 

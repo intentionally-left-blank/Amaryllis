@@ -2,6 +2,8 @@
 
 Describe what changed and why.
 
+For Agent Factory baseline refresh PRs, use `.github/PULL_REQUEST_TEMPLATE/agent-factory-baseline-refresh.md`.
+
 ## Checklist
 
 - [ ] I added/updated tests where needed.
@@ -12,4 +14,3 @@ Describe what changed and why.
 ## Risk / Rollback
 
 Describe risk level and rollback path if this PR changes runtime behavior, policy, or release automation.
-

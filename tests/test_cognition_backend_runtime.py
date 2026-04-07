@@ -532,6 +532,28 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         self.assertIsInstance(hints, list)
         self.assertTrue(any("IST can mean" in str(item) for item in hints))
 
+    def test_quickstart_plan_timezone_hint_includes_locale_fallback_for_spanish_cst(self) -> None:
+        planned = self.client.post(
+            "/v1/agents/quickstart/plan",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "request": "create an agent for AI digest fin de semana at 7.15 CST",
+            },
+        )
+        self.assertEqual(planned.status_code, 200)
+        payload = planned.json()
+        quickstart_plan = payload.get("quickstart_plan", {})
+        automation = quickstart_plan.get("automation", {})
+        self.assertIsInstance(automation, dict)
+        self.assertEqual(str(automation.get("timezone")), "UTC-06:00")
+        reason_view = quickstart_plan.get("inference_reason_view", {})
+        self.assertIsInstance(reason_view, dict)
+        hints = reason_view.get("disambiguation_hints", [])
+        self.assertIsInstance(hints, list)
+        self.assertTrue(any("Locale fallback (es)" in str(item) for item in hints))
+        self.assertTrue(any("America/Mexico_City" in str(item) for item in hints))
+
     def test_quickstart_plan_supports_portuguese_daily_with_cdmx_timezone(self) -> None:
         planned = self.client.post(
             "/v1/agents/quickstart/plan",

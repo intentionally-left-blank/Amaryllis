@@ -63,6 +63,14 @@ jobs:
             --output "artifacts/agent-factory-plan-perf-baseline-refresh-report.json" \
             --write-updated-baseline "artifacts/agent_factory_plan_perf_envelope_suggested.json"
 
+      - name: Build baseline refresh PR template
+        run: |
+          python scripts/release/agent_factory_plan_perf_baseline_pr_template.py \
+            --refresh-report "artifacts/agent-factory-plan-perf-baseline-refresh-report.json" \
+            --suggested-baseline "artifacts/agent_factory_plan_perf_envelope_suggested.json" \
+            --output "artifacts/agent-factory-plan-perf-baseline-pr-template.md" \
+            --metadata-output "artifacts/agent-factory-plan-perf-baseline-pr-template-metadata.json"
+
       - name: Upload baseline refresh artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -73,4 +81,6 @@ jobs:
             artifacts/agent-factory-plan-perf-gate-dev-linux-report.json
             artifacts/agent-factory-plan-perf-baseline-refresh-report.json
             artifacts/agent_factory_plan_perf_envelope_suggested.json
+            artifacts/agent-factory-plan-perf-baseline-pr-template.md
+            artifacts/agent-factory-plan-perf-baseline-pr-template-metadata.json
           if-no-files-found: error

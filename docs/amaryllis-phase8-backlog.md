@@ -5,6 +5,10 @@
 Turn natural-language agent creation into a production-grade, contract-driven surface:
 "сделай такого агента" -> deterministic plan -> idempotent apply.
 
+## Phase Status
+
+`completed` (all milestones and closure controls shipped)
+
 ## Milestones
 
 | ID | Status | Task | Deliverables | Exit Signal |
@@ -24,8 +28,13 @@ Turn natural-language agent creation into a production-grade, contract-driven su
 | P8-A13 | done | Add baseline refresh PR policy gate | `scripts/release/agent_factory_plan_perf_baseline_policy_gate.py` + `.github/workflows/agent-factory-baseline-policy-gate.yml` + gate tests/docs | Baseline drift over auto limits is blocked without manual-approval metadata |
 | P8-A14 | done | Add timezone abbreviation disambiguation hints + extra LatAm locale coverage | `agents/factory.py` timezone ambiguity hints (`IST/CST`) + `disambiguation_hints` in `inference_reason_view` + `CDMX`/Portuguese schedule coverage in fixtures/tests | Planner remains deterministic but surfaces ambiguity explicitly for UI confirmation |
 
-## Next Priorities
+## Closure Addenda (April 2026)
 
-1. Add auto-generated baseline update PR template that pre-fills `change_control` metadata from refresh report.
-2. Add repo-level CI check that ensures baseline refresh PR description references refresh artifact and approver identity.
-3. Extend disambiguation hints with locale-specific fallback suggestions (for example preferred city aliases per user locale).
+1. `done` Auto-generated baseline update PR template now ships from refresh workflow:
+   - `scripts/release/agent_factory_plan_perf_baseline_pr_template.py`
+   - `artifacts/agent-factory-plan-perf-baseline-pr-template.md`
+   - `artifacts/agent-factory-plan-perf-baseline-pr-template-metadata.json`
+2. `done` Repo-level CI now validates baseline-refresh PR description metadata:
+   - `scripts/release/agent_factory_plan_perf_baseline_pr_description_gate.py`
+   - wired in `.github/workflows/agent-factory-baseline-policy-gate.yml`
+3. `done` Timezone disambiguation hints now include locale-aware fallback suggestions in Agent Factory inference explainability.

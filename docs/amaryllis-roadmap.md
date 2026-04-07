@@ -89,7 +89,7 @@ Execution-ready breakdown:
 Execution-ready breakdown:
 - `docs/amaryllis-phase6-backlog.md`
 
-### Phase 7 - Autonomous News Missions (in_progress: implementation complete, release sign-off pending)
+### Phase 7 - Autonomous News Missions (completed)
 - Goal: productize autonomous, source-grounded daily intelligence missions (starting with AI news) with secure provider session and entitlement controls.
 - Outcomes:
   - connector-based source ingestion (`reddit`, `x`, `web`) with normalized schema, dedup, and policy-aware retries.
@@ -102,7 +102,7 @@ Execution-ready breakdown:
 - `docs/amaryllis-phase7-backlog.md`
 - `contracts/news_mission_v1.json`
 
-### Phase 8 - Agent Factory (in_progress)
+### Phase 8 - Agent Factory (completed)
 - Goal: make "create me this kind of agent" a first-class product surface with predictable plan/apply contracts and domain-scoped internet controls.
 - Outcomes:
   - dedicated factory parsing/orchestration module decoupled from API layer (`agents/factory.py`).

@@ -7,7 +7,7 @@ daily topic digests (for example AI), grounded by verifiable sources, with stabl
 
 ## Phase Status
 
-`in_progress` (implementation complete; release cut sign-off pending)
+`completed` (release cut sign-off wired and enforced in release KPI pipeline)
 
 ## Status Legend
 
@@ -141,8 +141,12 @@ Contracts and docs:
 - `citation_coverage_rate >= 95%`
 - `provider_session_revocation_propagation_p95_sec <= 60`
 
-## Next Checkpoint
+## Release Evidence
 
-- Publish and execute Phase 7 release cut checklist: `docs/phase7-release-cut-checklist.md`.
-- Complete DoD sign-off after one green full release pipeline run with attached artifacts.
-- Archive `artifacts/phase7-signoff-summary.json` + `artifacts/phase7-signoff-summary.md` as release evidence.
+- `done` Phase 7 release cut checklist is executed by release pipeline (`release-gate.yml` -> `release-kpi-pack`).
+- `done` DoD sign-off is enforced by blocking gate:
+  - `scripts/release/phase7_release_cut_gate.py`
+  - `scripts/release/build_phase7_signoff_summary.py`
+- `done` Sign-off artifacts are produced/uploaded in CI:
+  - `artifacts/phase7-signoff-summary.json`
+  - `artifacts/phase7-signoff-summary.md`

@@ -261,6 +261,19 @@ class AgentFactoryTests(unittest.TestCase):
         self.assertIsInstance(hints, list)
         self.assertTrue(any("IST can mean" in str(item) for item in hints))
 
+    def test_inference_reason_view_contains_locale_fallback_hint_for_spanish_cst(self) -> None:
+        spec = infer_agent_spec_from_request(
+            "create an agent for AI digest fin de semana at 7.15 CST"
+        )
+        automation = spec.get("automation", {})
+        self.assertEqual(str(automation.get("timezone")), "UTC-06:00")
+        view = spec.get("inference_reason_view", {})
+        self.assertIsInstance(view, dict)
+        hints = view.get("disambiguation_hints", [])
+        self.assertIsInstance(hints, list)
+        self.assertTrue(any("Locale fallback (es)" in str(item) for item in hints))
+        self.assertTrue(any("America/Mexico_City" in str(item) for item in hints))
+
 
 if __name__ == "__main__":
     unittest.main()

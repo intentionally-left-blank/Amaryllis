@@ -257,6 +257,62 @@ _AMBIGUOUS_TIMEZONE_HINTS: dict[str, str] = {
     "ist": "IST can mean India (UTC+05:30), Israel (UTC+02:00), or Irish time; use city or UTC offset if needed.",
     "cst": "CST can mean US Central (UTC-06:00) or China Standard Time (UTC+08:00); use city or UTC offset if needed.",
 }
+_LOCALE_DISAMBIGUATION_CUES: dict[str, tuple[str, ...]] = {
+    "ru": (
+        "создай",
+        "агента",
+        "новост",
+        "по будням",
+        "по выходным",
+        "мск",
+        "москва",
+    ),
+    "es": (
+        "entre semana",
+        "fin de semana",
+        "fines de semana",
+        "cada dia",
+        "noticias",
+        "resumen",
+        "manana",
+    ),
+    "pt": (
+        "todo dia",
+        "todos os dias",
+        "fim de semana",
+        "fins de semana",
+        "noticias",
+        "resumo",
+        "noite",
+        "manha",
+    ),
+    "tr": (
+        "her saat",
+        "her gun",
+        "her hafta",
+        "hafta ici",
+        "hafta sonu",
+        "aksam",
+        "oglen",
+        "sabah",
+    ),
+}
+_AMBIGUOUS_TIMEZONE_LOCALE_HINTS: dict[str, dict[str, str]] = {
+    "ist": {
+        "default": "Locale fallback: prefer explicit city names like Asia/Kolkata or Asia/Jerusalem.",
+        "ru": "Locale fallback (ru): if this is Moscow time, use Europe/Moscow explicitly.",
+        "es": "Locale fallback (es): if this is India, use Asia/Kolkata; for Israel use Asia/Jerusalem.",
+        "pt": "Locale fallback (pt): if this is India, use Asia/Kolkata; for Israel use Asia/Jerusalem.",
+        "tr": "Locale fallback (tr): if this is Turkiye, use Europe/Istanbul instead of IST.",
+    },
+    "cst": {
+        "default": "Locale fallback: prefer explicit city names like America/Chicago, America/Mexico_City, or Asia/Shanghai.",
+        "ru": "Locale fallback (ru): if this is China, use Asia/Shanghai; if US Central, use America/Chicago.",
+        "es": "Locale fallback (es): for LatAm/US use America/Mexico_City or America/Chicago; for China use Asia/Shanghai.",
+        "pt": "Locale fallback (pt): for LatAm/US use America/Mexico_City or America/Chicago; for China use Asia/Shanghai.",
+        "tr": "Locale fallback (tr): if this is China use Asia/Shanghai; if US Central use America/Chicago.",
+    },
+}
 
 _SOURCE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("reddit", ("reddit", "реддит")),
@@ -572,19 +628,44 @@ def _extract_timezone_hint(raw_text: str) -> str:
     return "UTC"
 
 
-def _extract_timezone_disambiguation_hints(raw_text: str) -> list[str]:
+def _infer_timezone_disambiguation_locale(raw_text: str) -> str:
+    text = str(raw_text or "").strip()
+    if not text:
+        return "default"
+    lowered = text.lower()
+    if re.search(r"[а-яё]", lowered):
+        return "ru"
+    for locale, cues in _LOCALE_DISAMBIGUATION_CUES.items():
+        if any(cue in lowered for cue in cues):
+            return locale
+    return "default"
+
+
+def _build_timezone_disambiguation_hint(*, token: str, locale: str) -> str:
+    normalized_token = str(token or "").strip().lower()
+    base_hint = _AMBIGUOUS_TIMEZONE_HINTS.get(normalized_token)
+    if not base_hint:
+        return ""
+    locale_hints = _AMBIGUOUS_TIMEZONE_LOCALE_HINTS.get(normalized_token, {})
+    locale_hint = str(locale_hints.get(locale) or locale_hints.get("default") or "").strip()
+    if locale_hint:
+        return f"{base_hint} {locale_hint}"
+    return base_hint
+
+
+def _extract_timezone_disambiguation_hints(raw_text: str, *, locale: str = "default") -> list[str]:
     text = str(raw_text or "").strip()
     if not text:
         return []
     hints: list[str] = []
     words = [match.group(0).lower() for match in _WORD_TOKEN_PATTERN.finditer(text)]
     for word in words:
-        hint = _AMBIGUOUS_TIMEZONE_HINTS.get(word)
-        if hint is not None and hint not in hints:
+        hint = _build_timezone_disambiguation_hint(token=word, locale=locale)
+        if hint and hint not in hints:
             hints.append(hint)
     compact = re.sub(r"[^a-zа-яё0-9_]+", "", text.lower())
-    compact_hint = _AMBIGUOUS_TIMEZONE_HINTS.get(compact)
-    if compact_hint is not None and compact_hint not in hints:
+    compact_hint = _build_timezone_disambiguation_hint(token=compact, locale=locale)
+    if compact_hint and compact_hint not in hints:
         hints.append(compact_hint)
     return hints
 
@@ -1335,12 +1416,17 @@ def infer_agent_spec_from_request(request_text: str) -> dict[str, Any]:
         source_targets=source_targets,
         source_domains=source_domains,
     )
-    timezone_disambiguation_hints = _extract_timezone_disambiguation_hints(raw)
+    timezone_disambiguation_locale = _infer_timezone_disambiguation_locale(raw)
+    timezone_disambiguation_hints = _extract_timezone_disambiguation_hints(
+        raw,
+        locale=timezone_disambiguation_locale,
+    )
     if timezone_disambiguation_hints:
         signals = inference_reason.get("signals")
         if not isinstance(signals, dict):
             signals = {}
         signals["timezone_disambiguation_hints"] = timezone_disambiguation_hints
+        signals["timezone_disambiguation_locale"] = timezone_disambiguation_locale
         inference_reason["signals"] = signals
 
     if not requested_focus:

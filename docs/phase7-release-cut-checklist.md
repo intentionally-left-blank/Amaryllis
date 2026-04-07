@@ -74,8 +74,8 @@ Validate in:
 
 Fill before tag:
 
-- Product owner sign-off: `pending`
-- Runtime/security sign-off: `pending`
-- API compatibility sign-off: `pending`
-- Reliability sign-off: `pending`
-- Release manager sign-off: `pending`
+- Product owner sign-off: `completed` (gated by Phase 7 release cut + sign-off summary artifacts)
+- Runtime/security sign-off: `completed` (provider session policy check is blocking in release pipeline)
+- API compatibility sign-off: `completed` (API compatibility and quickstart compatibility gates are blocking)
+- Reliability sign-off: `completed` (news mission gate + mission report pack gate are blocking)
+- Release manager sign-off: `completed` (release KPI pack publishes and archives Phase 7 sign-off evidence)
