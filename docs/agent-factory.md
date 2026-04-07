@@ -80,6 +80,12 @@ Intent-inference regression gate:
 - fixture: `eval/fixtures/agent_factory/intent_inference_cases.json`
 - docs: `docs/agent-factory-intent-gate.md`
 
+Quickstart flow parity gate:
+
+- script: `scripts/release/agent_factory_quickstart_flow_gate.py`
+- fixture: `eval/fixtures/agent_factory/quickstart_flow_cases.json`
+- docs: `docs/agent-factory-quickstart-flow-gate.md`
+
 Plan performance gate:
 
 - script: `scripts/release/agent_factory_plan_perf_gate.py`

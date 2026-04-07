@@ -1,0 +1,32 @@
+{
+  "suite": "agent_factory_quickstart_flow_cases_v1",
+  "cases": [
+    {
+      "id": "news_daily_channels",
+      "request": "создай новостного агента для AI каждый день в 08:15 из reddit и twitter",
+      "expected": {
+        "kind": "news",
+        "source_policy_mode": "channels",
+        "schedule_type": "weekly"
+      }
+    },
+    {
+      "id": "coding_allowlist_hourly",
+      "request": "create an agent for python package maintenance from pypi.org and github.com every 6 hours at 10 minute",
+      "expected": {
+        "kind": "coding",
+        "source_policy_mode": "allowlist",
+        "schedule_type": "hourly"
+      }
+    },
+    {
+      "id": "general_non_scheduled",
+      "request": "создай агента для личной продуктивности",
+      "expected": {
+        "kind": "general",
+        "source_policy_mode": "open_web",
+        "schedule_type": ""
+      }
+    }
+  ]
+}

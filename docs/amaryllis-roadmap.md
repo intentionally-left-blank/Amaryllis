@@ -116,6 +116,19 @@ Execution-ready breakdown:
 - `docs/agent-factory.md`
 - `contracts/agent_factory_v1.json`
 
+### Phase 9 - Product Wedge and Competitive Scale (in_progress)
+- Goal: convert technical platform maturity into a category-defining product wedge with measurable activation, retention, and competitive benchmark outcomes.
+- Outcomes:
+  - one-line user flow (`ask -> plan -> apply -> scheduled first run`) with clear first-result diagnostics and blocking quickstart parity gate coverage.
+  - reusable mission template catalog and source-policy bundles for safe-by-default internet scoping.
+  - hardened provider session + entitlement onboarding and failure diagnostics.
+  - reproducible competitor-neutral benchmark pack integrated into release/nightly decision gates.
+  - product KPI artifacts (activation/retention/progress deltas) promoted to release evidence.
+
+Execution-ready breakdown:
+- `docs/amaryllis-phase9-backlog.md`
+- `docs/amaryllis-phase9-execution-plan.md`
+
 ### Parallel Track - Post-LLM Cognitive R&D
 - Goal: keep backend swappable for next-gen local cognition.
 - Outcomes:

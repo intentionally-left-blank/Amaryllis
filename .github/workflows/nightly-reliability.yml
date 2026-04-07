@@ -219,6 +219,11 @@ jobs:
           python scripts/release/agent_factory_intent_gate.py \
             --output "artifacts/nightly-agent-factory-intent-gate-report.json"
 
+      - name: Run nightly Agent Factory quickstart flow gate (blocking)
+        run: |
+          python scripts/release/agent_factory_quickstart_flow_gate.py \
+            --output "artifacts/nightly-agent-factory-quickstart-flow-gate-report.json"
+
       - name: Run nightly Agent Factory plan perf gate (blocking)
         run: |
           python scripts/release/agent_factory_plan_perf_gate.py \
@@ -523,6 +528,14 @@ jobs:
         with:
           name: nightly-agent-factory-intent-gate-report
           path: artifacts/nightly-agent-factory-intent-gate-report.json
+          if-no-files-found: error
+
+      - name: Upload nightly Agent Factory quickstart flow gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-agent-factory-quickstart-flow-gate-report
+          path: artifacts/nightly-agent-factory-quickstart-flow-gate-report.json
           if-no-files-found: error
 
       - name: Upload nightly Agent Factory plan perf gate report
