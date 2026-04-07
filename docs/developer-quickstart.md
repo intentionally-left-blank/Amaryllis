@@ -83,6 +83,12 @@ curl -X POST http://127.0.0.1:8000/v1/agents/quickstart \
 
 Using the same `idempotency_key` with the same payload is replay-safe: retries return the same created agent instead of creating duplicates.
 
+Apply/chat quickstart responses also include `first_result` (`quickstart_first_result_v1`) with:
+- `mode`
+- `next_run_at` and `next_run_eta_sec`
+- `run_health`
+- `recovery_hints`
+
 Inspect factory contract:
 
 ```bash

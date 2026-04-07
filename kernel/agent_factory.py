@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import re
 from typing import Any
 from urllib.parse import urlparse
@@ -777,6 +778,171 @@ def automation_schedule_summary(automation: dict[str, Any]) -> str:
     if schedule_type:
         return f"schedule_type={schedule_type}"
     return "расписание активно"
+
+
+def _parse_iso_utc(raw_value: Any) -> datetime | None:
+    text = str(raw_value or "").strip()
+    if not text:
+        return None
+    normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def build_quickstart_first_result_snapshot(
+    *,
+    automation: dict[str, Any] | None,
+    automation_error: str | None,
+) -> dict[str, Any]:
+    now_utc = datetime.now(timezone.utc)
+    schedule = automation if isinstance(automation, dict) else None
+    error_text = str(automation_error or "").strip()
+
+    next_run_at = str(schedule.get("next_run_at") or "").strip() if isinstance(schedule, dict) else ""
+    next_run_eta_sec: int | None = None
+    if next_run_at:
+        parsed_next_run = _parse_iso_utc(next_run_at)
+        if parsed_next_run is not None:
+            next_run_eta_sec = max(0, int((parsed_next_run - now_utc).total_seconds()))
+
+    if schedule is None:
+        mode = "automation_setup_failed" if error_text else "manual_only"
+        health_status = "degraded" if error_text else "manual_only"
+        run_health = {
+            "status": health_status,
+            "is_enabled": False,
+            "consecutive_failures": 0,
+            "escalation_level": "none",
+            "last_error": error_text or None,
+            "last_run_at": None,
+        }
+        recovery_hints = (
+            [
+                {
+                    "code": "automation_setup_failed",
+                    "action": "configure_automation",
+                    "message": "Automation setup failed. Configure schedule manually and retry.",
+                },
+                {
+                    "code": "manual_run_available",
+                    "action": "run_agent_now",
+                    "message": "You can run this agent immediately via /agents/{agent_id}/runs.",
+                },
+            ]
+            if error_text
+            else [
+                {
+                    "code": "automation_not_enabled",
+                    "action": "create_automation",
+                    "message": "Automation is not enabled. Create a schedule to get recurring results.",
+                },
+                {
+                    "code": "manual_run_available",
+                    "action": "run_agent_now",
+                    "message": "You can run this agent immediately via /agents/{agent_id}/runs.",
+                },
+            ]
+        )
+        return {
+            "version": "quickstart_first_result_v1",
+            "mode": mode,
+            "next_run_at": None,
+            "next_run_eta_sec": None,
+            "run_health": run_health,
+            "recovery_hints": recovery_hints,
+        }
+
+    is_enabled = bool(schedule.get("is_enabled", True))
+    try:
+        consecutive_failures = max(0, int(schedule.get("consecutive_failures", 0)))
+    except Exception:
+        consecutive_failures = 0
+    escalation_level = str(schedule.get("escalation_level") or "none").strip().lower() or "none"
+    if escalation_level not in {"none", "warning", "critical"}:
+        escalation_level = "none"
+    last_error = str(schedule.get("last_error") or "").strip() or None
+    last_run_at = str(schedule.get("last_run_at") or "").strip() or None
+    circuit_open_until = str(schedule.get("circuit_open_until") or "").strip() or None
+    backoff_until = str(schedule.get("backoff_until") or "").strip() or None
+    automation_id = str(schedule.get("id") or "").strip() or None
+
+    if not is_enabled:
+        health_status = "paused"
+    elif escalation_level == "critical":
+        health_status = "critical"
+    elif escalation_level == "warning" or consecutive_failures > 0 or bool(last_error):
+        health_status = "degraded"
+    else:
+        health_status = "healthy"
+
+    run_health = {
+        "status": health_status,
+        "is_enabled": is_enabled,
+        "consecutive_failures": consecutive_failures,
+        "escalation_level": escalation_level,
+        "last_error": last_error,
+        "last_run_at": last_run_at,
+        "backoff_until": backoff_until,
+        "circuit_open_until": circuit_open_until,
+    }
+
+    recovery_hints: list[dict[str, str]] = []
+    if health_status in {"critical", "degraded"}:
+        recovery_hints.append(
+            {
+                "code": "inspect_automation_events",
+                "action": "inspect_events",
+                "message": "Inspect /automations/{automation_id}/events for failure details and retry guidance.",
+            }
+        )
+    if not is_enabled:
+        recovery_hints.append(
+            {
+                "code": "resume_automation",
+                "action": "resume_automation",
+                "message": "Automation is paused. Resume it to continue scheduled runs.",
+            }
+        )
+    elif not next_run_at:
+        recovery_hints.append(
+            {
+                "code": "next_run_missing",
+                "action": "refresh_automation",
+                "message": "Next run is not scheduled yet. Update or resume automation to restore schedule.",
+            }
+        )
+    else:
+        recovery_hints.append(
+            {
+                "code": "manual_run_available",
+                "action": "run_automation_now",
+                "message": "If you need results sooner, trigger a manual run via /automations/{automation_id}/run.",
+            }
+        )
+    if not recovery_hints:
+        recovery_hints.append(
+            {
+                "code": "monitor_health",
+                "action": "monitor_automation_health",
+                "message": "Monitor automation health and events to keep recurring runs stable.",
+            }
+        )
+
+    mode = "scheduled" if next_run_at and is_enabled else "scheduled_pending"
+    return {
+        "version": "quickstart_first_result_v1",
+        "mode": mode,
+        "automation_id": automation_id,
+        "next_run_at": next_run_at or None,
+        "next_run_eta_sec": next_run_eta_sec,
+        "run_health": run_health,
+        "recovery_hints": recovery_hints,
+    }
 
 
 def _sanitize_source_channels(values: list[Any] | None) -> list[str]:

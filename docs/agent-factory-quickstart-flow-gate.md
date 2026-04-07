@@ -16,6 +16,11 @@
   - `sources`, `source_policy`
   - `automation` (`schedule_type`, `schedule`, `timezone`, `start_immediately`)
 - `inference_reason_view` exists on all paths.
+- `first_result` contract exists on apply/chat paths and includes:
+  - `mode`
+  - `next_run_at` / `next_run_eta_sec`
+  - `run_health`
+  - `recovery_hints`.
 
 ## Fixture
 

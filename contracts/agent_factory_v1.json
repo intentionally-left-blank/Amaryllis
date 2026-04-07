@@ -144,6 +144,54 @@
           "additionalProperties": true
         }
       }
+    },
+    "quickstart_first_result": {
+      "required": [
+        "version",
+        "mode",
+        "run_health",
+        "recovery_hints"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "enum": [
+            "quickstart_first_result_v1"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "scheduled",
+            "scheduled_pending",
+            "manual_only",
+            "automation_setup_failed"
+          ]
+        },
+        "automation_id": {
+          "type": "string",
+          "nullable": true
+        },
+        "next_run_at": {
+          "type": "string",
+          "nullable": true
+        },
+        "next_run_eta_sec": {
+          "type": "integer",
+          "nullable": true
+        },
+        "run_health": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "recovery_hints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
     }
   },
   "endpoints": [
@@ -216,13 +264,16 @@
       "response": {
         "quickstart_spec": {
           "$ref": "#/entities/quickstart_spec"
+        },
+        "first_result": {
+          "$ref": "#/entities/quickstart_first_result"
         }
       }
     },
     {
       "method": "POST",
       "path": "/chat/completions",
-      "description": "If request intent contains an agent creation command, runtime may trigger quickstart flow and return quick_action.type=agent_created."
+      "description": "If request intent contains an agent creation command, runtime may trigger quickstart flow and return quick_action.type=agent_created with quick_action.first_result."
     }
   ]
 }

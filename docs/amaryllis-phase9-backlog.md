@@ -31,7 +31,7 @@ Convert Amaryllis from a technically mature platform into a category-defining pr
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
 | P9-A01 | done | Promote "one phrase" flow as first-class runtime contract | `/v1/agents/quickstart` + chat path parity for apply lifecycle and quickstart flow gate | User can request, preview, create, and schedule an agent from a single prompt with deterministic idempotency |
-| P9-A02 | todo | Add first-result contract for newly created agents | `agent_created` payload + first-run ETA/health snapshot | Response always includes explicit next-run timing and recovery hints |
+| P9-A02 | done | Add first-result contract for newly created agents | `agent_created` payload + first-run ETA/health snapshot | Response always includes explicit next-run timing and recovery hints |
 | P9-A03 | todo | Harden plan explainability for non-technical users | simplified `inference_reason_view` profile + locale-safe wording | Users can understand why an agent was created/configured without reading internal policy jargon |
 
 ### Epic B - Template and Source Policy Productization
@@ -73,7 +73,7 @@ Convert Amaryllis from a technically mature platform into a category-defining pr
 | ID | Status | Scope |
 |---|---|---|
 | P9-A01 | done | one-phrase quickstart contract polish + chat/apply parity |
-| P9-A02 | todo | first-result/next-run snapshot contract |
+| P9-A02 | done | first-result/next-run snapshot contract |
 | P9-B01 | todo | minimal template catalog (`ai_news_daily` + 2 adjacent templates) |
 | P9-C01 | todo | provider-session onboarding UX hardening |
 
@@ -117,5 +117,5 @@ Sprint goal:
 ## Next Checkpoint
 
 - Publish execution plan with work packages and gate matrix: `docs/amaryllis-phase9-execution-plan.md`.
-- Continue Sprint P9-S0 with `P9-A02`, `P9-B01`, `P9-C01` after landing `P9-A01`.
+- Continue Sprint P9-S0 with `P9-B01`, `P9-C01` after landing `P9-A01` and `P9-A02`.
 - Promote product KPI snapshot to release KPI pack once first trend baseline is collected.

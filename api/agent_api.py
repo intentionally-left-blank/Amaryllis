@@ -13,6 +13,7 @@ from kernel.agent_factory import (
     apply_agent_spec_overrides as factory_apply_agent_spec_overrides,
     automation_schedule_summary as factory_automation_schedule_summary,
     build_inference_reason_view as factory_build_inference_reason_view,
+    build_quickstart_first_result_snapshot as factory_build_quickstart_first_result_snapshot,
     infer_agent_spec_from_request as factory_infer_agent_spec_from_request,
 )
 from runtime.auth import assert_owner, auth_context_from_request, resolve_user_id
@@ -382,13 +383,20 @@ def quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> dict[
                     cached_spec = _ensure_inference_reason_view(cached_spec)
                     cached_focus = str(cached_spec.get("focus") or "")
                     cached_reply = str(cached_record.get("assistant_reply") or "").strip()
+                    cached_automation_error = str(cached_record.get("automation_error") or "").strip() or None
                     if not cached_reply:
                         cached_reply = _build_quickstart_assistant_reply(
                             agent_id=cached_agent.id,
                             agent_name=cached_agent.name,
                             focus=cached_focus,
                             automation=cached_automation if isinstance(cached_automation, dict) else None,
-                            automation_error=None,
+                            automation_error=cached_automation_error,
+                        )
+                    cached_first_result = cached_record.get("first_result")
+                    if not isinstance(cached_first_result, dict):
+                        cached_first_result = factory_build_quickstart_first_result_snapshot(
+                            automation=cached_automation if isinstance(cached_automation, dict) else None,
+                            automation_error=cached_automation_error,
                         )
                     replay_receipt = _sign_action(
                         request,
@@ -421,6 +429,7 @@ def quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> dict[
                         "automation": cached_automation if isinstance(cached_automation, dict) else None,
                         "quickstart_spec": cached_spec,
                         "assistant_reply": cached_reply,
+                        "first_result": cached_first_result,
                         "idempotency": {
                             "key": idempotency_key,
                             "fingerprint": request_fingerprint,
@@ -511,6 +520,10 @@ def quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> dict[
         automation=automation if isinstance(automation, dict) else None,
         automation_error=automation_error,
     )
+    first_result = factory_build_quickstart_first_result_snapshot(
+        automation=automation if isinstance(automation, dict) else None,
+        automation_error=automation_error,
+    )
     if idempotency_payload is not None:
         try:
             services.database.set_user_memory(
@@ -525,6 +538,8 @@ def quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> dict[
                         ),
                         "quickstart_spec": spec,
                         "assistant_reply": assistant_reply,
+                        "automation_error": automation_error,
+                        "first_result": first_result,
                         "recorded_at": time.time(),
                     },
                     ensure_ascii=False,
@@ -539,6 +554,7 @@ def quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> dict[
         "automation": automation,
         "quickstart_spec": spec,
         "assistant_reply": assistant_reply,
+        "first_result": first_result,
         "idempotency": idempotency_payload,
         "action_receipt": receipt,
         "request_id": _request_id(request),

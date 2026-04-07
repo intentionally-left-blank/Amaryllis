@@ -56,6 +56,37 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
     def _auth(token: str) -> dict[str, str]:
         return {"Authorization": f"Bearer {token}"}
 
+    def _assert_first_result_contract(
+        self,
+        payload: dict,
+        *,
+        expected_mode: str,
+        expect_next_run: bool,
+    ) -> dict:
+        self.assertIsInstance(payload, dict)
+        self.assertEqual(str(payload.get("version") or ""), "quickstart_first_result_v1")
+        self.assertEqual(str(payload.get("mode") or ""), expected_mode)
+        run_health = payload.get("run_health", {})
+        self.assertIsInstance(run_health, dict)
+        self.assertTrue(str(run_health.get("status") or "").strip())
+        hints = payload.get("recovery_hints", [])
+        self.assertIsInstance(hints, list)
+        self.assertGreaterEqual(len(hints), 1)
+        for item in hints:
+            self.assertIsInstance(item, dict)
+            self.assertTrue(str(item.get("code") or "").strip())
+            self.assertTrue(str(item.get("message") or "").strip())
+            self.assertTrue(str(item.get("action") or "").strip())
+        if expect_next_run:
+            self.assertTrue(str(payload.get("next_run_at") or "").strip())
+            eta = payload.get("next_run_eta_sec")
+            self.assertIsInstance(eta, int)
+            self.assertGreaterEqual(int(eta), 0)
+        else:
+            self.assertIsNone(payload.get("next_run_at"))
+            self.assertIsNone(payload.get("next_run_eta_sec"))
+        return payload
+
     def test_health_uses_selected_cognition_backend(self) -> None:
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
@@ -107,6 +138,8 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         created_agent_id = str(agent.get("id") or "")
         self.assertTrue(created_agent_id)
         self.assertIsNone(quick_action.get("automation"))
+        first_result = quick_action.get("first_result", {})
+        self._assert_first_result_contract(first_result, expected_mode="manual_only", expect_next_run=False)
 
         listed = self.client.get(
             "/agents",
@@ -163,6 +196,8 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         second_idempotency = second_quick_action.get("idempotency", {})
         self.assertTrue(bool(second_idempotency.get("replayed", False)))
         self.assertTrue(bool(second_idempotency.get("derived", False)))
+        second_first_result = second_quick_action.get("first_result", {})
+        self._assert_first_result_contract(second_first_result, expected_mode="manual_only", expect_next_run=False)
 
         after = self.client.get(
             "/agents",
@@ -213,6 +248,9 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         self.assertIsInstance(schedule, dict)
         self.assertEqual(int(schedule.get("hour", -1)), 8)
         self.assertEqual(int(schedule.get("minute", -1)), 15)
+        first_result = quick_action.get("first_result", {})
+        self._assert_first_result_contract(first_result, expected_mode="scheduled", expect_next_run=True)
+        self.assertEqual(str((first_result.get("run_health") or {}).get("status") or ""), "healthy")
 
         listed = self.client.get(
             "/automations",
@@ -248,6 +286,8 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         schedule = automation.get("schedule", {})
         self.assertEqual(int(schedule.get("interval_hours", -1)), 3)
         self.assertEqual(int(schedule.get("minute", -1)), 5)
+        first_result = quick_action.get("first_result", {})
+        self._assert_first_result_contract(first_result, expected_mode="scheduled", expect_next_run=True)
 
     def test_agents_quickstart_endpoint_creates_agent_and_automation(self) -> None:
         response = self.client.post(
@@ -275,6 +315,9 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         schedule = automation.get("schedule", {})
         self.assertEqual(int(schedule.get("hour", -1)), 8)
         self.assertEqual(int(schedule.get("minute", -1)), 15)
+        first_result = payload.get("first_result", {})
+        self._assert_first_result_contract(first_result, expected_mode="scheduled", expect_next_run=True)
+        self.assertEqual(str((first_result.get("run_health") or {}).get("status") or ""), "healthy")
 
     def test_agents_quickstart_endpoint_is_idempotent_with_same_key(self) -> None:
         before = self.client.get(
@@ -322,6 +365,8 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         self.assertIsInstance(second_spec.get("inference_reason_view", {}), dict)
         second_idempotency = second_payload.get("idempotency", {})
         self.assertTrue(bool(second_idempotency.get("replayed", False)))
+        second_first_result = second_payload.get("first_result", {})
+        self._assert_first_result_contract(second_first_result, expected_mode="scheduled", expect_next_run=True)
 
         after = self.client.get(
             "/agents",

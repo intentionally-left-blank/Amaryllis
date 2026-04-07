@@ -27,6 +27,11 @@ Create specialized agents from a single natural-language request:
    - `automation` schedule (`schedule_type`, `schedule`, `timezone`, `start_immediately`)
 3. Apply the same request via `/v1/agents/quickstart` (optionally with `idempotency_key`).
 4. Retry safely with the same `idempotency_key` (no duplicate agent creation).
+5. Read `first_result` snapshot in apply/chat responses:
+   - `mode` (`scheduled`, `manual_only`, `automation_setup_failed`)
+   - `next_run_at` + `next_run_eta_sec`
+   - `run_health` status
+   - `recovery_hints` actionable steps.
 
 In macOS desktop (`Agents -> One-shot Quickstart`), `inference_reason_view` is rendered as:
 - confidence/kind chips;

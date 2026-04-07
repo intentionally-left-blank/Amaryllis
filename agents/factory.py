@@ -5,6 +5,7 @@ from kernel.agent_factory import (
     automation_schedule_summary,
     build_inference_reason_view,
     build_quickstart_agent_created_content,
+    build_quickstart_first_result_snapshot,
     infer_agent_spec_from_request,
     looks_like_agent_quickstart_request,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "automation_schedule_summary",
     "build_inference_reason_view",
     "build_quickstart_agent_created_content",
+    "build_quickstart_first_result_snapshot",
     "infer_agent_spec_from_request",
     "looks_like_agent_quickstart_request",
 ]

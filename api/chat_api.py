@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from kernel.agent_factory import (
     automation_schedule_summary as factory_automation_schedule_summary,
     build_quickstart_agent_created_content as factory_build_quickstart_agent_created_content,
+    build_quickstart_first_result_snapshot as factory_build_quickstart_first_result_snapshot,
     infer_agent_spec_from_request as factory_infer_agent_spec_from_request,
     looks_like_agent_quickstart_request as factory_looks_like_agent_quickstart_request,
 )
@@ -454,6 +455,7 @@ def _build_quickstart_chat_completion(
     action_receipt: dict[str, Any],
     automation_record: dict[str, Any] | None = None,
     quickstart_spec: dict[str, Any] | None = None,
+    first_result: dict[str, Any] | None = None,
     idempotency: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     completion_id = f"chatcmpl-{uuid4().hex}"
@@ -495,6 +497,7 @@ def _build_quickstart_chat_completion(
             "agent": agent_record,
             "automation": automation_record,
             "quickstart_spec": quickstart_spec,
+            "first_result": first_result,
             "idempotency": idempotency,
             "action_receipt": action_receipt,
         },
@@ -628,6 +631,7 @@ def _maybe_handle_chat_agent_quickstart(
                     cached_spec = cached_record.get("quickstart_spec")
                     if not isinstance(cached_spec, dict):
                         cached_spec = spec
+                    cached_automation_error = str(cached_record.get("automation_error") or "").strip() or None
                     content = str(cached_record.get("assistant_content") or "").strip()
                     if not content:
                         content = _build_quickstart_agent_created_content(
@@ -635,7 +639,13 @@ def _maybe_handle_chat_agent_quickstart(
                             agent_name=cached_agent.name,
                             focus=str(cached_spec.get("focus") or ""),
                             automation=cached_automation if isinstance(cached_automation, dict) else None,
-                            automation_error=None,
+                            automation_error=cached_automation_error,
+                        )
+                    cached_first_result = cached_record.get("first_result")
+                    if not isinstance(cached_first_result, dict):
+                        cached_first_result = factory_build_quickstart_first_result_snapshot(
+                            automation=cached_automation if isinstance(cached_automation, dict) else None,
+                            automation_error=cached_automation_error,
                         )
                     replay_receipt = _sign_action(
                         request,
@@ -680,6 +690,7 @@ def _maybe_handle_chat_agent_quickstart(
                         action_receipt=replay_receipt,
                         automation_record=cached_automation if isinstance(cached_automation, dict) else None,
                         quickstart_spec=cached_spec,
+                        first_result=cached_first_result,
                         idempotency=replay_idempotency,
                     )
         idempotency_payload = {
@@ -757,6 +768,10 @@ def _maybe_handle_chat_agent_quickstart(
         automation=automation_record if isinstance(automation_record, dict) else None,
         automation_error=automation_error,
     )
+    first_result = factory_build_quickstart_first_result_snapshot(
+        automation=automation_record if isinstance(automation_record, dict) else None,
+        automation_error=automation_error,
+    )
     if idempotency_payload is not None:
         try:
             services.database.set_user_memory(
@@ -772,6 +787,8 @@ def _maybe_handle_chat_agent_quickstart(
                             else None
                         ),
                         "quickstart_spec": spec,
+                        "automation_error": automation_error,
+                        "first_result": first_result,
                         "assistant_content": content,
                         "recorded_at": time.time(),
                     },
@@ -793,6 +810,7 @@ def _maybe_handle_chat_agent_quickstart(
         action_receipt=receipt,
         automation_record=automation_record,
         quickstart_spec=spec,
+        first_result=first_result,
         idempotency=idempotency_payload,
     )
 

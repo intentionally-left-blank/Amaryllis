@@ -175,6 +175,20 @@ def _ensure_reason_view(value: Any) -> bool:
     return isinstance(value, dict) and bool(str(value.get("version") or "").strip())
 
 
+def _ensure_first_result_contract(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    if str(value.get("version") or "").strip() != "quickstart_first_result_v1":
+        return False
+    run_health = value.get("run_health")
+    recovery_hints = value.get("recovery_hints")
+    if not isinstance(run_health, dict):
+        return False
+    if not isinstance(recovery_hints, list):
+        return False
+    return bool(recovery_hints)
+
+
 def _evaluate_case(
     *,
     client: Any,
@@ -290,6 +304,9 @@ def _evaluate_case(
         }
     if not _ensure_reason_view(apply_spec.get("inference_reason_view")):
         add_mismatch("apply.quickstart_spec.inference_reason_view", "dict with version", apply_spec.get("inference_reason_view"))
+    apply_first_result = apply_first_payload.get("first_result")
+    if not _ensure_first_result_contract(apply_first_result):
+        add_mismatch("apply.first_result", "quickstart_first_result_v1 payload", apply_first_result)
     apply_first_agent = apply_first_payload.get("agent")
     if not isinstance(apply_first_agent, dict) or not _normalize_text(apply_first_agent.get("id")):
         add_mismatch("apply.first_agent.id", "non-empty", apply_first_agent)
@@ -397,6 +414,9 @@ def _evaluate_case(
         }
     if not _ensure_reason_view(chat_first_spec.get("inference_reason_view")):
         add_mismatch("chat.quickstart_spec.inference_reason_view", "dict with version", chat_first_spec.get("inference_reason_view"))
+    chat_first_result = quick_action.get("first_result")
+    if not _ensure_first_result_contract(chat_first_result):
+        add_mismatch("chat.quick_action.first_result", "quickstart_first_result_v1 payload", chat_first_result)
 
     chat_first_agent = quick_action.get("agent")
     if not isinstance(chat_first_agent, dict) or not _normalize_text(chat_first_agent.get("id")):
@@ -469,6 +489,28 @@ def _evaluate_case(
     elif bool(expected.get("schedule_type") == ""):
         if actual_schedule_type != "":
             add_mismatch("expected.schedule_type", "", actual_schedule_type)
+
+    expected_mode = "scheduled" if actual_schedule_type else "manual_only"
+    if isinstance(apply_first_result, dict):
+        actual_apply_mode = _normalize_text(apply_first_result.get("mode"))
+        if actual_apply_mode != expected_mode:
+            add_mismatch("apply.first_result.mode", expected_mode, actual_apply_mode)
+        if expected_mode == "scheduled":
+            if not _normalize_text(apply_first_result.get("next_run_at")):
+                add_mismatch("apply.first_result.next_run_at", "non-empty", apply_first_result.get("next_run_at"))
+        else:
+            if apply_first_result.get("next_run_at") is not None:
+                add_mismatch("apply.first_result.next_run_at", None, apply_first_result.get("next_run_at"))
+    if isinstance(chat_first_result, dict):
+        actual_chat_mode = _normalize_text(chat_first_result.get("mode"))
+        if actual_chat_mode != expected_mode:
+            add_mismatch("chat.first_result.mode", expected_mode, actual_chat_mode)
+        if expected_mode == "scheduled":
+            if not _normalize_text(chat_first_result.get("next_run_at")):
+                add_mismatch("chat.first_result.next_run_at", "non-empty", chat_first_result.get("next_run_at"))
+        else:
+            if chat_first_result.get("next_run_at") is not None:
+                add_mismatch("chat.first_result.next_run_at", None, chat_first_result.get("next_run_at"))
 
     return {
         "id": case_id,
