@@ -952,6 +952,12 @@ jobs:
           name: api-quickstart-compat-report
           path: artifacts/api-quickstart
 
+      - name: Download news mission gate report
+        uses: actions/download-artifact@v4
+        with:
+          name: news-mission-gate-report
+          path: artifacts/news-mission
+
       - name: Download QoS governor gate report
         uses: actions/download-artifact@v4
         with:
