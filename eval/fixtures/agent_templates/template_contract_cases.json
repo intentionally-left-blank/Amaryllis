@@ -1,0 +1,124 @@
+{
+  "suite": "agent_template_contract_cases_v1",
+  "cases": [
+    {
+      "id": "code_health_default",
+      "template_id": "code_health",
+      "agent_id": "fixture-code-health",
+      "user_id": "fixture-user",
+      "timezone": "UTC",
+      "now_utc": "2026-01-05T08:00:00+00:00",
+      "simulation": {
+        "risk_summary": {
+          "overall_risk_level": "medium"
+        }
+      },
+      "expected": {
+        "lane": "engineering",
+        "schedule_type": "weekly"
+      }
+    },
+    {
+      "id": "security_audit_default",
+      "template_id": "security_audit",
+      "agent_id": "fixture-security-audit",
+      "user_id": "fixture-user",
+      "timezone": "UTC",
+      "now_utc": "2026-01-05T08:00:00+00:00",
+      "simulation": {
+        "risk_summary": {
+          "overall_risk_level": "high"
+        }
+      },
+      "expected": {
+        "lane": "security",
+        "schedule_type": "weekly"
+      }
+    },
+    {
+      "id": "release_guard_default",
+      "template_id": "release_guard",
+      "agent_id": "fixture-release-guard",
+      "user_id": "fixture-user",
+      "timezone": "UTC",
+      "now_utc": "2026-01-05T08:00:00+00:00",
+      "simulation": {
+        "risk_summary": {
+          "overall_risk_level": "critical"
+        }
+      },
+      "expected": {
+        "lane": "release",
+        "schedule_type": "weekly"
+      }
+    },
+    {
+      "id": "runtime_watchdog_default",
+      "template_id": "runtime_watchdog",
+      "agent_id": "fixture-runtime-watchdog",
+      "user_id": "fixture-user",
+      "timezone": "UTC",
+      "now_utc": "2026-01-05T08:00:00+00:00",
+      "simulation": {
+        "risk_summary": {
+          "overall_risk_level": "high"
+        }
+      },
+      "expected": {
+        "lane": "monitoring",
+        "schedule_type": "hourly"
+      }
+    },
+    {
+      "id": "ai_news_daily_default",
+      "template_id": "ai_news_daily",
+      "agent_id": "fixture-ai-news",
+      "user_id": "fixture-user",
+      "timezone": "UTC",
+      "now_utc": "2026-01-05T08:00:00+00:00",
+      "simulation": {
+        "risk_summary": {
+          "overall_risk_level": "medium"
+        }
+      },
+      "expected": {
+        "lane": "news",
+        "schedule_type": "weekly"
+      }
+    },
+    {
+      "id": "ai_research_brief_daily_default",
+      "template_id": "ai_research_brief_daily",
+      "agent_id": "fixture-ai-research",
+      "user_id": "fixture-user",
+      "timezone": "UTC",
+      "now_utc": "2026-01-05T08:00:00+00:00",
+      "simulation": {
+        "risk_summary": {
+          "overall_risk_level": "medium"
+        }
+      },
+      "expected": {
+        "lane": "research",
+        "schedule_type": "weekly"
+      }
+    },
+    {
+      "id": "ai_monitoring_watch_hourly_default",
+      "template_id": "ai_monitoring_watch_hourly",
+      "agent_id": "fixture-ai-monitoring",
+      "user_id": "fixture-user",
+      "timezone": "UTC",
+      "now_utc": "2026-01-05T08:00:00+00:00",
+      "simulation": {
+        "risk_summary": {
+          "overall_risk_level": "low"
+        }
+      },
+      "expected": {
+        "lane": "monitoring",
+        "schedule_type": "hourly"
+      }
+    }
+  ]
+}

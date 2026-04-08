@@ -1,0 +1,636 @@
+{
+  "version": "agent_template_snapshot_v1",
+  "generated_at": "2026-04-07T22:01:26.395722+00:00",
+  "catalog_version": "mission_template_catalog_v1",
+  "cases": {
+    "code_health_default": {
+      "template": {
+        "catalog_version": "mission_template_catalog_v1",
+        "description": "Run lint/test/dependency checks and return remediation backlog.",
+        "id": "code_health",
+        "lane": "engineering",
+        "name": "Code Health Sweep",
+        "risk_tags": [
+          "quality",
+          "maintenance"
+        ]
+      },
+      "resolved": {
+        "budget": {
+          "max_steps": 24,
+          "max_tool_calls": 40,
+          "timeout_sec": 900
+        },
+        "cadence_profile": "workday",
+        "interval_sec": null,
+        "max_attempts": 3,
+        "message": "Run code health sweep: execute lint/tests, detect flaky or failing areas, summarize root causes, and propose prioritized fixes.",
+        "mission_policy": {
+          "profile": "balanced",
+          "slo": {
+            "backoff_base_sec": 5.0,
+            "backoff_max_sec": 300.0,
+            "circuit_failure_threshold": 4,
+            "circuit_open_sec": 120.0,
+            "critical_failures": 4,
+            "disable_failures": 6,
+            "warning_failures": 2
+          }
+        },
+        "schedule": null,
+        "schedule_type": "",
+        "start_immediately": false
+      },
+      "mission_plan": {
+        "apply_payload": {
+          "agent_id": "fixture-code-health",
+          "interval_sec": 604800,
+          "message": "Run code health sweep: execute lint/tests, detect flaky or failing areas, summarize root causes, and propose prioritized fixes.",
+          "schedule": {
+            "byday": [
+              "MO",
+              "TU",
+              "WE",
+              "TH",
+              "FR"
+            ],
+            "hour": 9,
+            "minute": 0
+          },
+          "schedule_type": "weekly",
+          "session_id": null,
+          "start_immediately": false,
+          "timezone": "UTC",
+          "user_id": "fixture-user"
+        },
+        "interval_sec": 604800,
+        "next_run_at": "2026-01-05T09:00:00+00:00",
+        "recommendation": {
+          "effective_start_immediately": false,
+          "requested_start_immediately": false,
+          "review_checklist": [
+            "Verify mission prompt is specific and bounded.",
+            "Confirm target agent tools match mission intent.",
+            "Risk level is acceptable for standard scheduler rollout."
+          ]
+        },
+        "risk": {
+          "overall": "medium",
+          "requires_review": false
+        },
+        "schedule": {
+          "byday": [
+            "MO",
+            "TU",
+            "WE",
+            "TH",
+            "FR"
+          ],
+          "hour": 9,
+          "minute": 0
+        },
+        "schedule_type": "weekly"
+      }
+    },
+    "security_audit_default": {
+      "template": {
+        "catalog_version": "mission_template_catalog_v1",
+        "description": "Review dependency, secrets, and policy posture with explicit risk findings.",
+        "id": "security_audit",
+        "lane": "security",
+        "name": "Security Audit",
+        "risk_tags": [
+          "security",
+          "compliance"
+        ]
+      },
+      "resolved": {
+        "budget": {
+          "max_steps": 28,
+          "max_tool_calls": 48,
+          "timeout_sec": 1200
+        },
+        "cadence_profile": "weekly",
+        "interval_sec": null,
+        "max_attempts": 4,
+        "message": "Run security audit: scan dependencies/secrets/config, classify risks, and prepare mitigation plan with urgency levels.",
+        "mission_policy": {
+          "profile": "strict",
+          "slo": {
+            "backoff_base_sec": 10.0,
+            "backoff_max_sec": 600.0,
+            "circuit_failure_threshold": 2,
+            "circuit_open_sec": 300.0,
+            "critical_failures": 2,
+            "disable_failures": 3,
+            "warning_failures": 1
+          }
+        },
+        "schedule": null,
+        "schedule_type": "",
+        "start_immediately": false
+      },
+      "mission_plan": {
+        "apply_payload": {
+          "agent_id": "fixture-security-audit",
+          "interval_sec": 604800,
+          "message": "Run security audit: scan dependencies/secrets/config, classify risks, and prepare mitigation plan with urgency levels.",
+          "schedule": {
+            "byday": [
+              "MO"
+            ],
+            "hour": 9,
+            "minute": 0
+          },
+          "schedule_type": "weekly",
+          "session_id": null,
+          "start_immediately": false,
+          "timezone": "UTC",
+          "user_id": "fixture-user"
+        },
+        "interval_sec": 604800,
+        "next_run_at": "2026-01-05T09:00:00+00:00",
+        "recommendation": {
+          "effective_start_immediately": false,
+          "requested_start_immediately": false,
+          "review_checklist": [
+            "Verify mission prompt is specific and bounded.",
+            "Confirm target agent tools match mission intent.",
+            "Risk level is 'high': run dry-run output review before enabling immediate scheduling.",
+            "Start paused or delayed, then promote after first successful run."
+          ]
+        },
+        "risk": {
+          "overall": "high",
+          "requires_review": true
+        },
+        "schedule": {
+          "byday": [
+            "MO"
+          ],
+          "hour": 9,
+          "minute": 0
+        },
+        "schedule_type": "weekly"
+      }
+    },
+    "release_guard_default": {
+      "template": {
+        "catalog_version": "mission_template_catalog_v1",
+        "description": "Validate release readiness gates and summarize go/no-go blockers.",
+        "id": "release_guard",
+        "lane": "release",
+        "name": "Release Guard",
+        "risk_tags": [
+          "release",
+          "reliability"
+        ]
+      },
+      "resolved": {
+        "budget": {
+          "max_steps": 22,
+          "max_tool_calls": 36,
+          "timeout_sec": 900
+        },
+        "cadence_profile": "daily",
+        "interval_sec": null,
+        "max_attempts": 3,
+        "message": "Run release guard mission: validate quality gates, highlight blockers, and provide go/no-go recommendation with rollback notes.",
+        "mission_policy": {
+          "profile": "release",
+          "slo": {
+            "backoff_base_sec": 15.0,
+            "backoff_max_sec": 900.0,
+            "circuit_failure_threshold": 2,
+            "circuit_open_sec": 600.0,
+            "critical_failures": 2,
+            "disable_failures": 3,
+            "warning_failures": 1
+          }
+        },
+        "schedule": null,
+        "schedule_type": "",
+        "start_immediately": false
+      },
+      "mission_plan": {
+        "apply_payload": {
+          "agent_id": "fixture-release-guard",
+          "interval_sec": 604800,
+          "message": "Run release guard mission: validate quality gates, highlight blockers, and provide go/no-go recommendation with rollback notes.",
+          "schedule": {
+            "byday": [
+              "MO",
+              "TU",
+              "WE",
+              "TH",
+              "FR",
+              "SA",
+              "SU"
+            ],
+            "hour": 9,
+            "minute": 0
+          },
+          "schedule_type": "weekly",
+          "session_id": null,
+          "start_immediately": false,
+          "timezone": "UTC",
+          "user_id": "fixture-user"
+        },
+        "interval_sec": 604800,
+        "next_run_at": "2026-01-05T09:00:00+00:00",
+        "recommendation": {
+          "effective_start_immediately": false,
+          "requested_start_immediately": false,
+          "review_checklist": [
+            "Verify mission prompt is specific and bounded.",
+            "Confirm target agent tools match mission intent.",
+            "Risk level is 'critical': run dry-run output review before enabling immediate scheduling.",
+            "Start paused or delayed, then promote after first successful run."
+          ]
+        },
+        "risk": {
+          "overall": "critical",
+          "requires_review": true
+        },
+        "schedule": {
+          "byday": [
+            "MO",
+            "TU",
+            "WE",
+            "TH",
+            "FR",
+            "SA",
+            "SU"
+          ],
+          "hour": 9,
+          "minute": 0
+        },
+        "schedule_type": "weekly"
+      }
+    },
+    "runtime_watchdog_default": {
+      "template": {
+        "catalog_version": "mission_template_catalog_v1",
+        "description": "Continuously watch runtime health and auto-surface incident hints.",
+        "id": "runtime_watchdog",
+        "lane": "monitoring",
+        "name": "Runtime Watchdog",
+        "risk_tags": [
+          "ops",
+          "watchdog"
+        ]
+      },
+      "resolved": {
+        "budget": {
+          "max_steps": 16,
+          "max_tool_calls": 24,
+          "timeout_sec": 600
+        },
+        "cadence_profile": "hourly",
+        "interval_sec": null,
+        "max_attempts": 2,
+        "message": "Run runtime watchdog mission: inspect health/slo/incidents, detect regressions, and generate actionable recovery checklist.",
+        "mission_policy": {
+          "profile": "watchdog",
+          "slo": {
+            "backoff_base_sec": 3.0,
+            "backoff_max_sec": 90.0,
+            "circuit_failure_threshold": 3,
+            "circuit_open_sec": 90.0,
+            "critical_failures": 2,
+            "disable_failures": 4,
+            "warning_failures": 1
+          }
+        },
+        "schedule": null,
+        "schedule_type": "",
+        "start_immediately": true
+      },
+      "mission_plan": {
+        "apply_payload": {
+          "agent_id": "fixture-runtime-watchdog",
+          "interval_sec": 3600,
+          "message": "Run runtime watchdog mission: inspect health/slo/incidents, detect regressions, and generate actionable recovery checklist.",
+          "schedule": {
+            "interval_hours": 1,
+            "minute": 0
+          },
+          "schedule_type": "hourly",
+          "session_id": null,
+          "start_immediately": false,
+          "timezone": "UTC",
+          "user_id": "fixture-user"
+        },
+        "interval_sec": 3600,
+        "next_run_at": "2026-01-05T09:00:00+00:00",
+        "recommendation": {
+          "effective_start_immediately": false,
+          "requested_start_immediately": true,
+          "review_checklist": [
+            "Verify mission prompt is specific and bounded.",
+            "Confirm target agent tools match mission intent.",
+            "Risk level is 'high': run dry-run output review before enabling immediate scheduling.",
+            "Start paused or delayed, then promote after first successful run."
+          ]
+        },
+        "risk": {
+          "overall": "high",
+          "requires_review": true
+        },
+        "schedule": {
+          "interval_hours": 1,
+          "minute": 0
+        },
+        "schedule_type": "hourly"
+      }
+    },
+    "ai_news_daily_default": {
+      "template": {
+        "catalog_version": "mission_template_catalog_v1",
+        "description": "Collect, deduplicate, and summarize daily AI news with source-grounded citations.",
+        "id": "ai_news_daily",
+        "lane": "news",
+        "name": "AI News Daily Digest",
+        "risk_tags": [
+          "news",
+          "research"
+        ]
+      },
+      "resolved": {
+        "budget": {
+          "max_steps": 20,
+          "max_tool_calls": 36,
+          "timeout_sec": 900
+        },
+        "cadence_profile": "daily",
+        "interval_sec": null,
+        "max_attempts": 3,
+        "message": "Run daily AI news mission: collect updates from web, reddit, and x for the last 24 hours; deduplicate overlapping stories by canonical URL; produce a concise digest with source links and confidence markers for each section.",
+        "mission_policy": {
+          "profile": "balanced",
+          "slo": {
+            "backoff_base_sec": 5.0,
+            "backoff_max_sec": 300.0,
+            "circuit_failure_threshold": 4,
+            "circuit_open_sec": 120.0,
+            "critical_failures": 4,
+            "disable_failures": 6,
+            "warning_failures": 2
+          }
+        },
+        "schedule": {
+          "byday": [
+            "MO",
+            "TU",
+            "WE",
+            "TH",
+            "FR",
+            "SA",
+            "SU"
+          ],
+          "hour": 9,
+          "minute": 0
+        },
+        "schedule_type": "weekly",
+        "start_immediately": false
+      },
+      "mission_plan": {
+        "apply_payload": {
+          "agent_id": "fixture-ai-news",
+          "interval_sec": 604800,
+          "message": "Run daily AI news mission: collect updates from web, reddit, and x for the last 24 hours; deduplicate overlapping stories by canonical URL; produce a concise digest with source links and confidence markers for each section.",
+          "schedule": {
+            "byday": [
+              "MO",
+              "TU",
+              "WE",
+              "TH",
+              "FR",
+              "SA",
+              "SU"
+            ],
+            "hour": 9,
+            "minute": 0
+          },
+          "schedule_type": "weekly",
+          "session_id": null,
+          "start_immediately": false,
+          "timezone": "UTC",
+          "user_id": "fixture-user"
+        },
+        "interval_sec": 604800,
+        "next_run_at": "2026-01-05T09:00:00+00:00",
+        "recommendation": {
+          "effective_start_immediately": false,
+          "requested_start_immediately": false,
+          "review_checklist": [
+            "Verify mission prompt is specific and bounded.",
+            "Confirm target agent tools match mission intent.",
+            "Risk level is acceptable for standard scheduler rollout."
+          ]
+        },
+        "risk": {
+          "overall": "medium",
+          "requires_review": false
+        },
+        "schedule": {
+          "byday": [
+            "MO",
+            "TU",
+            "WE",
+            "TH",
+            "FR",
+            "SA",
+            "SU"
+          ],
+          "hour": 9,
+          "minute": 0
+        },
+        "schedule_type": "weekly"
+      }
+    },
+    "ai_research_brief_daily_default": {
+      "template": {
+        "catalog_version": "mission_template_catalog_v1",
+        "description": "Track fresh AI research outputs and summarize practical implications with citations.",
+        "id": "ai_research_brief_daily",
+        "lane": "research",
+        "name": "AI Research Brief (Daily)",
+        "risk_tags": [
+          "research",
+          "analysis"
+        ]
+      },
+      "resolved": {
+        "budget": {
+          "max_steps": 24,
+          "max_tool_calls": 42,
+          "timeout_sec": 1200
+        },
+        "cadence_profile": "daily",
+        "interval_sec": null,
+        "max_attempts": 3,
+        "message": "Run daily AI research brief mission: collect important new papers, evaluations, and technical reports; cluster by topic, summarize key contributions and limitations, and include direct source links plus recommended follow-up reading.",
+        "mission_policy": {
+          "profile": "balanced",
+          "slo": {
+            "backoff_base_sec": 5.0,
+            "backoff_max_sec": 300.0,
+            "circuit_failure_threshold": 4,
+            "circuit_open_sec": 120.0,
+            "critical_failures": 4,
+            "disable_failures": 6,
+            "warning_failures": 2
+          }
+        },
+        "schedule": {
+          "byday": [
+            "MO",
+            "TU",
+            "WE",
+            "TH",
+            "FR",
+            "SA",
+            "SU"
+          ],
+          "hour": 10,
+          "minute": 0
+        },
+        "schedule_type": "weekly",
+        "start_immediately": false
+      },
+      "mission_plan": {
+        "apply_payload": {
+          "agent_id": "fixture-ai-research",
+          "interval_sec": 604800,
+          "message": "Run daily AI research brief mission: collect important new papers, evaluations, and technical reports; cluster by topic, summarize key contributions and limitations, and include direct source links plus recommended follow-up reading.",
+          "schedule": {
+            "byday": [
+              "MO",
+              "TU",
+              "WE",
+              "TH",
+              "FR",
+              "SA",
+              "SU"
+            ],
+            "hour": 10,
+            "minute": 0
+          },
+          "schedule_type": "weekly",
+          "session_id": null,
+          "start_immediately": false,
+          "timezone": "UTC",
+          "user_id": "fixture-user"
+        },
+        "interval_sec": 604800,
+        "next_run_at": "2026-01-05T10:00:00+00:00",
+        "recommendation": {
+          "effective_start_immediately": false,
+          "requested_start_immediately": false,
+          "review_checklist": [
+            "Verify mission prompt is specific and bounded.",
+            "Confirm target agent tools match mission intent.",
+            "Risk level is acceptable for standard scheduler rollout."
+          ]
+        },
+        "risk": {
+          "overall": "medium",
+          "requires_review": false
+        },
+        "schedule": {
+          "byday": [
+            "MO",
+            "TU",
+            "WE",
+            "TH",
+            "FR",
+            "SA",
+            "SU"
+          ],
+          "hour": 10,
+          "minute": 0
+        },
+        "schedule_type": "weekly"
+      }
+    },
+    "ai_monitoring_watch_hourly_default": {
+      "template": {
+        "catalog_version": "mission_template_catalog_v1",
+        "description": "Monitor selected channels for high-signal changes and emit alert-style updates.",
+        "id": "ai_monitoring_watch_hourly",
+        "lane": "monitoring",
+        "name": "AI Monitoring Watch (Hourly)",
+        "risk_tags": [
+          "monitoring",
+          "ops"
+        ]
+      },
+      "resolved": {
+        "budget": {
+          "max_steps": 16,
+          "max_tool_calls": 24,
+          "timeout_sec": 600
+        },
+        "cadence_profile": "hourly",
+        "interval_sec": null,
+        "max_attempts": 2,
+        "message": "Run hourly AI monitoring mission: detect product launches, policy changes, outages, and major updates; prioritize high-signal events, provide concise alerts with links, and suggest immediate next actions.",
+        "mission_policy": {
+          "profile": "watchdog",
+          "slo": {
+            "backoff_base_sec": 3.0,
+            "backoff_max_sec": 90.0,
+            "circuit_failure_threshold": 3,
+            "circuit_open_sec": 90.0,
+            "critical_failures": 2,
+            "disable_failures": 4,
+            "warning_failures": 1
+          }
+        },
+        "schedule": {
+          "interval_hours": 1,
+          "minute": 5
+        },
+        "schedule_type": "hourly",
+        "start_immediately": true
+      },
+      "mission_plan": {
+        "apply_payload": {
+          "agent_id": "fixture-ai-monitoring",
+          "interval_sec": 3600,
+          "message": "Run hourly AI monitoring mission: detect product launches, policy changes, outages, and major updates; prioritize high-signal events, provide concise alerts with links, and suggest immediate next actions.",
+          "schedule": {
+            "interval_hours": 1,
+            "minute": 5
+          },
+          "schedule_type": "hourly",
+          "session_id": null,
+          "start_immediately": true,
+          "timezone": "UTC",
+          "user_id": "fixture-user"
+        },
+        "interval_sec": 3600,
+        "next_run_at": "2026-01-05T08:05:00+00:00",
+        "recommendation": {
+          "effective_start_immediately": true,
+          "requested_start_immediately": true,
+          "review_checklist": [
+            "Verify mission prompt is specific and bounded.",
+            "Confirm target agent tools match mission intent.",
+            "Risk level is acceptable for standard scheduler rollout."
+          ]
+        },
+        "risk": {
+          "overall": "low",
+          "requires_review": false
+        },
+        "schedule": {
+          "interval_hours": 1,
+          "minute": 5
+        },
+        "schedule_type": "hourly"
+      }
+    }
+  }
+}

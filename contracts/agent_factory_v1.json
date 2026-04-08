@@ -1,6 +1,6 @@
 {
   "contract": "agent_factory_v1",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Contract for natural-language agent factory (plan/apply/chat shortcut) with deterministic idempotency and source policy controls.",
   "entities": {
     "quickstart_request": {
@@ -51,7 +51,7 @@
           }
         },
         "source_policy": {
-          "$ref": "#/entities/source_policy"
+          "$ref": "#/entities/source_policy_override"
         },
         "automation": {
           "type": "object",
@@ -66,6 +66,36 @@
         "domains"
       ],
       "properties": {
+        "profile": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "open_web",
+            "channels",
+            "allowlist"
+          ]
+        },
+        "channels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "domains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "source_policy_override": {
+      "properties": {
+        "profile": {
+          "type": "string"
+        },
         "mode": {
           "type": "string",
           "enum": [
@@ -201,6 +231,32 @@
       "response": {
         "contract_version": "agent_factory_v1",
         "contract_path": "contracts/agent_factory_v1.json"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/agents/factory/source-policies",
+      "response": {
+        "version": "source_policy_profiles_v1",
+        "count": 4,
+        "items": [
+          {
+            "id": "open_web_default",
+            "mode": "open_web"
+          },
+          {
+            "id": "ai_news_channels",
+            "mode": "channels"
+          },
+          {
+            "id": "ai_research_allowlist",
+            "mode": "allowlist"
+          },
+          {
+            "id": "engineering_allowlist",
+            "mode": "allowlist"
+          }
+        ]
       }
     },
     {

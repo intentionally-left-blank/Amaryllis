@@ -240,6 +240,67 @@ def main() -> int:
                     errors.append("entitlements_available_after_revoke_should_be_false")
                 if session_count != 0:
                     errors.append(f"entitlements_session_count_after_revoke:{session_count}")
+                route_policy = ent_payload.get("route_policy") if isinstance(ent_payload, dict) else {}
+                if not isinstance(route_policy, dict):
+                    route_policy = {}
+                route_policy_version = str(route_policy.get("version") or "")
+                selected_route = str(route_policy.get("selected_route") or "")
+                checks.append(
+                    {
+                        "name": "entitlements_route_policy_version",
+                        "value": route_policy_version,
+                        "expected": "provider_route_policy_v1",
+                    }
+                )
+                checks.append({"name": "entitlements_selected_route_after_revoke", "value": selected_route, "expected": "none"})
+                if route_policy_version != "provider_route_policy_v1":
+                    errors.append(f"entitlements_route_policy_version:{route_policy_version}")
+                if selected_route != "none":
+                    errors.append(f"entitlements_selected_route_after_revoke:{selected_route}")
+
+                error_contract = ent_payload.get("error_contract") if isinstance(ent_payload, dict) else {}
+                if not isinstance(error_contract, dict):
+                    error_contract = {}
+                error_code = str(error_contract.get("error_code") or "")
+                error_status = str(error_contract.get("status") or "")
+                checks.append(
+                    {
+                        "name": "entitlements_error_contract_code_after_revoke",
+                        "value": error_code,
+                        "expected": "provider_access_not_configured",
+                    }
+                )
+                checks.append(
+                    {
+                        "name": "entitlements_error_contract_status_after_revoke",
+                        "value": error_status,
+                        "expected": "error",
+                    }
+                )
+                if error_code != "provider_access_not_configured":
+                    errors.append(f"entitlements_error_contract_code_after_revoke:{error_code}")
+                if error_status != "error":
+                    errors.append(f"entitlements_error_contract_status_after_revoke:{error_status}")
+
+                routing_policy = client.get(
+                    "/auth/providers/routing-policy",
+                    headers=_auth("user-token"),
+                    params={"user_id": "user-1", "provider": "openai"},
+                )
+                checks.append({"name": "routing_policy_status", "status": routing_policy.status_code, "expected": 200})
+                if routing_policy.status_code != 200:
+                    errors.append(f"routing_policy_status:{routing_policy.status_code}")
+                routing_payload = _json_payload(routing_policy)
+                routing_version = str(routing_payload.get("contract_version") or "")
+                checks.append(
+                    {
+                        "name": "routing_policy_contract_version",
+                        "value": routing_version,
+                        "expected": "provider_route_policy_v1",
+                    }
+                )
+                if routing_version != "provider_route_policy_v1":
+                    errors.append(f"routing_policy_contract_version:{routing_version}")
 
                 unauth = client.get("/auth/providers/sessions")
                 checks.append({"name": "unauthenticated_request_blocked", "status": unauth.status_code, "expected": 401})
@@ -279,4 +340,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

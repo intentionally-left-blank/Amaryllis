@@ -10,6 +10,7 @@ Create specialized agents from a single natural-language request:
 ## API
 
 - `GET /v1/agents/factory/contract`
+- `GET /v1/agents/factory/source-policies`
 - `POST /v1/agents/quickstart/plan`
 - `POST /v1/agents/quickstart`
 - `POST /v1/chat/completions` (intent shortcut)
@@ -55,6 +56,32 @@ For advanced control you can send structured overrides while keeping NL request 
 - `open_web`: no explicit source constraints inferred.
 - `channels`: channel constraints inferred (for example `reddit`, `twitter`, `web`).
 - `allowlist`: explicit domain list inferred (for example `openai.com`, `huggingface.co`).
+
+## Source Policy Profiles
+
+Use profile bundles to avoid manual JSON policy tuning:
+
+- endpoint: `GET /v1/agents/factory/source-policies`
+- catalog version: `source_policy_profiles_v1`
+- built-in profiles:
+  - `open_web_default`
+  - `ai_news_channels`
+  - `ai_research_allowlist`
+  - `engineering_allowlist`
+
+Apply profile through structured override:
+
+```json
+{
+  "overrides": {
+    "source_policy": {
+      "profile": "ai_research_allowlist"
+    }
+  }
+}
+```
+
+`profile` can be combined with explicit `mode/channels/domains` when deeper customization is required.
 
 ## Schedule/Timezone Inference
 

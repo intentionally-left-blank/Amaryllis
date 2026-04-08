@@ -154,6 +154,7 @@ class ModelManagerGuardrailsTests(unittest.TestCase):
             )
 
         self.assertIn("entitlement", str(ctx.exception).lower())
+        self.assertIn("error_code=provider_access_not_configured", str(ctx.exception))
         self.assertEqual(fake.calls, 0)
         self.assertEqual(len(resolver.calls), 1)
         self.assertEqual(resolver.calls[0]["provider"], "openai")

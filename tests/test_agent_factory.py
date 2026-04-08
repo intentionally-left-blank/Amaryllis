@@ -96,6 +96,29 @@ class AgentFactoryTests(unittest.TestCase):
         )
         self.assertIsNone(overridden.get("automation"))
 
+    def test_apply_overrides_accepts_source_policy_profile_bundle(self) -> None:
+        base = infer_agent_spec_from_request("create an agent for AI research digest")
+        overridden = apply_agent_spec_overrides(
+            spec=base,
+            overrides={"source_policy": {"profile": "ai_research_allowlist"}},
+        )
+        source_policy = overridden.get("source_policy", {})
+        self.assertIsInstance(source_policy, dict)
+        self.assertEqual(str(source_policy.get("mode") or ""), "allowlist")
+        self.assertEqual(str(source_policy.get("profile") or ""), "ai_research_allowlist")
+        domains = source_policy.get("domains", [])
+        self.assertIsInstance(domains, list)
+        self.assertIn("arxiv.org", domains)
+        self.assertIn("openreview.net", domains)
+
+    def test_apply_overrides_rejects_unknown_source_policy_profile_bundle(self) -> None:
+        base = infer_agent_spec_from_request("create an agent for AI research digest")
+        with self.assertRaises(ValueError):
+            apply_agent_spec_overrides(
+                spec=base,
+                overrides={"source_policy": {"profile": "unknown_bundle_profile"}},
+            )
+
     def test_inference_reason_marks_mixed_intent_conflict(self) -> None:
         spec = infer_agent_spec_from_request("создай агента для AI новостей и python разработки из reddit")
         reason = spec.get("inference_reason", {})

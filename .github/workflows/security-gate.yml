@@ -61,6 +61,7 @@ jobs:
             tests.test_security_http_authz \
             tests.test_autonomy_circuit_breaker_api \
             tests.test_provider_auth_api \
+            tests.test_entitlements_route_policy \
             tests.test_provider_session_policy_check \
             tests.test_tool_enforcement_modes \
             tests.test_tool_call_parsing_security \

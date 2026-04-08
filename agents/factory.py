@@ -7,7 +7,9 @@ from kernel.agent_factory import (
     build_quickstart_agent_created_content,
     build_quickstart_first_result_snapshot,
     infer_agent_spec_from_request,
+    list_source_policy_profiles,
     looks_like_agent_quickstart_request,
+    source_policy_profile_catalog,
 )
 
 __all__ = [
@@ -17,5 +19,7 @@ __all__ = [
     "build_quickstart_agent_created_content",
     "build_quickstart_first_result_snapshot",
     "infer_agent_spec_from_request",
+    "list_source_policy_profiles",
     "looks_like_agent_quickstart_request",
+    "source_policy_profile_catalog",
 ]

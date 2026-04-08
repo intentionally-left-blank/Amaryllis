@@ -14,10 +14,13 @@ _SUPPORTED_CADENCE_PROFILES: tuple[str, ...] = (
     "weekly",
     "watch_fs",
 )
+MISSION_TEMPLATE_CATALOG_VERSION = "mission_template_catalog_v1"
 
 _MISSION_TEMPLATE_REGISTRY: dict[str, dict[str, Any]] = {
     "code_health": {
         "id": "code_health",
+        "catalog_version": MISSION_TEMPLATE_CATALOG_VERSION,
+        "lane": "engineering",
         "name": "Code Health Sweep",
         "description": "Run lint/test/dependency checks and return remediation backlog.",
         "default_message": (
@@ -33,6 +36,8 @@ _MISSION_TEMPLATE_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "security_audit": {
         "id": "security_audit",
+        "catalog_version": MISSION_TEMPLATE_CATALOG_VERSION,
+        "lane": "security",
         "name": "Security Audit",
         "description": "Review dependency, secrets, and policy posture with explicit risk findings.",
         "default_message": (
@@ -48,6 +53,8 @@ _MISSION_TEMPLATE_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "release_guard": {
         "id": "release_guard",
+        "catalog_version": MISSION_TEMPLATE_CATALOG_VERSION,
+        "lane": "release",
         "name": "Release Guard",
         "description": "Validate release readiness gates and summarize go/no-go blockers.",
         "default_message": (
@@ -63,6 +70,8 @@ _MISSION_TEMPLATE_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "runtime_watchdog": {
         "id": "runtime_watchdog",
+        "catalog_version": MISSION_TEMPLATE_CATALOG_VERSION,
+        "lane": "monitoring",
         "name": "Runtime Watchdog",
         "description": "Continuously watch runtime health and auto-surface incident hints.",
         "default_message": (
@@ -78,6 +87,8 @@ _MISSION_TEMPLATE_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "ai_news_daily": {
         "id": "ai_news_daily",
+        "catalog_version": MISSION_TEMPLATE_CATALOG_VERSION,
+        "lane": "news",
         "name": "AI News Daily Digest",
         "description": "Collect, deduplicate, and summarize daily AI news with source-grounded citations.",
         "default_message": (
@@ -98,11 +109,73 @@ _MISSION_TEMPLATE_REGISTRY: dict[str, dict[str, Any]] = {
             "minute": 0,
         },
     },
+    "ai_research_brief_daily": {
+        "id": "ai_research_brief_daily",
+        "catalog_version": MISSION_TEMPLATE_CATALOG_VERSION,
+        "lane": "research",
+        "name": "AI Research Brief (Daily)",
+        "description": "Track fresh AI research outputs and summarize practical implications with citations.",
+        "default_message": (
+            "Run daily AI research brief mission: collect important new papers, evaluations, and technical reports; "
+            "cluster by topic, summarize key contributions and limitations, and include direct source links plus "
+            "recommended follow-up reading."
+        ),
+        "cadence_profile": "daily",
+        "start_immediately": False,
+        "max_attempts": 3,
+        "budget": {"max_steps": 24, "max_tool_calls": 42, "timeout_sec": 1200},
+        "mission_policy_profile": "balanced",
+        "risk_tags": ["research", "analysis"],
+        "schedule_type": "weekly",
+        "schedule": {
+            "byday": ["MO", "TU", "WE", "TH", "FR", "SA", "SU"],
+            "hour": 10,
+            "minute": 0,
+        },
+    },
+    "ai_monitoring_watch_hourly": {
+        "id": "ai_monitoring_watch_hourly",
+        "catalog_version": MISSION_TEMPLATE_CATALOG_VERSION,
+        "lane": "monitoring",
+        "name": "AI Monitoring Watch (Hourly)",
+        "description": "Monitor selected channels for high-signal changes and emit alert-style updates.",
+        "default_message": (
+            "Run hourly AI monitoring mission: detect product launches, policy changes, outages, and major updates; "
+            "prioritize high-signal events, provide concise alerts with links, and suggest immediate next actions."
+        ),
+        "cadence_profile": "hourly",
+        "start_immediately": True,
+        "max_attempts": 2,
+        "budget": {"max_steps": 16, "max_tool_calls": 24, "timeout_sec": 600},
+        "mission_policy_profile": "watchdog",
+        "risk_tags": ["monitoring", "ops"],
+        "schedule_type": "hourly",
+        "schedule": {
+            "interval_hours": 1,
+            "minute": 5,
+        },
+    },
 }
 
 
 def list_mission_templates() -> list[dict[str, Any]]:
     return [deepcopy(_MISSION_TEMPLATE_REGISTRY[key]) for key in sorted(_MISSION_TEMPLATE_REGISTRY)]
+
+
+def mission_template_catalog() -> dict[str, Any]:
+    templates = list_mission_templates()
+    lanes = sorted(
+        {
+            str(item.get("lane") or "").strip().lower()
+            for item in templates
+            if isinstance(item, dict) and str(item.get("lane") or "").strip()
+        }
+    )
+    return {
+        "version": MISSION_TEMPLATE_CATALOG_VERSION,
+        "template_count": len(templates),
+        "lanes": lanes,
+    }
 
 
 def apply_mission_template(
@@ -343,6 +416,8 @@ def _template_view(template: dict[str, Any] | None) -> dict[str, Any] | None:
         return None
     return {
         "id": str(template.get("id") or ""),
+        "catalog_version": str(template.get("catalog_version") or ""),
+        "lane": str(template.get("lane") or ""),
         "name": str(template.get("name") or ""),
         "description": str(template.get("description") or ""),
         "risk_tags": list(template.get("risk_tags") or []),

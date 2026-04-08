@@ -7,6 +7,7 @@ from automation.mission_planner import (
     apply_mission_template,
     build_mission_plan,
     list_mission_templates,
+    mission_template_catalog,
     resolve_mission_schedule,
 )
 
@@ -89,13 +90,29 @@ class MissionPlannerTests(unittest.TestCase):
         self.assertEqual(str(apply_payload.get("schedule_type")), "weekly")
         self.assertEqual(bool(apply_payload.get("start_immediately")), True)
 
-    def test_template_catalog_contains_phase3_defaults(self) -> None:
+    def test_template_catalog_contains_phase9_defaults(self) -> None:
         templates = list_mission_templates()
         template_ids = {str(item.get("id")) for item in templates}
         self.assertEqual(
             template_ids,
-            {"code_health", "security_audit", "release_guard", "runtime_watchdog", "ai_news_daily"},
+            {
+                "code_health",
+                "security_audit",
+                "release_guard",
+                "runtime_watchdog",
+                "ai_news_daily",
+                "ai_research_brief_daily",
+                "ai_monitoring_watch_hourly",
+            },
         )
+        catalog = mission_template_catalog()
+        self.assertEqual(str(catalog.get("version")), "mission_template_catalog_v1")
+        self.assertGreaterEqual(int(catalog.get("template_count", 0)), len(template_ids))
+        lanes = catalog.get("lanes", [])
+        self.assertIsInstance(lanes, list)
+        self.assertIn("news", lanes)
+        self.assertIn("research", lanes)
+        self.assertIn("monitoring", lanes)
 
     def test_apply_template_uses_defaults_when_message_missing(self) -> None:
         resolved = apply_mission_template(
@@ -162,6 +179,51 @@ class MissionPlannerTests(unittest.TestCase):
                 max_attempts=None,
                 budget=None,
             )
+
+    def test_apply_ai_research_brief_daily_template(self) -> None:
+        resolved = apply_mission_template(
+            template_id="ai_research_brief_daily",
+            message=None,
+            cadence_profile=None,
+            start_immediately=None,
+            schedule_type=None,
+            schedule=None,
+            interval_sec=None,
+            max_attempts=None,
+            budget=None,
+        )
+        self.assertEqual(str(resolved.get("cadence_profile")), "daily")
+        self.assertEqual(str(resolved.get("schedule_type")), "weekly")
+        schedule = resolved.get("schedule")
+        self.assertIsInstance(schedule, dict)
+        assert isinstance(schedule, dict)
+        self.assertEqual(int(schedule.get("hour", -1)), 10)
+        self.assertEqual(int(schedule.get("minute", -1)), 0)
+        template = resolved.get("template", {})
+        self.assertEqual(str(template.get("lane")), "research")
+
+    def test_apply_ai_monitoring_watch_hourly_template(self) -> None:
+        resolved = apply_mission_template(
+            template_id="ai_monitoring_watch_hourly",
+            message=None,
+            cadence_profile=None,
+            start_immediately=None,
+            schedule_type=None,
+            schedule=None,
+            interval_sec=None,
+            max_attempts=None,
+            budget=None,
+        )
+        self.assertEqual(str(resolved.get("cadence_profile")), "hourly")
+        self.assertEqual(str(resolved.get("schedule_type")), "hourly")
+        schedule = resolved.get("schedule")
+        self.assertIsInstance(schedule, dict)
+        assert isinstance(schedule, dict)
+        self.assertEqual(int(schedule.get("interval_hours", -1)), 1)
+        self.assertEqual(int(schedule.get("minute", -1)), 5)
+        self.assertEqual(bool(resolved.get("start_immediately")), True)
+        template = resolved.get("template", {})
+        self.assertEqual(str(template.get("lane")), "monitoring")
 
 
 if __name__ == "__main__":

@@ -127,14 +127,28 @@ class AutomationMissionPlanAPITests(unittest.TestCase):
         )
         self.assertEqual(listed.status_code, 200)
         payload = listed.json()
-        self.assertGreaterEqual(int(payload.get("count", 0)), 4)
+        self.assertGreaterEqual(int(payload.get("count", 0)), 7)
+        catalog = payload.get("catalog", {})
+        self.assertIsInstance(catalog, dict)
+        self.assertEqual(str(catalog.get("version") or ""), "mission_template_catalog_v1")
+        lanes = catalog.get("lanes", [])
+        self.assertIsInstance(lanes, list)
+        self.assertIn("news", lanes)
+        self.assertIn("research", lanes)
+        self.assertIn("monitoring", lanes)
         items = payload.get("items", [])
         self.assertIsInstance(items, list)
         template_ids = {str(item.get("id")) for item in items if isinstance(item, dict)}
         self.assertTrue(
-            {"code_health", "security_audit", "release_guard", "runtime_watchdog", "ai_news_daily"}.issubset(
-                template_ids
-            )
+            {
+                "code_health",
+                "security_audit",
+                "release_guard",
+                "runtime_watchdog",
+                "ai_news_daily",
+                "ai_research_brief_daily",
+                "ai_monitoring_watch_hourly",
+            }.issubset(template_ids)
         )
         release_guard = next(
             (item for item in items if isinstance(item, dict) and str(item.get("id")) == "release_guard"),
@@ -146,6 +160,16 @@ class AutomationMissionPlanAPITests(unittest.TestCase):
             {},
         )
         self.assertEqual(str(ai_news.get("cadence_profile")), "daily")
+        ai_research = next(
+            (item for item in items if isinstance(item, dict) and str(item.get("id")) == "ai_research_brief_daily"),
+            {},
+        )
+        self.assertEqual(str(ai_research.get("lane")), "research")
+        ai_monitoring = next(
+            (item for item in items if isinstance(item, dict) and str(item.get("id")) == "ai_monitoring_watch_hourly"),
+            {},
+        )
+        self.assertEqual(str(ai_monitoring.get("lane")), "monitoring")
 
     def test_mission_policy_catalog_endpoint(self) -> None:
         listed = self.client.get(
@@ -261,6 +285,50 @@ class AutomationMissionPlanAPITests(unittest.TestCase):
         self.assertIn("daily ai news mission", message)
         template = payload.get("template", {})
         self.assertEqual(str(template.get("id")), "ai_news_daily")
+
+    def test_apply_mission_template_endpoint_creates_automation_in_one_step(self) -> None:
+        created = self.client.post(
+            "/agents/create",
+            headers=self._auth("user-token"),
+            json={
+                "name": "Template Apply Agent",
+                "system_prompt": "template apply",
+                "user_id": "user-1",
+                "tools": ["web_search"],
+            },
+        )
+        self.assertEqual(created.status_code, 200)
+        agent_id = str(created.json().get("id"))
+
+        applied = self.client.post(
+            "/automations/mission/template-apply",
+            headers=self._auth("user-token"),
+            json={
+                "agent_id": agent_id,
+                "user_id": "user-1",
+                "template_id": "ai_research_brief_daily",
+                "timezone": "UTC",
+                "message": "Run daily AI research brief focused on model evals and long-context benchmarks.",
+            },
+        )
+        self.assertEqual(applied.status_code, 200)
+        payload = applied.json()
+        automation = payload.get("automation", {})
+        self.assertIsInstance(automation, dict)
+        self.assertTrue(str(automation.get("id") or "").strip())
+        self.assertEqual(str(automation.get("schedule_type") or ""), "weekly")
+        schedule = automation.get("schedule", {})
+        self.assertIsInstance(schedule, dict)
+        self.assertEqual(int(schedule.get("hour", -1)), 10)
+        template = payload.get("template", {})
+        self.assertEqual(str(template.get("id") or ""), "ai_research_brief_daily")
+        self.assertEqual(str(template.get("lane") or ""), "research")
+        mission_plan = payload.get("mission_plan", {})
+        self.assertEqual(str(mission_plan.get("agent_id") or ""), agent_id)
+        self.assertEqual(str(mission_plan.get("schedule_type") or ""), "weekly")
+        self.assertIn("next_run_at", mission_plan)
+        simulation = payload.get("simulation", {})
+        self.assertEqual(str(simulation.get("agent_id") or ""), agent_id)
 
 
 if __name__ == "__main__":

@@ -96,6 +96,13 @@ curl -s http://127.0.0.1:8000/v1/agents/factory/contract \
   -H "Authorization: Bearer dev-token"
 ```
 
+Inspect source-policy profile bundles:
+
+```bash
+curl -s http://127.0.0.1:8000/v1/agents/factory/source-policies \
+  -H "Authorization: Bearer dev-token"
+```
+
 Custom web scope (domain allowlist) is inferred from your natural-language request:
 
 ```bash
@@ -132,6 +139,23 @@ curl -X POST http://127.0.0.1:8000/v1/agents/quickstart/plan \
         "enabled": true,
         "schedule_type": "hourly",
         "schedule": {"interval_hours": 6, "minute": 10}
+      }
+    }
+  }'
+```
+
+Profile-based source-policy override (no manual domain JSON):
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/agents/quickstart/plan \
+  -H "Authorization: Bearer dev-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user-001",
+    "request": "create an agent for AI research updates",
+    "overrides": {
+      "source_policy": {
+        "profile": "ai_research_allowlist"
       }
     }
   }'

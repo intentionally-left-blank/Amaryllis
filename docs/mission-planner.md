@@ -10,7 +10,18 @@ It combines:
 - cadence normalization (`workday/daily/hourly/weekly/watch_fs`),
 - recommendation gate for immediate start based on mission risk.
 
-`GET /automations/mission/templates` returns preset mission templates (`code_health`, `security_audit`, `release_guard`, `runtime_watchdog`, `ai_news_daily`) for low-friction planning.
+`GET /automations/mission/templates` returns versioned preset mission templates for low-friction planning:
+
+- `code_health`, `security_audit`, `release_guard`, `runtime_watchdog`
+- `ai_news_daily` (`news`)
+- `ai_research_brief_daily` (`research`)
+- `ai_monitoring_watch_hourly` (`monitoring`)
+
+`POST /automations/mission/template-apply` performs one-step flow:
+
+- apply template defaults + user overrides,
+- run risk simulation,
+- create automation immediately.
 
 `GET /automations/mission/policies` returns per-mission SLO policy profiles (`balanced`, `strict`, `watchdog`, `release`).
 
@@ -38,7 +49,7 @@ curl -X POST http://localhost:8000/automations/mission/plan \
 - `timezone` (default `UTC`): planner timezone.
 - `cadence_profile` (optional): one of `hourly`, `daily`, `workday`, `weekly`, `watch_fs`.
 - `start_immediately` (optional): requested immediate scheduling.
-- `template_id` (optional): one of `code_health`, `security_audit`, `release_guard`, `runtime_watchdog`, `ai_news_daily`.
+- `template_id` (optional): one of `code_health`, `security_audit`, `release_guard`, `runtime_watchdog`, `ai_news_daily`, `ai_research_brief_daily`, `ai_monitoring_watch_hourly`.
 - `schedule_type`, `schedule`, `interval_sec` (optional): explicit schedule override.
 - `max_attempts`, `budget` (optional): passed to dry-run simulation only.
 - `mission_policy_profile` (optional): one of `balanced`, `strict`, `watchdog`, `release`.
@@ -56,6 +67,14 @@ curl -X POST http://localhost:8000/automations/mission/plan \
 - `mission_policy`: resolved mission SLO policy used for scheduler enforcement.
 - `apply_hint`: `{ endpoint: "/automations/create", payload: ... }`.
 
+One-step apply response (`POST /automations/mission/template-apply`) includes:
+
+- `automation` (created scheduler record)
+- `mission_plan`
+- `simulation`
+- `template`
+- `mission_policy`
+
 ## Behavior
 
 - High/critical/unknown mission risk forces `effective_start_immediately=false`.
@@ -70,9 +89,18 @@ curl -X POST http://localhost:8000/automations/mission/plan \
 curl http://localhost:8000/automations/mission/templates
 ```
 
-Each item includes:
+Response includes:
+
+- `catalog.version`
+- `catalog.template_count`
+- `catalog.lanes`
+- `items[]`
+
+Each template item includes:
 
 - `id`
+- `catalog_version`
+- `lane`
 - `name`
 - `description`
 - `default_message`
@@ -102,3 +130,8 @@ Each item includes:
 - `tests/test_mission_planner.py`
 - `tests/test_automation_mission_plan_api.py`
 - `tests/test_automation_scheduler.py`
+- `tests/test_agent_template_contract_gate.py`
+
+## Release Gate
+
+- `python scripts/release/agent_template_contract_gate.py --output artifacts/agent-template-contract-gate-report.json`

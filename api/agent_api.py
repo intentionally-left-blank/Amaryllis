@@ -15,6 +15,7 @@ from kernel.agent_factory import (
     build_inference_reason_view as factory_build_inference_reason_view,
     build_quickstart_first_result_snapshot as factory_build_quickstart_first_result_snapshot,
     infer_agent_spec_from_request as factory_infer_agent_spec_from_request,
+    source_policy_profile_catalog as factory_source_policy_profile_catalog,
 )
 from runtime.auth import assert_owner, auth_context_from_request, resolve_user_id
 from runtime.errors import AmaryllisError, NotFoundError, ProviderError, ValidationError
@@ -101,6 +102,7 @@ class CreateAgentRequest(BaseModel):
 
 
 class QuickstartSourcePolicyOverride(BaseModel):
+    profile: str | None = Field(default=None, min_length=1, max_length=80)
     mode: Literal["open_web", "channels", "allowlist"] | None = None
     channels: list[str] | None = None
     domains: list[str] | None = None
@@ -304,6 +306,7 @@ def create_agent(payload: CreateAgentRequest, request: Request) -> dict[str, Any
 
 @router.get("/agents/factory/contract")
 def agent_factory_contract(request: Request) -> dict[str, Any]:
+    source_policy_catalog = factory_source_policy_profile_catalog()
     return {
         "contract_version": "agent_factory_v1",
         "contract_path": "contracts/agent_factory_v1.json",
@@ -311,6 +314,7 @@ def agent_factory_contract(request: Request) -> dict[str, Any]:
             {"method": "POST", "path": "/agents/quickstart/plan"},
             {"method": "POST", "path": "/agents/quickstart"},
             {"method": "POST", "path": "/chat/completions", "shortcut": "chat_intent_quickstart"},
+            {"method": "GET", "path": "/agents/factory/source-policies"},
         ],
         "capabilities": {
             "input": "natural_language_request",
@@ -320,6 +324,9 @@ def agent_factory_contract(request: Request) -> dict[str, Any]:
             "source_policy": {
                 "modes": ["open_web", "channels", "allowlist"],
                 "supports_domain_allowlist": True,
+                "profile_catalog_version": str(source_policy_catalog.get("version") or ""),
+                "profile_bundles_count": int(source_policy_catalog.get("count") or 0),
+                "profiles_endpoint": "/agents/factory/source-policies",
             },
             "automation": {
                 "schedules": ["hourly", "weekly"],
@@ -328,6 +335,13 @@ def agent_factory_contract(request: Request) -> dict[str, Any]:
         },
         "request_id": _request_id(request),
     }
+
+
+@router.get("/agents/factory/source-policies")
+def agent_factory_source_policies(request: Request) -> dict[str, Any]:
+    catalog = dict(factory_source_policy_profile_catalog())
+    catalog["request_id"] = _request_id(request)
+    return catalog
 
 
 @router.post("/agents/quickstart")
@@ -343,12 +357,15 @@ def quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> dict[
         idempotency_key = _normalize_quickstart_idempotency_key(request.headers.get("X-Idempotency-Key"))
     idempotency_payload: dict[str, Any] | None = None
 
-    spec = factory_infer_agent_spec_from_request(payload.request)
-    spec = factory_apply_agent_spec_overrides(
-        spec=spec,
-        overrides=payload.overrides.model_dump(exclude_none=True) if payload.overrides is not None else None,
-    )
-    spec = _ensure_inference_reason_view(spec)
+    try:
+        spec = factory_infer_agent_spec_from_request(payload.request)
+        spec = factory_apply_agent_spec_overrides(
+            spec=spec,
+            overrides=payload.overrides.model_dump(exclude_none=True) if payload.overrides is not None else None,
+        )
+        spec = _ensure_inference_reason_view(spec)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
     automation: dict[str, Any] | None = None
     automation_error: str | None = None
     if idempotency_key:
@@ -565,12 +582,15 @@ def quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> dict[
 def plan_quickstart_agent(payload: QuickstartAgentRequest, request: Request) -> dict[str, Any]:
     auth = auth_context_from_request(request)
     effective_user_id = resolve_user_id(request_user_id=payload.user_id, auth=auth)
-    spec = factory_infer_agent_spec_from_request(payload.request)
-    spec = factory_apply_agent_spec_overrides(
-        spec=spec,
-        overrides=payload.overrides.model_dump(exclude_none=True) if payload.overrides is not None else None,
-    )
-    spec = _ensure_inference_reason_view(spec)
+    try:
+        spec = factory_infer_agent_spec_from_request(payload.request)
+        spec = factory_apply_agent_spec_overrides(
+            spec=spec,
+            overrides=payload.overrides.model_dump(exclude_none=True) if payload.overrides is not None else None,
+        )
+        spec = _ensure_inference_reason_view(spec)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
     inference_reason = spec.get("inference_reason") if isinstance(spec.get("inference_reason"), dict) else {}
     inference_reason_view = (
         spec.get("inference_reason_view") if isinstance(spec.get("inference_reason_view"), dict) else {}

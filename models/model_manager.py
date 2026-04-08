@@ -3510,20 +3510,35 @@ class ModelManager:
         if not isinstance(payload, dict):
             raise RuntimeError("Provider entitlement resolver returned invalid payload.")
 
+        route_policy = payload.get("route_policy")
+        if not isinstance(route_policy, dict):
+            route_policy = {}
+        error_contract = payload.get("error_contract")
+        if not isinstance(error_contract, dict):
+            error_contract = {}
+
         if not bool(payload.get("available", False)):
+            error_code = str(error_contract.get("error_code") or "provider_access_not_configured").strip()
+            selected_route = str(route_policy.get("selected_route") or "none").strip().lower() or "none"
+            available_routes = list(route_policy.get("available_routes") or [])
+            contract_message = str(error_contract.get("message") or "").strip()
+            reason_message = contract_message or "Create provider session or configure server provider key."
             raise RuntimeError(
                 (
                     f"Provider entitlement denied for '{provider_name}' and user '{normalized_user}'. "
-                    "Create provider session or configure server provider key."
+                    f"error_code={error_code} selected_route={selected_route} "
+                    f"available_routes={available_routes}. {reason_message}"
                 )
             )
 
         feature_flags = payload.get("feature_flags")
         if isinstance(feature_flags, dict) and feature_flags.get("chat") is False:
+            selected_route = str(route_policy.get("selected_route") or "none").strip().lower() or "none"
             raise RuntimeError(
                 (
                     f"Provider entitlement denied for '{provider_name}' and user '{normalized_user}': "
-                    "chat feature is disabled."
+                    f"chat feature is disabled. error_code=provider_chat_disabled "
+                    f"selected_route={selected_route}"
                 )
             )
 

@@ -9,6 +9,12 @@ def list_mission_templates() -> list[dict[str, Any]]:
     return _list_mission_templates()
 
 
+def mission_template_catalog() -> dict[str, Any]:
+    from automation.mission_planner import mission_template_catalog as _mission_template_catalog
+
+    return _mission_template_catalog()
+
+
 def list_mission_policy_profiles() -> list[dict[str, Any]]:
     from automation.mission_policy import list_mission_policy_profiles as _list_mission_policy_profiles
 

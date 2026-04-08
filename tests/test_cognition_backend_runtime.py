@@ -468,6 +468,39 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         }
         self.assertIn(("POST", "/agents/quickstart/plan"), signature)
         self.assertIn(("POST", "/agents/quickstart"), signature)
+        self.assertIn(("GET", "/agents/factory/source-policies"), signature)
+        source_policy_caps = payload.get("capabilities", {}).get("source_policy", {})
+        self.assertIsInstance(source_policy_caps, dict)
+        self.assertEqual(
+            str(source_policy_caps.get("profiles_endpoint") or ""),
+            "/agents/factory/source-policies",
+        )
+        self.assertEqual(
+            str(source_policy_caps.get("profile_catalog_version") or ""),
+            "source_policy_profiles_v1",
+        )
+        self.assertGreaterEqual(int(source_policy_caps.get("profile_bundles_count") or 0), 4)
+
+    def test_agents_factory_source_policy_catalog_endpoint_is_available(self) -> None:
+        response = self.client.get(
+            "/v1/agents/factory/source-policies",
+            headers=self._auth("user-token"),
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(str(payload.get("version") or ""), "source_policy_profiles_v1")
+        self.assertGreaterEqual(int(payload.get("count") or 0), 4)
+        items = payload.get("items", [])
+        self.assertIsInstance(items, list)
+        profile_ids = {
+            str(item.get("id") or "")
+            for item in items
+            if isinstance(item, dict)
+        }
+        self.assertIn("open_web_default", profile_ids)
+        self.assertIn("ai_news_channels", profile_ids)
+        self.assertIn("ai_research_allowlist", profile_ids)
+        self.assertIn("engineering_allowlist", profile_ids)
 
     def test_quickstart_plan_infers_domain_allowlist_source_policy(self) -> None:
         planned = self.client.post(
@@ -662,6 +695,51 @@ class CognitionBackendRuntimeTests(unittest.TestCase):
         inference_reason = quickstart_plan.get("inference_reason", {})
         self.assertIsInstance(inference_reason, dict)
         self.assertIn("kind", inference_reason.get("overrides_applied", []))
+
+    def test_quickstart_plan_accepts_source_policy_profile_override(self) -> None:
+        planned = self.client.post(
+            "/v1/agents/quickstart/plan",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "request": "create an agent for AI research digest",
+                "overrides": {
+                    "source_policy": {
+                        "profile": "ai_research_allowlist",
+                    }
+                },
+            },
+        )
+        self.assertEqual(planned.status_code, 200)
+        payload = planned.json()
+        quickstart_plan = payload.get("quickstart_plan", {})
+        source_policy = quickstart_plan.get("source_policy", {})
+        self.assertIsInstance(source_policy, dict)
+        self.assertEqual(str(source_policy.get("mode") or ""), "allowlist")
+        self.assertEqual(str(source_policy.get("profile") or ""), "ai_research_allowlist")
+        domains = source_policy.get("domains", [])
+        self.assertIsInstance(domains, list)
+        self.assertIn("arxiv.org", domains)
+        self.assertIn("openreview.net", domains)
+
+    def test_quickstart_plan_rejects_unknown_source_policy_profile_override(self) -> None:
+        planned = self.client.post(
+            "/v1/agents/quickstart/plan",
+            headers=self._auth("user-token"),
+            json={
+                "user_id": "user-1",
+                "request": "create an agent for AI research digest",
+                "overrides": {
+                    "source_policy": {
+                        "profile": "unknown_profile_bundle",
+                    }
+                },
+            },
+        )
+        self.assertEqual(planned.status_code, 400)
+        error = planned.json().get("error", {})
+        self.assertEqual(str(error.get("type") or ""), "validation_error")
+        self.assertIn("source policy profile", str(error.get("message") or ""))
 
     def test_agents_quickstart_idempotency_key_rejects_override_change(self) -> None:
         first = self.client.post(

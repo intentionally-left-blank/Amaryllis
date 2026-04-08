@@ -38,16 +38,16 @@ Convert Amaryllis from a technically mature platform into a category-defining pr
 
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
-| P9-B01 | todo | Add template catalog for daily intelligence missions | versioned template registry (`news/research/monitoring`) | User can choose and customize templates in one step, then run/schedule |
-| P9-B02 | todo | Add source-policy profile bundles | reusable `open_web/channels/allowlist` presets + domain packs | Users can safely scope internet access by persona/use-case without manual JSON editing |
-| P9-B03 | todo | Add template quality gate | release/nightly template contract + replay snapshots | CI blocks regressions in template schema and expected output fields |
+| P9-B01 | done | Add template catalog for daily intelligence missions | versioned template registry (`news/research/monitoring`) | User can choose and customize templates in one step, then run/schedule |
+| P9-B02 | done | Add source-policy profile bundles | reusable `open_web/channels/allowlist` presets + domain packs | Users can safely scope internet access by persona/use-case without manual JSON editing |
+| P9-B03 | done | Add template quality gate | release/nightly template contract + replay snapshots | CI blocks regressions in template schema and expected output fields |
 
 ### Epic C - Account Access and Entitlement UX
 
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
-| P9-C01 | todo | Productize provider-session onboarding UX | provider session create/list/revoke guide + API UX improvements | User can connect provider access without token leaks and with clear entitlement feedback |
-| P9-C02 | todo | Add fallback route policy (session vs BYOK) | deterministic routing policy + explicit error contracts | Runtime picks safe fallback path and explains missing entitlements clearly |
+| P9-C01 | done | Productize provider-session onboarding UX | provider session create/list/revoke guide + API UX improvements | User can connect provider access without token leaks and with clear entitlement feedback |
+| P9-C02 | done | Add fallback route policy (session vs BYOK) | deterministic routing policy + explicit error contracts | Runtime picks safe fallback path and explains missing entitlements clearly |
 | P9-C03 | todo | Add entitlement diagnostics card | machine-readable diagnostics for model access failures | Support/debug flow resolves account and quota issues without digging through logs |
 
 ### Epic D - Competitive Benchmark and Scoreboard
@@ -74,8 +74,8 @@ Convert Amaryllis from a technically mature platform into a category-defining pr
 |---|---|---|
 | P9-A01 | done | one-phrase quickstart contract polish + chat/apply parity |
 | P9-A02 | done | first-result/next-run snapshot contract |
-| P9-B01 | todo | minimal template catalog (`ai_news_daily` + 2 adjacent templates) |
-| P9-C01 | todo | provider-session onboarding UX hardening |
+| P9-B01 | done | minimal template catalog (`ai_news_daily` + 2 adjacent templates) |
+| P9-C01 | done | provider-session onboarding UX hardening |
 
 Sprint goal:
 - new user can ask "create this agent" and reliably get a scheduled, observable, recoverable first outcome.
@@ -84,9 +84,9 @@ Sprint goal:
 
 | ID | Status | Scope |
 |---|---|---|
-| P9-B02 | todo | source-policy profile bundles + defaults |
-| P9-B03 | todo | template contract/replay quality gate |
-| P9-C02 | todo | entitlement fallback route policy |
+| P9-B02 | done | source-policy profile bundles + defaults |
+| P9-B03 | done | template contract/replay quality gate |
+| P9-C02 | done | entitlement fallback route policy |
 | P9-D01 | todo | benchmark scenario set v1 |
 
 Sprint goal:
@@ -117,5 +117,5 @@ Sprint goal:
 ## Next Checkpoint
 
 - Publish execution plan with work packages and gate matrix: `docs/amaryllis-phase9-execution-plan.md`.
-- Continue Sprint P9-S0 with `P9-B01`, `P9-C01` after landing `P9-A01` and `P9-A02`.
+- Continue with `P9-C03` and `P9-D01` as next high-priority block after `P9-B03`/`P9-C02`.
 - Promote product KPI snapshot to release KPI pack once first trend baseline is collected.

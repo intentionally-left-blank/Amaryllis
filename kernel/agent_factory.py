@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
 import re
 from typing import Any
@@ -333,6 +334,58 @@ _SOURCE_DOMAIN_PREFIXES: tuple[tuple[str, str], ...] = (
 )
 _SUPPORTED_AGENT_KINDS: tuple[str, ...] = ("news", "coding", "general")
 _SUPPORTED_SOURCE_POLICY_MODES: tuple[str, ...] = ("open_web", "channels", "allowlist")
+SOURCE_POLICY_PROFILE_CATALOG_VERSION = "source_policy_profiles_v1"
+_SOURCE_POLICY_PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
+    "open_web_default": {
+        "id": "open_web_default",
+        "name": "Open Web (Default)",
+        "description": "No channel/domain restrictions. Best for broad exploration.",
+        "mode": "open_web",
+        "channels": [],
+        "domains": [],
+        "recommended_for": ["general", "news"],
+    },
+    "ai_news_channels": {
+        "id": "ai_news_channels",
+        "name": "AI News Channels",
+        "description": "Use high-signal channels for AI news tracking without strict domain allowlist.",
+        "mode": "channels",
+        "channels": ["web", "reddit", "twitter", "hackernews"],
+        "domains": [],
+        "recommended_for": ["news"],
+    },
+    "ai_research_allowlist": {
+        "id": "ai_research_allowlist",
+        "name": "AI Research Allowlist",
+        "description": "Restrict crawling to trusted AI research domains.",
+        "mode": "allowlist",
+        "channels": ["web", "arxiv", "github"],
+        "domains": [
+            "arxiv.org",
+            "openreview.net",
+            "huggingface.co",
+            "paperswithcode.com",
+            "github.com",
+        ],
+        "recommended_for": ["news", "general"],
+    },
+    "engineering_allowlist": {
+        "id": "engineering_allowlist",
+        "name": "Engineering Docs Allowlist",
+        "description": "Constrain sources to developer docs and package ecosystems.",
+        "mode": "allowlist",
+        "channels": ["web", "github"],
+        "domains": [
+            "github.com",
+            "docs.python.org",
+            "developer.mozilla.org",
+            "pypi.org",
+            "npmjs.com",
+            "crates.io",
+        ],
+        "recommended_for": ["coding", "general"],
+    },
+}
 _NEWS_KIND_KEYWORDS: tuple[str, ...] = (
     "news",
     "новост",
@@ -400,6 +453,19 @@ _CODING_DOMAIN_SUFFIXES: tuple[str, ...] = (
     "developer.mozilla.org",
     "docs.python.org",
 )
+
+
+def list_source_policy_profiles() -> list[dict[str, Any]]:
+    return [deepcopy(_SOURCE_POLICY_PROFILE_REGISTRY[key]) for key in sorted(_SOURCE_POLICY_PROFILE_REGISTRY)]
+
+
+def source_policy_profile_catalog() -> dict[str, Any]:
+    profiles = list_source_policy_profiles()
+    return {
+        "version": SOURCE_POLICY_PROFILE_CATALOG_VERSION,
+        "count": len(profiles),
+        "items": profiles,
+    }
 
 
 def looks_like_agent_quickstart_request(text: str) -> bool:
@@ -993,6 +1059,45 @@ def _sanitize_tools(values: list[Any] | None) -> list[str]:
     return tools
 
 
+def _normalize_source_policy_profile_id(raw: Any) -> str:
+    token = str(raw or "").strip().lower().replace("-", "_")
+    if not token:
+        return ""
+    if re.fullmatch(r"[a-z0-9_]{3,64}", token) is None:
+        return ""
+    return token
+
+
+def _resolve_source_policy_profile(profile_id: str | None) -> dict[str, Any] | None:
+    normalized = _normalize_source_policy_profile_id(profile_id)
+    if not normalized:
+        return None
+    profile = _SOURCE_POLICY_PROFILE_REGISTRY.get(normalized)
+    if profile is None:
+        raise ValueError(f"unsupported source policy profile: {profile_id}")
+    return deepcopy(profile)
+
+
+def _match_source_policy_profile(*, mode: str, channels: list[str], domains: list[str]) -> str | None:
+    normalized_mode = str(mode or "").strip().lower()
+    normalized_channels = _sanitize_source_channels(channels)
+    normalized_domains = _sanitize_domains(domains)
+    for profile_id in sorted(_SOURCE_POLICY_PROFILE_REGISTRY):
+        profile = _SOURCE_POLICY_PROFILE_REGISTRY.get(profile_id)
+        if not isinstance(profile, dict):
+            continue
+        profile_mode = str(profile.get("mode") or "").strip().lower()
+        profile_channels = _sanitize_source_channels(profile.get("channels"))
+        profile_domains = _sanitize_domains(profile.get("domains"))
+        if (
+            normalized_mode == profile_mode
+            and normalized_channels == profile_channels
+            and normalized_domains == profile_domains
+        ):
+            return profile_id
+    return None
+
+
 def _default_tools_for_kind(kind: str, *, source_targets: list[str], source_domains: list[str]) -> list[str]:
     normalized_kind = str(kind or "").strip().lower()
     if normalized_kind == "news":
@@ -1178,6 +1283,7 @@ def _compose_agent_spec(
     source_domains: list[str],
     schedule_spec: dict[str, Any] | None,
     tools_override: list[str] | None = None,
+    source_policy_profile: str | None = None,
 ) -> dict[str, Any]:
     normalized_kind = str(kind or "general").strip().lower()
     if normalized_kind not in _SUPPORTED_AGENT_KINDS:
@@ -1213,6 +1319,16 @@ def _compose_agent_spec(
             is_news=(normalized_kind == "news"),
         )
 
+    resolved_mode = "allowlist" if resolved_domains else ("channels" if resolved_targets else "open_web")
+    matched_profile = _match_source_policy_profile(
+        mode=resolved_mode,
+        channels=resolved_targets,
+        domains=resolved_domains,
+    )
+    requested_profile = _normalize_source_policy_profile_id(source_policy_profile)
+    if requested_profile and matched_profile != requested_profile:
+        matched_profile = None
+
     return {
         "name": resolved_name,
         "focus": resolved_focus,
@@ -1228,6 +1344,7 @@ def _compose_agent_spec(
         "source_policy": _build_source_policy(
             source_targets=resolved_targets,
             domains=resolved_domains,
+            profile=matched_profile,
         ),
         "kind": normalized_kind,
         "automation": automation_spec,
@@ -1311,18 +1428,27 @@ def _infer_source_targets(lowered_text: str, *, domains: list[str]) -> list[str]
     return targets
 
 
-def _build_source_policy(*, source_targets: list[str], domains: list[str]) -> dict[str, Any]:
+def _build_source_policy(
+    *,
+    source_targets: list[str],
+    domains: list[str],
+    profile: str | None = None,
+) -> dict[str, Any]:
     if domains:
         mode = "allowlist"
     elif source_targets:
         mode = "channels"
     else:
         mode = "open_web"
-    return {
+    payload: dict[str, Any] = {
         "mode": mode,
         "channels": source_targets,
         "domains": domains,
     }
+    normalized_profile = _normalize_source_policy_profile_id(profile)
+    if normalized_profile:
+        payload["profile"] = normalized_profile
+    return payload
 
 
 def _build_automation_message(
@@ -1649,8 +1775,15 @@ def apply_agent_spec_overrides(*, spec: dict[str, Any], overrides: dict[str, Any
 
     source_channels = list(base_channels)
     source_domains = list(base_domains)
+    source_policy_profile: str | None = None
     source_policy_override = overrides.get("source_policy")
     if isinstance(source_policy_override, dict):
+        if source_policy_override.get("profile") is not None:
+            profile = _resolve_source_policy_profile(str(source_policy_override.get("profile") or ""))
+            if profile is not None:
+                source_channels = _sanitize_source_channels(profile.get("channels"))
+                source_domains = _sanitize_domains(profile.get("domains"))
+                source_policy_profile = str(profile.get("id") or "")
         if isinstance(source_policy_override.get("channels"), list):
             source_channels = _sanitize_source_channels(source_policy_override.get("channels"))
         if isinstance(source_policy_override.get("domains"), list):
@@ -1686,6 +1819,7 @@ def apply_agent_spec_overrides(*, spec: dict[str, Any], overrides: dict[str, Any
         source_domains=source_domains,
         schedule_spec=schedule_spec,
         tools_override=tools_override,
+        source_policy_profile=source_policy_profile,
     )
     base_reason = base.get("inference_reason")
     reason_payload: dict[str, Any] = {

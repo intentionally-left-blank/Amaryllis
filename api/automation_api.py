@@ -10,6 +10,7 @@ from runtime.automation_missions import (
     build_mission_plan,
     list_mission_policy_profiles,
     list_mission_templates,
+    mission_template_catalog,
 )
 from runtime.auth import assert_owner, auth_context_from_request, resolve_user_id
 from runtime.errors import AmaryllisError, NotFoundError, ProviderError, ValidationError
@@ -78,11 +79,31 @@ class PlanMissionRequest(BaseModel):
     mission_policy: dict[str, Any] = Field(default_factory=dict)
 
 
+class ApplyMissionTemplateRequest(BaseModel):
+    agent_id: str = Field(min_length=1)
+    user_id: str = Field(min_length=1)
+    template_id: str = Field(min_length=1)
+    message: str | None = None
+    session_id: str | None = None
+    timezone: str = Field(default="UTC", min_length=1)
+    cadence_profile: str | None = None
+    start_immediately: bool | None = None
+    schedule_type: str | None = Field(default=None)
+    schedule: dict[str, Any] = Field(default_factory=dict)
+    interval_sec: int | None = Field(default=None, ge=10, le=86400)
+    max_attempts: int | None = Field(default=None, ge=1, le=10)
+    budget: dict[str, Any] = Field(default_factory=dict)
+    mission_policy_profile: str | None = None
+    mission_policy: dict[str, Any] = Field(default_factory=dict)
+
+
 @router.get("/automations/mission/templates")
 def mission_templates(request: Request) -> dict[str, Any]:
     auth_context_from_request(request)
     templates = list_mission_templates()
+    catalog = mission_template_catalog()
     return {
+        "catalog": catalog,
         "items": templates,
         "count": len(templates),
         "request_id": _request_id(request),
@@ -203,6 +224,131 @@ def plan_mission(payload: PlanMissionRequest, request: Request) -> dict[str, Any
             target_id=payload.agent_id,
             status="failed",
             details={"error": str(exc)},
+        )
+        raise ProviderError(str(exc)) from exc
+
+
+@router.post("/automations/mission/template-apply")
+def apply_mission_template_and_create(payload: ApplyMissionTemplateRequest, request: Request) -> dict[str, Any]:
+    services = request.app.state.services
+    auth = auth_context_from_request(request)
+    effective_user_id = resolve_user_id(request_user_id=payload.user_id, auth=auth)
+    try:
+        agent = services.agent_manager.get_agent(payload.agent_id)
+        if agent is None:
+            raise NotFoundError(f"Agent not found: {payload.agent_id}")
+        assert_owner(
+            owner_user_id=agent.user_id,
+            auth=auth,
+            resource_name="agent",
+            resource_id=payload.agent_id,
+        )
+
+        resolved = apply_mission_template(
+            template_id=payload.template_id,
+            message=payload.message,
+            cadence_profile=payload.cadence_profile,
+            start_immediately=payload.start_immediately,
+            schedule_type=payload.schedule_type,
+            schedule=payload.schedule,
+            interval_sec=payload.interval_sec,
+            max_attempts=payload.max_attempts,
+            budget=payload.budget,
+            mission_policy_profile=payload.mission_policy_profile,
+            mission_policy=payload.mission_policy,
+        )
+        simulation = services.agent_manager.simulate_run(
+            agent_id=payload.agent_id,
+            user_id=effective_user_id,
+            session_id=payload.session_id,
+            user_message=str(resolved.get("message") or ""),
+            max_attempts=resolved.get("max_attempts"),
+            budget=resolved.get("budget", {}),
+        )
+        mission_plan = build_mission_plan(
+            agent_id=payload.agent_id,
+            user_id=effective_user_id,
+            message=str(resolved.get("message") or ""),
+            session_id=payload.session_id,
+            timezone_name=payload.timezone,
+            cadence_profile=str(resolved.get("cadence_profile") or "workday"),
+            start_immediately=bool(resolved.get("start_immediately")),
+            schedule_type=resolved.get("schedule_type"),
+            schedule=resolved.get("schedule"),
+            interval_sec=resolved.get("interval_sec"),
+            simulation=simulation,
+        )
+        selected_template = resolved.get("template")
+        if isinstance(selected_template, dict):
+            mission_plan["template"] = selected_template
+        resolved_mission_policy = resolved.get("mission_policy")
+        if isinstance(resolved_mission_policy, dict):
+            mission_plan["mission_policy"] = resolved_mission_policy
+            apply_payload = mission_plan.get("apply_payload")
+            if isinstance(apply_payload, dict):
+                apply_payload["mission_policy"] = dict(resolved_mission_policy)
+
+        apply_payload = mission_plan.get("apply_payload")
+        if not isinstance(apply_payload, dict):
+            raise ValidationError("Mission planner failed to produce apply payload.")
+        automation = services.automation_scheduler.create_automation(
+            agent_id=str(apply_payload.get("agent_id") or payload.agent_id),
+            user_id=str(apply_payload.get("user_id") or effective_user_id),
+            session_id=apply_payload.get("session_id"),
+            message=str(apply_payload.get("message") or ""),
+            interval_sec=apply_payload.get("interval_sec"),
+            schedule_type=apply_payload.get("schedule_type"),
+            schedule=apply_payload.get("schedule"),
+            timezone_name=str(apply_payload.get("timezone") or payload.timezone),
+            start_immediately=bool(apply_payload.get("start_immediately", False)),
+            mission_policy=(
+                apply_payload.get("mission_policy")
+                if isinstance(apply_payload.get("mission_policy"), dict)
+                else {}
+            ),
+        )
+        receipt = _sign_action(
+            request,
+            action="automation_apply_mission_template",
+            payload={**payload.model_dump(), "user_id": effective_user_id},
+            actor=auth.user_id,
+            target_id=str(automation.get("id")),
+            details={
+                "agent_id": payload.agent_id,
+                "template_id": payload.template_id,
+            },
+        )
+        return {
+            "automation": automation,
+            "mission_plan": mission_plan,
+            "simulation": simulation,
+            "template": selected_template,
+            "mission_policy": resolved_mission_policy,
+            "action_receipt": receipt,
+            "request_id": _request_id(request),
+        }
+    except ValueError as exc:
+        _sign_action(
+            request,
+            action="automation_apply_mission_template",
+            payload={**payload.model_dump(), "user_id": effective_user_id},
+            actor=auth.user_id,
+            status="failed",
+            details={"error": str(exc), "agent_id": payload.agent_id, "template_id": payload.template_id},
+        )
+        if "not found" in str(exc).lower():
+            raise NotFoundError(str(exc)) from exc
+        raise ValidationError(str(exc)) from exc
+    except AmaryllisError:
+        raise
+    except Exception as exc:
+        _sign_action(
+            request,
+            action="automation_apply_mission_template",
+            payload={**payload.model_dump(), "user_id": effective_user_id},
+            actor=auth.user_id,
+            status="failed",
+            details={"error": str(exc), "agent_id": payload.agent_id, "template_id": payload.template_id},
         )
         raise ProviderError(str(exc)) from exc
 

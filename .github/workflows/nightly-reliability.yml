@@ -224,6 +224,11 @@ jobs:
           python scripts/release/agent_factory_quickstart_flow_gate.py \
             --output "artifacts/nightly-agent-factory-quickstart-flow-gate-report.json"
 
+      - name: Run nightly Agent template contract gate (blocking)
+        run: |
+          python scripts/release/agent_template_contract_gate.py \
+            --output "artifacts/nightly-agent-template-contract-gate-report.json"
+
       - name: Run nightly Agent Factory plan perf gate (blocking)
         run: |
           python scripts/release/agent_factory_plan_perf_gate.py \
