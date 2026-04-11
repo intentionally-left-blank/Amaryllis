@@ -63,6 +63,8 @@ jobs:
             tests.test_provider_auth_api \
             tests.test_entitlements_route_policy \
             tests.test_provider_session_policy_check \
+            tests.test_provider_entitlement_diagnostics_gate \
+            tests.test_competitive_benchmark_dataset_gate \
             tests.test_tool_enforcement_modes \
             tests.test_tool_call_parsing_security \
             tests.test_tool_isolation_policy \

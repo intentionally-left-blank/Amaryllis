@@ -6,6 +6,7 @@
 
 - `GET /auth/providers/entitlements`
 - `GET /auth/providers/routing-policy`
+- `GET /auth/providers/diagnostics`
 
 ## Contract
 
@@ -42,3 +43,10 @@ curl -H "Authorization: Bearer <token>" \
 ```
 
 Use this response to drive UI hints before requesting `/v1/chat/completions` or quickstart flows.
+
+For machine-readable troubleshooting checks and failure signatures, see provider diagnostics card endpoint:
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8000/auth/providers/diagnostics?user_id=<id>&provider=openai"
+```

@@ -13,6 +13,7 @@ Give users a clear, safe flow to connect provider access and verify entitlements
 - `POST /auth/providers/sessions/{session_id}/revoke`
 - `GET /auth/providers/entitlements`
 - `GET /auth/providers/routing-policy`
+- `GET /auth/providers/diagnostics`
 
 ## Onboarding Contract
 
@@ -53,3 +54,4 @@ If `provider` is omitted:
 3. Re-check `GET /auth/providers/entitlements?user_id=<id>&provider=openai`.
 4. Revoke old sessions when rotating credentials.
 5. Inspect deterministic route selection via `GET /auth/providers/routing-policy?user_id=<id>&provider=openai`.
+6. Use machine-readable diagnostics card: `GET /auth/providers/diagnostics?user_id=<id>&provider=openai`.

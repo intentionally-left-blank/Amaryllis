@@ -45,9 +45,11 @@ Mandatory gates before publish:
 39. Disaster recovery gate (backup + verify + restore drill)
 40. Compliance operations gate (access review + incidents + evidence export)
 41. Agent template contract gate (template schema/replay drift checks for mission template catalog)
+42. Provider entitlement diagnostics gate (machine-readable provider access diagnostics contract)
 
 Staging companion (non-blocking):
 - macOS desktop action parity smoke (`scripts/release/macos_desktop_parity_smoke.py`)
+- competitive benchmark dataset contract (`scripts/release/competitive_benchmark_dataset_gate.py`)
 
 Channel template reference:
 - `docs/distribution-channels.md`
@@ -66,6 +68,12 @@ First-run activation gate reference:
 
 Agent template contract gate reference:
 - `docs/agent-template-contract-gate.md`
+
+Provider entitlement diagnostics gate reference:
+- `docs/provider-entitlement-diagnostics-gate.md`
+
+Competitive benchmark scenario dataset reference:
+- `docs/competitive-benchmark-scenarios.md`
 
 Localization/governance gate reference:
 - `docs/localization-governance-gate.md`
@@ -140,6 +148,8 @@ python scripts/release/build_distribution_resilience_report.py --linux-parity-re
 python scripts/release/distribution_channel_manifest_gate.py --output artifacts/distribution-channel-manifest-report.json
 python scripts/release/api_quickstart_compatibility_gate.py --output artifacts/api-quickstart-compat-report.json
 python scripts/release/agent_template_contract_gate.py --output artifacts/agent-template-contract-gate-report.json
+python scripts/release/provider_entitlement_diagnostics_gate.py --output artifacts/provider-entitlement-diagnostics-gate-report.json
+python scripts/release/competitive_benchmark_dataset_gate.py --output artifacts/competitive-benchmark-dataset-report.json
 python scripts/release/render_distribution_channel_manifests.py --version "<version>" --windows-x64-url "<url>" --windows-x64-sha256 "<sha256>" --macos-arm64-url "<url>" --macos-arm64-sha256 "<sha256>" --macos-x64-url "<url>" --macos-x64-sha256 "<sha256>" --flathub-archive-url "<url>" --flathub-archive-sha256 "<sha256>" --output-dir artifacts/distribution-channels-rendered --report artifacts/distribution-channels-rendered-report.json
 python scripts/release/distribution_channel_render_gate.py --render-report artifacts/distribution-channels-rendered-report.json --expected-version "<version>" --output artifacts/distribution-channel-render-gate-report.json
 python scripts/release/first_run_activation_gate.py --output artifacts/first-run-activation-gate-report.json

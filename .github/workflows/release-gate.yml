@@ -176,6 +176,8 @@ jobs:
             tests.test_long_context_reliability_gate \
             tests.test_model_manager_guardrails \
             tests.test_entitlements_route_policy \
+            tests.test_provider_entitlement_diagnostics_gate \
+            tests.test_competitive_benchmark_dataset_gate \
             tests.test_agent_factory \
             tests.test_agent_factory_eval_fixtures \
             tests.test_agent_factory_intent_gate \
@@ -1164,6 +1166,16 @@ jobs:
           python scripts/security/provider_session_policy_check.py \
             --output "artifacts/provider-session-policy-check-report.json"
 
+      - name: Run provider entitlement diagnostics gate (blocking)
+        run: |
+          python scripts/release/provider_entitlement_diagnostics_gate.py \
+            --output "artifacts/provider-entitlement-diagnostics-gate-report.json"
+
+      - name: Run competitive benchmark dataset gate (blocking)
+        run: |
+          python scripts/release/competitive_benchmark_dataset_gate.py \
+            --output "artifacts/competitive-benchmark-dataset-report.json"
+
       - name: Run mission report pack gate (blocking)
         run: |
           python scripts/release/mission_report_pack_gate.py \
@@ -1199,6 +1211,20 @@ jobs:
         with:
           name: provider-session-policy-check-report
           path: artifacts/provider-session-policy-check-report.json
+          if-no-files-found: error
+
+      - name: Upload provider entitlement diagnostics gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-entitlement-diagnostics-gate-report
+          path: artifacts/provider-entitlement-diagnostics-gate-report.json
+          if-no-files-found: error
+
+      - name: Upload competitive benchmark dataset gate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: competitive-benchmark-dataset-gate-report
+          path: artifacts/competitive-benchmark-dataset-report.json
           if-no-files-found: error
 
       - name: Upload Phase 7 release cut gate report

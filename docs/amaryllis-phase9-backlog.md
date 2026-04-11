@@ -48,13 +48,13 @@ Convert Amaryllis from a technically mature platform into a category-defining pr
 |---|---|---|---|---|
 | P9-C01 | done | Productize provider-session onboarding UX | provider session create/list/revoke guide + API UX improvements | User can connect provider access without token leaks and with clear entitlement feedback |
 | P9-C02 | done | Add fallback route policy (session vs BYOK) | deterministic routing policy + explicit error contracts | Runtime picks safe fallback path and explains missing entitlements clearly |
-| P9-C03 | todo | Add entitlement diagnostics card | machine-readable diagnostics for model access failures | Support/debug flow resolves account and quota issues without digging through logs |
+| P9-C03 | done | Add entitlement diagnostics card | machine-readable diagnostics for model access failures | Support/debug flow resolves account and quota issues without digging through logs |
 
 ### Epic D - Competitive Benchmark and Scoreboard
 
 | ID | Status | Task | Deliverable | Definition of Done |
 |---|---|---|---|---|
-| P9-D01 | todo | Define competitor-neutral benchmark scenarios | benchmark dataset for "create/schedule/quality/recovery" flows | Scenarios are reproducible, auditable, and not tied to one vendor API |
+| P9-D01 | done | Define competitor-neutral benchmark scenarios | benchmark dataset for "create/schedule/quality/recovery" flows | Scenarios are reproducible, auditable, and not tied to one vendor API |
 | P9-D02 | todo | Implement benchmark runner + report pack | `scripts/release/competitive_benchmark_gate.py` + artifact schema | CI emits scorecards with latency, reliability, and user-flow completion metrics |
 | P9-D03 | todo | Add benchmark trend gate | baseline-aware trend checks in release/nightly | Regressions in product-level outcomes block release candidates |
 
@@ -87,7 +87,7 @@ Sprint goal:
 | P9-B02 | done | source-policy profile bundles + defaults |
 | P9-B03 | done | template contract/replay quality gate |
 | P9-C02 | done | entitlement fallback route policy |
-| P9-D01 | todo | benchmark scenario set v1 |
+| P9-D01 | done | benchmark scenario set v1 |
 
 Sprint goal:
 - user flow becomes safer by default and benchmarkable end-to-end.
@@ -96,7 +96,7 @@ Sprint goal:
 
 | ID | Status | Scope |
 |---|---|---|
-| P9-C03 | todo | entitlement diagnostics card |
+| P9-C03 | done | entitlement diagnostics card |
 | P9-D02 | todo | competitive benchmark gate + artifact wiring |
 | P9-D03 | todo | benchmark trend gate |
 | P9-E01 | todo | install-to-first-agent wizard contract |
@@ -117,5 +117,5 @@ Sprint goal:
 ## Next Checkpoint
 
 - Publish execution plan with work packages and gate matrix: `docs/amaryllis-phase9-execution-plan.md`.
-- Continue with `P9-C03` and `P9-D01` as next high-priority block after `P9-B03`/`P9-C02`.
+- Continue with `P9-D02` as next high-priority block after `P9-D01`.
 - Promote product KPI snapshot to release KPI pack once first trend baseline is collected.

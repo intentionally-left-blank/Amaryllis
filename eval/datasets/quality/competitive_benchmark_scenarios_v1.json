@@ -1,0 +1,385 @@
+{
+  "suite": "competitive_benchmark_scenarios_v1",
+  "schema_version": 1,
+  "description": "Competitor-neutral benchmark scenarios for product-level create, schedule, quality, and recovery flows.",
+  "reproducibility": {
+    "runtime_backend": "deterministic",
+    "timezone": "UTC",
+    "locale": "en-US",
+    "idempotency_required": true,
+    "artifact_contract_version": "competitive_benchmark_artifact_v1"
+  },
+  "audit": {
+    "required_trace_fields": [
+      "scenario_id",
+      "lane",
+      "request_id",
+      "status",
+      "latency_ms"
+    ],
+    "required_summary_metrics": [
+      "completion_rate_pct",
+      "p95_latency_ms",
+      "first_run_success_rate_pct",
+      "recovery_success_rate_pct"
+    ]
+  },
+  "lanes": [
+    {
+      "id": "create",
+      "goal": "One-phrase request reliably creates a runnable autonomous agent."
+    },
+    {
+      "id": "schedule",
+      "goal": "Agent schedule configuration is normalized and reproducible."
+    },
+    {
+      "id": "quality",
+      "goal": "Agent outputs are grounded, concise, and decision-useful."
+    },
+    {
+      "id": "recovery",
+      "goal": "User can recover from access and runtime failures without log spelunking."
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "create_daily_intelligence_digest",
+      "lane": "create",
+      "title": "One-phrase daily intelligence digest",
+      "objective": "Validate that a single plain-language request creates a scheduled autonomous digest agent with first-run metadata.",
+      "prompt": "Create an autonomous agent that tracks AI industry updates daily and sends a concise morning digest with key takeaways.",
+      "setup": {
+        "template": "ai_news_daily",
+        "source_policy_bundle": "open_web_ai_default",
+        "provider_access": "optional"
+      },
+      "expected_outcomes": {
+        "checks": [
+          "quickstart.response.agent.id_present",
+          "quickstart.response.agent_created.status=created",
+          "quickstart.response.agent_created.next_run_eta_present",
+          "quickstart.response.plan_version_present"
+        ],
+        "kpi_targets": {
+          "create_success_rate_pct_min": 95,
+          "create_p95_latency_ms_max": 3000
+        }
+      },
+      "evidence": {
+        "must_capture": [
+          "request.prompt",
+          "response.agent.id",
+          "response.agent_created.next_run_eta",
+          "response.summary.status"
+        ],
+        "artifact_tags": [
+          "phase9",
+          "competitive",
+          "create",
+          "daily-intelligence"
+        ]
+      },
+      "reproducibility": {
+        "seed": "cbs-create-001",
+        "max_retries": 1,
+        "replay_window_sec": 900
+      }
+    },
+    {
+      "id": "create_market_monitor_alert_agent",
+      "lane": "create",
+      "title": "One-phrase market monitor agent",
+      "objective": "Validate that request intent maps to a monitoring agent with deterministic source policy defaults and stable idempotency behavior.",
+      "prompt": "Please build an agent that watches new AI model releases and alerts me when high-impact announcements appear.",
+      "setup": {
+        "template": "ai_model_release_monitor",
+        "source_policy_bundle": "open_web_channels_default",
+        "provider_access": "optional"
+      },
+      "expected_outcomes": {
+        "checks": [
+          "quickstart.response.intent.kind=monitoring",
+          "quickstart.response.agent.id_present",
+          "quickstart.response.agent.policy.source_bundle_present",
+          "quickstart.response.idempotency.replay_safe=true"
+        ],
+        "kpi_targets": {
+          "create_success_rate_pct_min": 95,
+          "create_p95_latency_ms_max": 3000
+        }
+      },
+      "evidence": {
+        "must_capture": [
+          "request.prompt",
+          "response.intent.kind",
+          "response.agent.policy.source_bundle",
+          "response.idempotency.status"
+        ],
+        "artifact_tags": [
+          "phase9",
+          "competitive",
+          "create",
+          "monitoring"
+        ]
+      },
+      "reproducibility": {
+        "seed": "cbs-create-002",
+        "max_retries": 1,
+        "replay_window_sec": 900
+      }
+    },
+    {
+      "id": "schedule_weekday_briefing_local_time",
+      "lane": "schedule",
+      "title": "Weekday briefing schedule normalization",
+      "objective": "Validate that weekday schedule requests are normalized into an explicit weekly contract with timezone-safe fields.",
+      "prompt": "Set this agent to run every weekday at 09:00 local time and deliver the update before standup.",
+      "setup": {
+        "schedule_type": "weekly",
+        "timezone_required": true
+      },
+      "expected_outcomes": {
+        "checks": [
+          "automation.schedule.type=weekly",
+          "automation.schedule.byday_contains_weekdays",
+          "automation.schedule.hour=9",
+          "automation.timezone.present=true"
+        ],
+        "kpi_targets": {
+          "schedule_success_rate_pct_min": 99,
+          "schedule_contract_error_rate_pct_max": 1
+        }
+      },
+      "evidence": {
+        "must_capture": [
+          "request.prompt",
+          "response.automation.schedule",
+          "response.automation.timezone",
+          "response.summary.status"
+        ],
+        "artifact_tags": [
+          "phase9",
+          "competitive",
+          "schedule",
+          "weekday"
+        ]
+      },
+      "reproducibility": {
+        "seed": "cbs-schedule-001",
+        "max_retries": 1,
+        "replay_window_sec": 1200
+      }
+    },
+    {
+      "id": "schedule_hourly_breaking_alerts",
+      "lane": "schedule",
+      "title": "Hourly breaking-news heartbeat",
+      "objective": "Validate interval schedule contract for hourly monitoring with deterministic bounds and safe minimum interval enforcement.",
+      "prompt": "Run this agent every 2 hours and notify me only when a high-signal AI event appears.",
+      "setup": {
+        "schedule_type": "interval",
+        "interval_hours": 2
+      },
+      "expected_outcomes": {
+        "checks": [
+          "automation.schedule.type=interval",
+          "automation.schedule.interval_hours=2",
+          "automation.schedule.interval_hours_min_bound_respected",
+          "automation.schedule.next_run_eta_present"
+        ],
+        "kpi_targets": {
+          "schedule_success_rate_pct_min": 99,
+          "schedule_p95_latency_ms_max": 2000
+        }
+      },
+      "evidence": {
+        "must_capture": [
+          "request.prompt",
+          "response.automation.schedule.interval_hours",
+          "response.agent_created.next_run_eta",
+          "response.summary.status"
+        ],
+        "artifact_tags": [
+          "phase9",
+          "competitive",
+          "schedule",
+          "interval"
+        ]
+      },
+      "reproducibility": {
+        "seed": "cbs-schedule-002",
+        "max_retries": 1,
+        "replay_window_sec": 1200
+      }
+    },
+    {
+      "id": "quality_grounded_digest_with_sources",
+      "lane": "quality",
+      "title": "Grounded digest quality",
+      "objective": "Validate that digest output preserves factual grounding, source attribution, and concise synthesis quality.",
+      "prompt": "Generate a digest that summarizes the top AI updates, cites each source, and keeps the summary practical for decision-making.",
+      "setup": {
+        "quality_profile": "grounded_digest_v1",
+        "source_policy_bundle": "open_web_ai_default"
+      },
+      "expected_outcomes": {
+        "checks": [
+          "output.sections_present=true",
+          "output.source_attribution.count_min=3",
+          "output.groundedness_score_pct_min=85",
+          "output.conciseness_score_pct_min=80"
+        ],
+        "kpi_targets": {
+          "quality_pass_rate_pct_min": 90,
+          "quality_regression_rate_pct_max": 5
+        }
+      },
+      "evidence": {
+        "must_capture": [
+          "response.output.sections",
+          "response.output.source_attribution",
+          "response.output.quality_scores.groundedness",
+          "response.output.quality_scores.conciseness"
+        ],
+        "artifact_tags": [
+          "phase9",
+          "competitive",
+          "quality",
+          "groundedness"
+        ]
+      },
+      "reproducibility": {
+        "seed": "cbs-quality-001",
+        "max_retries": 0,
+        "replay_window_sec": 1800
+      }
+    },
+    {
+      "id": "quality_actionable_recommendations",
+      "lane": "quality",
+      "title": "Actionability and prioritization quality",
+      "objective": "Validate that output includes explicit prioritization and clear next actions for a busy professional user.",
+      "prompt": "Provide the AI updates with a short priority ranking and concrete recommended actions for today.",
+      "setup": {
+        "quality_profile": "actionability_v1",
+        "max_items": 5
+      },
+      "expected_outcomes": {
+        "checks": [
+          "output.priority_ranking.present=true",
+          "output.recommended_actions.count_min=3",
+          "output.actionability_score_pct_min=85",
+          "output.verbosity_within_bounds=true"
+        ],
+        "kpi_targets": {
+          "quality_pass_rate_pct_min": 90,
+          "quality_p95_generation_latency_ms_max": 6000
+        }
+      },
+      "evidence": {
+        "must_capture": [
+          "response.output.priority_ranking",
+          "response.output.recommended_actions",
+          "response.output.quality_scores.actionability",
+          "response.output.length_metrics"
+        ],
+        "artifact_tags": [
+          "phase9",
+          "competitive",
+          "quality",
+          "actionability"
+        ]
+      },
+      "reproducibility": {
+        "seed": "cbs-quality-002",
+        "max_retries": 0,
+        "replay_window_sec": 1800
+      }
+    },
+    {
+      "id": "recovery_missing_access_guidance",
+      "lane": "recovery",
+      "title": "Missing access recovery guidance",
+      "objective": "Validate that missing account access is surfaced with explicit diagnostics and user-friendly next actions.",
+      "prompt": "I asked for an external-data agent but account access is not configured. Explain what is blocked and what I should do next.",
+      "setup": {
+        "requires_provider_access": true,
+        "simulate_missing_access": true
+      },
+      "expected_outcomes": {
+        "checks": [
+          "diagnostics.status=blocked",
+          "diagnostics.summary.error_code_present",
+          "diagnostics.next_actions.non_empty",
+          "routing.policy.selected_route_present"
+        ],
+        "kpi_targets": {
+          "recovery_guidance_success_rate_pct_min": 98,
+          "support_escalation_rate_pct_max": 5
+        }
+      },
+      "evidence": {
+        "must_capture": [
+          "response.diagnostics.status",
+          "response.diagnostics.summary.error_code",
+          "response.diagnostics.next_actions",
+          "response.routing_policy.selected_route"
+        ],
+        "artifact_tags": [
+          "phase9",
+          "competitive",
+          "recovery",
+          "access"
+        ]
+      },
+      "reproducibility": {
+        "seed": "cbs-recovery-001",
+        "max_retries": 0,
+        "replay_window_sec": 900
+      }
+    },
+    {
+      "id": "recovery_transient_run_failure_retry",
+      "lane": "recovery",
+      "title": "Transient failure retry and user hints",
+      "objective": "Validate recovery path when a scheduled run fails transiently and the system provides retry status with actionable hints.",
+      "prompt": "If a scheduled run fails because of a temporary issue, recover automatically and tell me what happened in plain language.",
+      "setup": {
+        "simulate_run_failure": "transient",
+        "retry_policy": "default"
+      },
+      "expected_outcomes": {
+        "checks": [
+          "run.status.initial=failed",
+          "run.recovery.retry_attempted=true",
+          "run.recovery.final_status=success",
+          "run.recovery.user_hint_present=true"
+        ],
+        "kpi_targets": {
+          "recovery_success_rate_pct_min": 95,
+          "recovery_p95_time_to_recover_ms_max": 120000
+        }
+      },
+      "evidence": {
+        "must_capture": [
+          "run.status.timeline",
+          "run.recovery.retry_count",
+          "run.recovery.final_status",
+          "run.recovery.user_hint"
+        ],
+        "artifact_tags": [
+          "phase9",
+          "competitive",
+          "recovery",
+          "retry"
+        ]
+      },
+      "reproducibility": {
+        "seed": "cbs-recovery-002",
+        "max_retries": 2,
+        "replay_window_sec": 1800
+      }
+    }
+  ]
+}

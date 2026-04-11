@@ -74,6 +74,7 @@ class ProviderAuthAPITests(unittest.TestCase):
         }
         self.assertIn(("GET", "/auth/providers/onboarding"), endpoint_signature)
         self.assertIn(("GET", "/auth/providers/routing-policy"), endpoint_signature)
+        self.assertIn(("GET", "/auth/providers/diagnostics"), endpoint_signature)
 
         onboarding_before = self.client.get(
             "/auth/providers/onboarding",
@@ -242,6 +243,81 @@ class ProviderAuthAPITests(unittest.TestCase):
         items = aggregate_payload.get("items", [])
         self.assertIsInstance(items, list)
         self.assertGreaterEqual(len(items), 3)
+
+    def test_diagnostics_endpoint_reports_blocked_then_ready(self) -> None:
+        before = self.client.get(
+            "/auth/providers/diagnostics",
+            headers=self._auth("admin-token"),
+            params={"user_id": "diag-user", "provider": "openai"},
+        )
+        self.assertEqual(before.status_code, 200)
+        before_payload = before.json()
+        self.assertEqual(str(before_payload.get("contract_version")), "provider_entitlement_diagnostics_v1")
+        before_card = before_payload.get("card", {})
+        self.assertEqual(str(before_card.get("status")), "blocked")
+        before_error_contract = before_card.get("error_contract", {})
+        self.assertEqual(str(before_error_contract.get("error_code")), "provider_access_not_configured")
+
+        created = self.client.post(
+            "/auth/providers/sessions",
+            headers=self._auth("admin-token"),
+            json={
+                "user_id": "diag-user",
+                "provider": "openai",
+                "credential_ref": "secret://vault/openai/diag-user",
+                "scopes": ["chat"],
+            },
+        )
+        self.assertEqual(created.status_code, 200)
+        session_id = str(created.json().get("session", {}).get("id") or "")
+        self.assertTrue(session_id)
+
+        after = self.client.get(
+            "/auth/providers/diagnostics",
+            headers=self._auth("admin-token"),
+            params={"user_id": "diag-user", "provider": "openai"},
+        )
+        self.assertEqual(after.status_code, 200)
+        after_payload = after.json()
+        after_card = after_payload.get("card", {})
+        self.assertEqual(str(after_card.get("status")), "ready")
+        route_policy = after_card.get("route_policy", {})
+        self.assertEqual(str(route_policy.get("selected_route")), "user_session")
+        session_summary = after_card.get("session_summary", {})
+        self.assertGreaterEqual(int(session_summary.get("active_count") or 0), 1)
+        checks = after_card.get("checks", [])
+        self.assertIsInstance(checks, list)
+        self.assertTrue(any(str(item.get("id") or "") == "route_selected" for item in checks if isinstance(item, dict)))
+
+        revoked = self.client.post(
+            f"/auth/providers/sessions/{session_id}/revoke",
+            headers=self._auth("admin-token"),
+            json={"reason": "diagnostics-test-cleanup"},
+        )
+        self.assertEqual(revoked.status_code, 200)
+
+        after_revoke = self.client.get(
+            "/auth/providers/diagnostics",
+            headers=self._auth("admin-token"),
+            params={"user_id": "diag-user", "provider": "openai"},
+        )
+        self.assertEqual(after_revoke.status_code, 200)
+        after_revoke_card = after_revoke.json().get("card", {})
+        self.assertEqual(str(after_revoke_card.get("status")), "blocked")
+        revoked_summary = after_revoke_card.get("session_summary", {})
+        self.assertGreaterEqual(int(revoked_summary.get("revoked_count") or 0), 1)
+
+        aggregate = self.client.get(
+            "/auth/providers/diagnostics",
+            headers=self._auth("user-token"),
+            params={"user_id": "user-1"},
+        )
+        self.assertEqual(aggregate.status_code, 200)
+        aggregate_payload = aggregate.json()
+        self.assertEqual(str(aggregate_payload.get("contract_version")), "provider_entitlement_diagnostics_v1")
+        self.assertGreaterEqual(int(aggregate_payload.get("count") or 0), 3)
+        status_counts = aggregate_payload.get("status_counts", {})
+        self.assertIsInstance(status_counts, dict)
 
 
 if __name__ == "__main__":

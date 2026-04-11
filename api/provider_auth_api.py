@@ -6,13 +6,14 @@ from fastapi import APIRouter, Path, Query, Request
 from pydantic import BaseModel, Field
 
 from runtime.auth import assert_owner, auth_context_from_request, resolve_user_id
-from runtime.entitlements import ENTITLEMENT_ROUTE_POLICY_VERSION
+from runtime.entitlements import ENTITLEMENT_DIAGNOSTICS_VERSION, ENTITLEMENT_ROUTE_POLICY_VERSION
 from runtime.errors import AmaryllisError, ProviderError, ValidationError
 from runtime.provider_sessions import SUPPORTED_PROVIDER_SESSION_PROVIDERS
 
 router = APIRouter(tags=["provider-auth"])
 PROVIDER_AUTH_ONBOARDING_VERSION = "provider_auth_onboarding_v1"
 PROVIDER_AUTH_ROUTE_POLICY_VERSION = ENTITLEMENT_ROUTE_POLICY_VERSION
+PROVIDER_AUTH_DIAGNOSTICS_VERSION = ENTITLEMENT_DIAGNOSTICS_VERSION
 
 
 def _request_id(request: Request) -> str:
@@ -113,6 +114,11 @@ def _build_provider_onboarding_card(
                 "method": "GET",
                 "query": {"user_id": normalized_user, "provider": normalized_provider},
             },
+            "diagnostics": {
+                "endpoint": "/auth/providers/diagnostics",
+                "method": "GET",
+                "query": {"user_id": normalized_user, "provider": normalized_provider},
+            },
         },
     }
 
@@ -158,12 +164,14 @@ def provider_auth_contract(request: Request) -> dict[str, Any]:
             {"method": "GET", "path": "/auth/providers/entitlements"},
             {"method": "GET", "path": "/auth/providers/onboarding"},
             {"method": "GET", "path": "/auth/providers/routing-policy"},
+            {"method": "GET", "path": "/auth/providers/diagnostics"},
         ],
         "notes": [
             "credential_ref stores external secret reference, not raw provider token",
             "entitlements are evaluated from server key availability and active provider sessions",
             "use onboarding endpoint for step-by-step provider setup and entitlement feedback",
             "routing-policy endpoint exposes deterministic session-vs-server-key route selection",
+            "diagnostics endpoint exposes machine-readable checks for provider access failures",
         ],
     }
 
@@ -402,6 +410,53 @@ def provider_routing_policy(
             "items": items,
             "count": len(items),
             "ready_count": ready_count,
+            "request_id": _request_id(request),
+        }
+    except Exception as exc:
+        _raise_provider_auth_error(exc)
+
+
+@router.get("/auth/providers/diagnostics")
+def provider_diagnostics(
+    request: Request,
+    user_id: str | None = Query(default=None),
+    provider: str | None = Query(default=None),
+    session_limit: int = Query(default=50, ge=1, le=500),
+) -> dict[str, Any]:
+    services = request.app.state.services
+    auth = auth_context_from_request(request)
+    effective_user_id = resolve_user_id(request_user_id=user_id, auth=auth)
+    normalized_provider = str(provider or "").strip().lower() or None
+    try:
+        if normalized_provider:
+            if normalized_provider not in set(SUPPORTED_PROVIDER_SESSION_PROVIDERS):
+                raise ValidationError(
+                    "Unsupported provider. Allowed: " + ", ".join(SUPPORTED_PROVIDER_SESSION_PROVIDERS)
+                )
+            card = services.entitlement_resolver.resolve_provider_diagnostics(
+                user_id=effective_user_id,
+                provider=normalized_provider,
+                session_limit=session_limit,
+            )
+            return {
+                "contract_version": PROVIDER_AUTH_DIAGNOSTICS_VERSION,
+                "user_id": effective_user_id,
+                "provider": normalized_provider,
+                "card": card,
+                "request_id": _request_id(request),
+            }
+
+        payload = services.entitlement_resolver.resolve_all_diagnostics(
+            user_id=effective_user_id,
+            session_limit=session_limit,
+        )
+        return {
+            "contract_version": PROVIDER_AUTH_DIAGNOSTICS_VERSION,
+            "user_id": effective_user_id,
+            "items": list(payload.get("items") or []),
+            "count": int(payload.get("count") or 0),
+            "status_counts": dict(payload.get("status_counts") or {}),
+            "checked_at": payload.get("checked_at"),
             "request_id": _request_id(request),
         }
     except Exception as exc:

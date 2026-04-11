@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from runtime.config import AppConfig
 from runtime.entitlements import (
+    ENTITLEMENT_DIAGNOSTICS_VERSION,
     ENTITLEMENT_ERROR_CONTRACT_VERSION,
     ENTITLEMENT_ROUTE_POLICY_VERSION,
     EntitlementResolver,
@@ -79,6 +80,32 @@ class EntitlementRoutePolicyTests(unittest.TestCase):
         self.assertEqual(str(error_contract.get("error_code")), "provider_access_not_configured")
         self.assertEqual(int(error_contract.get("http_status") or 0), 403)
         self.assertTrue(list(error_contract.get("next_actions") or []))
+
+    def test_provider_diagnostics_transitions_blocked_to_ready(self) -> None:
+        before = self.resolver.resolve_provider_diagnostics(user_id="user-1", provider="openai")
+        self.assertEqual(str(before.get("version")), ENTITLEMENT_DIAGNOSTICS_VERSION)
+        self.assertEqual(str(before.get("status")), "blocked")
+        before_summary = before.get("summary", {})
+        self.assertEqual(str(before_summary.get("error_code")), "provider_access_not_configured")
+
+        self.sessions.create_session(
+            user_id="user-1",
+            provider="openai",
+            credential_ref="secret://vault/openai/user-1",
+            scopes=["chat"],
+        )
+        after = self.resolver.resolve_provider_diagnostics(user_id="user-1", provider="openai")
+        self.assertEqual(str(after.get("version")), ENTITLEMENT_DIAGNOSTICS_VERSION)
+        self.assertEqual(str(after.get("status")), "ready")
+        route_policy = after.get("route_policy", {})
+        self.assertEqual(str(route_policy.get("selected_route")), "user_session")
+        session_summary = after.get("session_summary", {})
+        self.assertGreaterEqual(int(session_summary.get("active_count") or 0), 1)
+        checks = after.get("checks", [])
+        self.assertIsInstance(checks, list)
+        self.assertTrue(
+            any(str(item.get("id") or "") == "route_selected" for item in checks if isinstance(item, dict))
+        )
 
 
 if __name__ == "__main__":

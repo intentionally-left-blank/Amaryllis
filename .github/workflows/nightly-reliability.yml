@@ -229,6 +229,16 @@ jobs:
           python scripts/release/agent_template_contract_gate.py \
             --output "artifacts/nightly-agent-template-contract-gate-report.json"
 
+      - name: Run nightly provider entitlement diagnostics gate (blocking)
+        run: |
+          python scripts/release/provider_entitlement_diagnostics_gate.py \
+            --output "artifacts/nightly-provider-entitlement-diagnostics-gate-report.json"
+
+      - name: Run nightly competitive benchmark dataset gate (blocking)
+        run: |
+          python scripts/release/competitive_benchmark_dataset_gate.py \
+            --output "artifacts/nightly-competitive-benchmark-dataset-report.json"
+
       - name: Run nightly Agent Factory plan perf gate (blocking)
         run: |
           python scripts/release/agent_factory_plan_perf_gate.py \
@@ -541,6 +551,22 @@ jobs:
         with:
           name: nightly-agent-factory-quickstart-flow-gate-report
           path: artifacts/nightly-agent-factory-quickstart-flow-gate-report.json
+          if-no-files-found: error
+
+      - name: Upload nightly provider entitlement diagnostics gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-provider-entitlement-diagnostics-gate-report
+          path: artifacts/nightly-provider-entitlement-diagnostics-gate-report.json
+          if-no-files-found: error
+
+      - name: Upload nightly competitive benchmark dataset gate report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-competitive-benchmark-dataset-gate-report
+          path: artifacts/nightly-competitive-benchmark-dataset-report.json
           if-no-files-found: error
 
       - name: Upload nightly Agent Factory plan perf gate report
